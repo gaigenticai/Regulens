@@ -49,3 +49,5 @@ std::vector<std::string> KnowledgeBase::search_similar(const std::string& query,
 }
 
 } // namespace regulens
+
+

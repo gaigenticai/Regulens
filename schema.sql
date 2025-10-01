@@ -281,3 +281,5 @@ INSERT INTO agent_configurations (agent_type, agent_name, configuration) VALUES
     "pattern_recognition_enabled": true
 }')
 ON CONFLICT (agent_type, agent_name, version) DO NOTHING;
+
+

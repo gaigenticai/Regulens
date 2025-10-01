@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <variant>
 #include <chrono>
-#include <nlohmann/json.hpp>
+#include "nlohmann/json.hpp"
 
 namespace regulens {
 

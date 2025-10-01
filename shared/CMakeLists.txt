@@ -18,9 +18,6 @@ target_include_directories(regulens_shared
 
 target_link_libraries(regulens_shared
     PUBLIC
-        nlohmann_json::nlohmann_json
-        spdlog::spdlog
-        Boost::system
-        Boost::filesystem
         Threads::Threads
+        ${Boost_LIBRARIES}
 )

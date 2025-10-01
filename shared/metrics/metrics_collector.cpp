@@ -291,3 +291,5 @@ std::string MetricsCollector::extract_component(const std::string& metric_name) 
 }
 
 } // namespace regulens
+
+

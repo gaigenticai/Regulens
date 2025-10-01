@@ -5,7 +5,7 @@
 #include <memory>
 #include <filesystem>
 #include <optional>
-#include <nlohmann/json.hpp>
+#include "nlohmann/json.hpp"
 
 namespace regulens {
 

@@ -349,3 +349,5 @@ This software is proprietary to Gaigentic AI. All rights reserved.
 ---
 
 **Built with ❤️ by Gaigentic AI for the future of regulatory compliance.**
+
+

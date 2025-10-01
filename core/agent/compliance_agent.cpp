@@ -41,3 +41,5 @@ std::vector<std::string> AgentRegistry::get_registered_types() const {
 
     return types;
 }
+
+

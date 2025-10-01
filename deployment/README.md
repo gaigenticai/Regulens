@@ -300,3 +300,5 @@ curl http://localhost:8080/health
 ---
 
 **Remember**: Build artifacts belong in deployment pipelines, not Git repositories. This ensures security, reproducibility, and maintainability of your enterprise application.
+
+

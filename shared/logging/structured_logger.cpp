@@ -153,3 +153,5 @@ std::string StructuredLogger::log_level_to_string(LogLevel level) const {
 }
 
 } // namespace regulens
+
+

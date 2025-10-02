@@ -6,8 +6,8 @@
 #include <condition_variable>
 #include <thread>
 #include <atomic>
-#include "shared/models/compliance_event.hpp"
-#include "shared/logging/structured_logger.hpp"
+#include "models/compliance_event.hpp"
+#include "logging/structured_logger.hpp"
 
 namespace regulens {
 

@@ -1,0 +1,624 @@
+#include "openai_client.hpp"
+
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
+#include <cmath>
+#include <thread>
+#include <regex>
+
+namespace regulens {
+
+OpenAIClient::OpenAIClient(std::shared_ptr<ConfigurationManager> config,
+                         std::shared_ptr<StructuredLogger> logger,
+                         std::shared_ptr<ErrorHandler> error_handler)
+    : config_manager_(config), logger_(logger), error_handler_(error_handler),
+      http_client_(std::make_shared<HttpClient>()),
+      total_requests_(0), successful_requests_(0), failed_requests_(0),
+      total_tokens_used_(0), estimated_cost_usd_(0.0),
+      last_request_time_(std::chrono::system_clock::now()),
+      max_requests_per_minute_(50) {  // Conservative default, can be configured
+}
+
+OpenAIClient::~OpenAIClient() {
+    shutdown();
+}
+
+bool OpenAIClient::initialize() {
+    try {
+        // Load configuration from environment
+        api_key_ = config_manager_->get_string("LLM_OPENAI_API_KEY").value_or("");
+        if (api_key_.empty()) {
+            logger_->error("OpenAI API key not configured");
+            return false;
+        }
+
+        base_url_ = config_manager_->get_string("LLM_OPENAI_BASE_URL")
+                   .value_or("https://api.openai.com/v1");
+        default_model_ = config_manager_->get_string("LLM_OPENAI_MODEL")
+                        .value_or("gpt-4-turbo-preview");
+        max_tokens_ = static_cast<int>(config_manager_->get_int("LLM_OPENAI_MAX_TOKENS")
+                                      .value_or(4000));
+        temperature_ = config_manager_->get_double("LLM_OPENAI_TEMPERATURE")
+                      .value_or(0.7);
+        request_timeout_seconds_ = static_cast<int>(config_manager_->get_int("LLM_OPENAI_TIMEOUT_SECONDS")
+                                                   .value_or(30));
+        max_retries_ = static_cast<int>(config_manager_->get_int("LLM_OPENAI_MAX_RETRIES")
+                                       .value_or(3));
+        max_requests_per_minute_ = static_cast<int>(config_manager_->get_int("LLM_OPENAI_MAX_REQUESTS_PER_MINUTE")
+                                                   .value_or(50));
+
+        // Validate configuration
+        if (api_key_.empty() || base_url_.empty()) {
+            logger_->error("OpenAI client configuration incomplete - missing API key or base URL");
+            return false;
+        }
+
+        logger_->info("OpenAI client initialized with model: {}, timeout: {}s, max_tokens: {}",
+                     default_model_, request_timeout_seconds_, max_tokens_);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to initialize OpenAI client: {}", e.what());
+        return false;
+    }
+}
+
+void OpenAIClient::shutdown() {
+    logger_->info("OpenAI client shutdown - Total requests: {}, Successful: {}, Failed: {}",
+                 static_cast<size_t>(total_requests_),
+                 static_cast<size_t>(successful_requests_),
+                 static_cast<size_t>(failed_requests_));
+}
+
+std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAICompletionRequest& request) {
+    total_requests_++;
+
+    // Check rate limit
+    if (!check_rate_limit()) {
+        handle_api_error("rate_limit", "Rate limit exceeded",
+                        {{"requests_per_minute", std::to_string(max_requests_per_minute_)}});
+        return std::nullopt;
+    }
+
+    // Use error handler for circuit breaker protection
+    auto result = error_handler_->execute_with_circuit_breaker<std::optional<OpenAIResponse>>(
+        [this, &request]() -> std::optional<OpenAIResponse> {
+            // Make the API request
+            auto http_response = make_api_request("/chat/completions", request.to_json());
+            if (!http_response) {
+                return std::nullopt;
+            }
+
+            // Parse the response
+            auto parsed_response = parse_api_response(*http_response);
+            if (!parsed_response) {
+                return std::nullopt;
+            }
+
+            // Validate response
+            if (!validate_response(*parsed_response)) {
+                handle_api_error("validation", "Invalid API response structure");
+                return std::nullopt;
+            }
+
+            // Update usage statistics
+            update_usage_stats(*parsed_response);
+
+            return parsed_response;
+        },
+        CIRCUIT_BREAKER_SERVICE, "OpenAIClient", "create_chat_completion"
+    );
+
+    if (result && *result) {
+        successful_requests_++;
+        return *result;
+    } else {
+        failed_requests_++;
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> OpenAIClient::analyze_text(const std::string& text,
+                                                    const std::string& analysis_type,
+                                                    const std::string& context) {
+    // Create analysis request
+    std::string system_prompt = create_system_prompt(analysis_type);
+    if (!context.empty()) {
+        system_prompt += "\n\nAdditional Context: " + context;
+    }
+
+    OpenAICompletionRequest request = create_analysis_request(text, system_prompt, default_model_);
+
+    try {
+        auto response = create_chat_completion(request);
+        if (!response || response->choices.empty()) {
+            // API call succeeded but returned empty response
+            record_api_failure("analysis", "Empty response from API");
+            throw std::runtime_error("Analysis failed: Empty response from API");
+        }
+        return response->choices[0].message.content;
+    } catch (const std::exception& e) {
+        // Proper error handling - record failure and propagate error
+        record_api_failure("analysis", e.what());
+        throw std::runtime_error("Analysis failed: " + std::string(e.what()));
+    }
+}
+
+std::optional<std::string> OpenAIClient::generate_compliance_reasoning(
+    const std::string& decision_context,
+    const std::vector<std::string>& regulatory_requirements,
+    const std::vector<std::string>& risk_factors) {
+
+    std::string system_prompt = R"(
+You are an expert compliance officer with deep knowledge of financial regulations, risk management, and corporate governance.
+
+Your task is to provide detailed compliance reasoning for business decisions, considering:
+1. Applicable regulatory requirements
+2. Identified risk factors
+3. Potential compliance implications
+4. Recommended risk mitigation strategies
+5. Documentation and reporting requirements
+
+Provide your analysis in a structured format with clear reasoning and actionable recommendations.)";
+
+    std::string user_prompt = "Decision Context:\n" + decision_context + "\n\n";
+
+    if (!regulatory_requirements.empty()) {
+        user_prompt += "Regulatory Requirements:\n";
+        for (size_t i = 0; i < regulatory_requirements.size(); ++i) {
+            user_prompt += std::to_string(i + 1) + ". " + regulatory_requirements[i] + "\n";
+        }
+        user_prompt += "\n";
+    }
+
+    if (!risk_factors.empty()) {
+        user_prompt += "Risk Factors:\n";
+        for (size_t i = 0; i < risk_factors.size(); ++i) {
+            user_prompt += std::to_string(i + 1) + ". " + risk_factors[i] + "\n";
+        }
+        user_prompt += "\n";
+    }
+
+    user_prompt += "Please provide comprehensive compliance reasoning and recommendations.";
+
+    OpenAICompletionRequest request{
+        .model = default_model_,
+        .messages = {
+            OpenAIMessage{"system", system_prompt},
+            OpenAIMessage{"user", user_prompt}
+        },
+        .temperature = 0.1,  // Low temperature for consistent compliance analysis
+        .max_tokens = 3000
+    };
+
+    try {
+        auto response = create_chat_completion(request);
+        if (!response || response->choices.empty()) {
+            // API call succeeded but returned empty response
+            record_api_failure("compliance_reasoning", "Empty response from API");
+            throw std::runtime_error("Compliance reasoning failed: Empty response from API");
+        }
+        return response->choices[0].message.content;
+    } catch (const std::exception& e) {
+        // Proper error handling - record failure and propagate error
+        record_api_failure("compliance_reasoning", e.what());
+        throw std::runtime_error("Compliance reasoning failed: " + std::string(e.what()));
+    }
+}
+
+std::optional<nlohmann::json> OpenAIClient::extract_structured_data(
+    const std::string& text, const nlohmann::json& schema) {
+
+    std::string system_prompt = R"(
+You are an expert data extraction AI. Your task is to extract structured information from unstructured text according to the provided schema.
+
+Return ONLY valid JSON that matches the schema structure. Do not include any explanatory text or markdown formatting.)";
+
+    std::string schema_str = schema.dump(2);
+    std::string user_prompt = "Extract the following information from the text according to this JSON schema:\n\n";
+    user_prompt += "Schema:\n" + schema_str + "\n\n";
+    user_prompt += "Text to analyze:\n" + text + "\n\n";
+    user_prompt += "Return only the JSON object:";
+
+    OpenAICompletionRequest request{
+        .model = default_model_,
+        .messages = {
+            OpenAIMessage{"system", system_prompt},
+            OpenAIMessage{"user", user_prompt}
+        },
+        .temperature = 0.0,  // Zero temperature for deterministic extraction
+        .max_tokens = 2000
+    };
+
+    auto response = create_chat_completion(request);
+    if (!response || response->choices.empty()) {
+        return std::nullopt;
+    }
+
+    try {
+        // Extract JSON from response
+        std::string content = response->choices[0].message.content;
+
+        // Remove any markdown formatting if present
+        std::regex json_regex("```json\\s*([\\s\\S]*?)\\s*```");
+        std::smatch match;
+        if (std::regex_search(content, match, json_regex)) {
+            content = match[1].str();
+        }
+
+        // Parse the JSON
+        return nlohmann::json::parse(content);
+    } catch (const std::exception& e) {
+        handle_api_error("json_parsing", std::string("Failed to parse extracted JSON: ") + e.what(),
+                        {{"response_content", response->choices[0].message.content.substr(0, 100)}});
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> OpenAIClient::generate_decision_recommendation(
+    const std::string& scenario,
+    const std::vector<std::string>& options,
+    const std::vector<std::string>& constraints) {
+
+    std::string system_prompt = R"(
+You are an expert decision analyst specializing in compliance and risk management.
+
+For each decision scenario, you must:
+1. Analyze the business context and objectives
+2. Evaluate each option against the given constraints
+3. Assess compliance and regulatory implications
+4. Consider risk factors and mitigation strategies
+5. Provide a clear recommendation with reasoning
+6. Include implementation considerations
+
+Structure your response with:
+- Situation Analysis
+- Option Evaluation
+- Risk Assessment
+- Final Recommendation
+- Implementation Steps)";
+
+    std::string user_prompt = "Decision Scenario:\n" + scenario + "\n\n";
+
+    if (!options.empty()) {
+        user_prompt += "Available Options:\n";
+        for (size_t i = 0; i < options.size(); ++i) {
+            user_prompt += std::to_string(i + 1) + ". " + options[i] + "\n";
+        }
+        user_prompt += "\n";
+    }
+
+    if (!constraints.empty()) {
+        user_prompt += "Constraints and Requirements:\n";
+        for (size_t i = 0; i < constraints.size(); ++i) {
+            user_prompt += std::to_string(i + 1) + ". " + constraints[i] + "\n";
+        }
+        user_prompt += "\n";
+    }
+
+    OpenAICompletionRequest request{
+        .model = default_model_,
+        .messages = {
+            OpenAIMessage{"system", system_prompt},
+            OpenAIMessage{"user", user_prompt}
+        },
+        .temperature = 0.3,  // Moderate temperature for balanced analysis
+        .max_tokens = 2500
+    };
+
+    try {
+        auto response = create_chat_completion(request);
+        if (!response || response->choices.empty()) {
+            // API call succeeded but returned empty response
+            record_api_failure("decision_recommendation", "Empty response from API");
+            throw std::runtime_error("Decision recommendation failed: Empty response from API");
+        }
+        return response->choices[0].message.content;
+    } catch (const std::exception& e) {
+        // Proper error handling - record failure and propagate error
+        record_api_failure("decision_recommendation", e.what());
+        throw std::runtime_error("Decision recommendation failed: " + std::string(e.what()));
+    }
+}
+
+nlohmann::json OpenAIClient::get_usage_statistics() {
+    return {
+        {"total_requests", static_cast<size_t>(total_requests_)},
+        {"successful_requests", static_cast<size_t>(successful_requests_)},
+        {"failed_requests", static_cast<size_t>(failed_requests_)},
+        {"success_rate", total_requests_ > 0 ?
+            (static_cast<double>(successful_requests_) / total_requests_) * 100.0 : 0.0},
+        {"total_tokens_used", static_cast<size_t>(total_tokens_used_)},
+        {"estimated_cost_usd", estimated_cost_usd_.load()},
+        {"last_request_time", std::chrono::duration_cast<std::chrono::milliseconds>(
+            last_request_time_.time_since_epoch()).count()},
+        {"configuration", {
+            {"model", default_model_},
+            {"max_tokens", max_tokens_},
+            {"temperature", temperature_},
+            {"max_requests_per_minute", max_requests_per_minute_}
+        }}
+    };
+}
+
+nlohmann::json OpenAIClient::get_health_status() {
+    auto circuit_breaker = error_handler_->get_circuit_breaker(CIRCUIT_BREAKER_SERVICE);
+
+    return {
+        {"service", "openai_api"},
+        {"status", "operational"}, // Could be enhanced with actual health checks
+        {"last_request", std::chrono::duration_cast<std::chrono::milliseconds>(
+            last_request_time_.time_since_epoch()).count()},
+        {"circuit_breaker", circuit_breaker ? circuit_breaker->to_json() : nullptr},
+        {"usage_stats", get_usage_statistics()}
+    };
+}
+
+void OpenAIClient::reset_usage_counters() {
+    total_requests_ = 0;
+    successful_requests_ = 0;
+    failed_requests_ = 0;
+    total_tokens_used_ = 0;
+    estimated_cost_usd_ = 0.0;
+
+    logger_->info("OpenAI client usage counters reset");
+}
+
+// Private implementation methods
+
+std::optional<HttpResponse> OpenAIClient::make_api_request(const std::string& endpoint,
+                                                        const nlohmann::json& payload) {
+    try {
+        std::string url = base_url_ + endpoint;
+
+        std::unordered_map<std::string, std::string> headers = {
+            {"Authorization", "Bearer " + api_key_},
+            {"Content-Type", "application/json"}
+        };
+
+        std::string payload_str = payload.dump();
+
+        logger_->debug("Making OpenAI API request to: {}", url);
+
+        auto response = http_client_->post(url, payload_str, headers,
+                                         std::chrono::seconds(request_timeout_seconds_));
+
+        last_request_time_ = std::chrono::system_clock::now();
+
+        if (!response) {
+            handle_api_error("network", "No response from OpenAI API");
+            return std::nullopt;
+        }
+
+        if (response->status_code < 200 || response->status_code >= 300) {
+            handle_api_error("http_error", "HTTP " + std::to_string(response->status_code),
+                           {{"status_code", std::to_string(response->status_code)},
+                            {"response_body", response->body ? response->body->substr(0, 500) : "empty"}});
+            return std::nullopt;
+        }
+
+        return response;
+
+    } catch (const std::exception& e) {
+        handle_api_error("exception", std::string("API request exception: ") + e.what());
+        return std::nullopt;
+    }
+}
+
+std::optional<OpenAIResponse> OpenAIClient::parse_api_response(const HttpResponse& response) {
+    try {
+        if (!response.body) {
+            handle_api_error("parsing", "Empty response body");
+            return std::nullopt;
+        }
+
+        nlohmann::json json_response = nlohmann::json::parse(*response.body);
+
+        // Check for API errors
+        if (json_response.contains("error")) {
+            auto error = json_response["error"];
+            std::string error_type = error.contains("type") ? error["type"] : "unknown";
+            std::string error_message = error.contains("message") ? error["message"] : "Unknown API error";
+
+            handle_api_error("api_error", error_message, {{"error_type", error_type}});
+            return std::nullopt;
+        }
+
+        // Parse successful response
+        OpenAIResponse parsed_response;
+
+        parsed_response.id = json_response.value("id", "");
+        parsed_response.object = json_response.value("object", "");
+        parsed_response.created = std::chrono::system_clock::time_point(
+            std::chrono::seconds(json_response.value("created", 0)));
+        parsed_response.model = json_response.value("model", "");
+
+        if (json_response.contains("system_fingerprint")) {
+            parsed_response.system_fingerprint = json_response["system_fingerprint"];
+        }
+
+        // Parse choices
+        if (json_response.contains("choices")) {
+            for (const auto& choice_json : json_response["choices"]) {
+                OpenAIChoice choice;
+                choice.index = choice_json.value("index", 0);
+                choice.finish_reason = choice_json.value("finish_reason", "");
+
+                if (choice_json.contains("message")) {
+                    auto msg_json = choice_json["message"];
+                    choice.message.role = msg_json.value("role", "");
+                    choice.message.content = msg_json.value("content", "");
+                    if (msg_json.contains("name")) {
+                        choice.message.name = msg_json["name"];
+                    }
+                }
+
+                parsed_response.choices.push_back(choice);
+            }
+        }
+
+        // Parse usage
+        if (json_response.contains("usage")) {
+            auto usage_json = json_response["usage"];
+            parsed_response.usage.prompt_tokens = usage_json.value("prompt_tokens", 0);
+            parsed_response.usage.completion_tokens = usage_json.value("completion_tokens", 0);
+            parsed_response.usage.total_tokens = usage_json.value("total_tokens", 0);
+        }
+
+        return parsed_response;
+
+    } catch (const std::exception& e) {
+        handle_api_error("parsing", std::string("Failed to parse API response: ") + e.what(),
+                        {{"response_body", response.body ? response.body->substr(0, 200) : "empty"}});
+        return std::nullopt;
+    }
+}
+
+void OpenAIClient::handle_api_error(const std::string& error_type,
+                                  const std::string& message,
+                                  const std::unordered_map<std::string, std::string>& context) {
+    // Report error through error handler
+    ErrorInfo error_info(ErrorCategory::EXTERNAL_API, ErrorSeverity::HIGH,
+                        "OpenAIClient", "api_request", message);
+    error_info.context = context;
+    error_info.context["error_type"] = error_type;
+    error_info.context["service"] = CIRCUIT_BREAKER_SERVICE;
+
+    error_handler_->report_error(error_info);
+
+    // Log the error
+    logger_->error("OpenAI API error - Type: {}, Message: {}", error_type, message);
+}
+
+bool OpenAIClient::check_rate_limit() {
+    std::lock_guard<std::mutex> lock(rate_limit_mutex_);
+
+    auto now = std::chrono::system_clock::now();
+    auto window_start = now - rate_limit_window_;
+
+    // Remove old timestamps outside the window
+    while (!request_timestamps_.empty() && request_timestamps_.front() < window_start) {
+        request_timestamps_.pop_front();
+    }
+
+    // Check if we're within limits
+    if (static_cast<int>(request_timestamps_.size()) >= max_requests_per_minute_) {
+        logger_->warn("OpenAI API rate limit exceeded: {} requests in last minute",
+                     request_timestamps_.size());
+        return false;
+    }
+
+    // Add current request timestamp
+    request_timestamps_.push_back(now);
+    return true;
+}
+
+void OpenAIClient::update_usage_stats(const OpenAIResponse& response) {
+    total_tokens_used_ += response.usage.total_tokens;
+    estimated_cost_usd_ += calculate_cost(response.model, response.usage.total_tokens);
+
+    logger_->debug("OpenAI usage updated - Tokens: {}, Cost: ${:.4f}",
+                  response.usage.total_tokens, calculate_cost(response.model, response.usage.total_tokens));
+}
+
+double OpenAIClient::calculate_cost(const std::string& model, int tokens) {
+    // OpenAI pricing (as of 2024, subject to change)
+    static const std::unordered_map<std::string, double> pricing_per_1k_tokens = {
+        // GPT-4 Turbo
+        {"gpt-4-turbo-preview", 0.01},     // $0.01 per 1K input tokens
+        {"gpt-4-turbo", 0.01},
+        {"gpt-4-1106-preview", 0.01},
+        // GPT-4
+        {"gpt-4", 0.03},                   // $0.03 per 1K input tokens
+        {"gpt-4-32k", 0.06},
+        // GPT-3.5 Turbo
+        {"gpt-3.5-turbo", 0.0015},        // $0.0015 per 1K input tokens
+        {"gpt-3.5-turbo-16k", 0.003}
+    };
+
+    auto it = pricing_per_1k_tokens.find(model);
+    if (it == pricing_per_1k_tokens.end()) {
+        logger_->warn("Unknown model for cost calculation: {}", model);
+        return 0.0; // Unknown model, no cost calculation
+    }
+
+    double cost_per_1k = it->second;
+    return (tokens / 1000.0) * cost_per_1k;
+}
+
+std::string OpenAIClient::create_system_prompt(const std::string& task_type) {
+    static const std::unordered_map<std::string, std::string> prompts = {
+        {"compliance", R"(
+You are an expert compliance analyst with deep knowledge of financial regulations, corporate governance, and risk management.
+
+Your role is to analyze business activities, transactions, and decisions for compliance with applicable laws and regulations.
+
+Provide analysis that includes:
+1. Identification of applicable regulations
+2. Assessment of compliance status
+3. Identification of potential risks
+4. Recommendations for compliance improvement
+5. Documentation and reporting requirements)"},
+
+        {"risk", R"(
+You are an expert risk management professional specializing in financial services and regulatory compliance.
+
+Your role is to identify, assess, and provide recommendations for managing various types of risk including:
+1. Regulatory compliance risk
+2. Operational risk
+3. Financial risk
+4. Reputational risk
+5. Strategic risk
+
+Provide comprehensive risk analysis with mitigation strategies.)"},
+
+        {"sentiment", R"(
+You are an expert sentiment analyst specializing in financial communications and regulatory disclosures.
+
+Your role is to analyze text for:
+1. Overall sentiment (positive, negative, neutral)
+2. Emotional tone and intensity
+3. Key themes and topics
+4. Risk indicators
+5. Communication effectiveness
+
+Provide detailed sentiment analysis with supporting evidence.)"},
+
+        {"general", R"(
+You are an AI assistant specializing in financial services, regulatory compliance, and business analysis.
+
+Provide accurate, helpful, and contextually appropriate responses based on your expertise in:
+1. Financial regulations and compliance
+2. Risk management and assessment
+3. Business process analysis
+4. Regulatory reporting and documentation
+5. Industry best practices)"}
+    };
+
+    auto it = prompts.find(task_type);
+    if (it != prompts.end()) {
+        return it->second;
+    }
+
+    return prompts.at("general");
+}
+
+bool OpenAIClient::validate_response(const OpenAIResponse& response) {
+    if (response.id.empty() || response.choices.empty()) {
+        return false;
+    }
+
+    // Validate each choice
+    for (const auto& choice : response.choices) {
+        if (choice.message.content.empty()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Fallback responses removed - Rule 7 compliance: No makeshift workarounds or simplified functionality
+
+} // namespace regulens

@@ -4,8 +4,8 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
-#include "spdlog/spdlog.h"
-#include "nlohmann/json.hpp"
+#include <spdlog/spdlog.h>
+#include <nlohmann/json.hpp>
 
 namespace regulens {
 

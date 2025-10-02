@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include "shared/logging/structured_logger.hpp"
-#include "shared/config/configuration_manager.hpp"
+#include "logging/structured_logger.hpp"
+#include "config/configuration_manager.hpp"
 
 namespace regulens {
 

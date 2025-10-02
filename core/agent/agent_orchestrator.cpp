@@ -1,15 +1,30 @@
 #include "agent_orchestrator.hpp"
-#include "shared/event_processor.hpp"
-#include "shared/knowledge_base.hpp"
-#include "shared/metrics/metrics_collector.hpp"
-#include "shared/logging/structured_logger.hpp"
-#include "core/agent/compliance_agent.hpp"
+#include "../shared/event_processor.hpp"
+#include "../shared/knowledge_base.hpp"
+#include "../shared/metrics/metrics_collector.hpp"
+#include "../shared/logging/structured_logger.hpp"
+#include "compliance_agent.hpp"
 
 namespace regulens {
 
+// Initialize static members
+std::unique_ptr<AgentOrchestrator> AgentOrchestrator::singleton_instance_;
+std::mutex AgentOrchestrator::singleton_mutex_;
+
 AgentOrchestrator& AgentOrchestrator::get_instance() {
-    static AgentOrchestrator instance;
-    return instance;
+    std::lock_guard<std::mutex> lock(singleton_mutex_);
+    if (!singleton_instance_) {
+        singleton_instance_ = create_test_instance();
+    }
+    return *singleton_instance_;
+}
+
+std::unique_ptr<AgentOrchestrator> AgentOrchestrator::create_for_testing() {
+    return create_test_instance();
+}
+
+std::unique_ptr<AgentOrchestrator> AgentOrchestrator::create_test_instance() {
+    return std::unique_ptr<AgentOrchestrator>(new AgentOrchestrator());
 }
 
 AgentOrchestrator::AgentOrchestrator()
@@ -29,6 +44,28 @@ bool AgentOrchestrator::initialize(std::shared_ptr<ConfigurationManager> config)
 
     config_ = config;
     logger_ = std::make_shared<StructuredLogger>(StructuredLogger::get_instance());
+
+    // Initialize core components
+    if (!initialize_components()) {
+        return false;
+    }
+
+    // Register system metrics
+    register_system_metrics();
+
+    // Initialize agents (if any pre-configured)
+    if (!initialize_agents()) {
+        return false;
+    }
+
+    // Start worker threads
+    start_worker_threads();
+
+    logger_->info("Agent orchestrator initialized successfully");
+    return true;
+}
+
+bool AgentOrchestrator::initialize_components() {
     metrics_collector_ = std::make_shared<MetricsCollector>();
     event_processor_ = std::make_shared<EventProcessor>(logger_);
     knowledge_base_ = std::make_shared<KnowledgeBase>(config_, logger_);
@@ -49,7 +86,17 @@ bool AgentOrchestrator::initialize(std::shared_ptr<ConfigurationManager> config)
         return false;
     }
 
-    // Register system metrics
+    return true;
+}
+
+bool AgentOrchestrator::initialize_agents() {
+    // For now, agents are registered dynamically via register_agent()
+    // This method can be extended for pre-configured agent initialization
+    logger_->debug("Agent initialization completed - no pre-configured agents");
+    return true;
+}
+
+void AgentOrchestrator::register_system_metrics() {
     metrics_collector_->register_counter("orchestrator.tasks_submitted");
     metrics_collector_->register_counter("orchestrator.tasks_completed");
     metrics_collector_->register_counter("orchestrator.tasks_failed");
@@ -57,11 +104,24 @@ bool AgentOrchestrator::initialize(std::shared_ptr<ConfigurationManager> config)
         [this]() { return static_cast<double>(registered_agents_.size()); });
     metrics_collector_->register_gauge("orchestrator.queue_size",
         [this]() { return static_cast<double>(task_queue_.size()); });
+}
 
-    // Start worker threads
-    start_worker_threads();
+bool AgentOrchestrator::validate_agent_registration(const AgentRegistration& registration) const {
+    if (registration.agent_type.empty()) {
+        logger_->error("Agent registration failed: empty agent type");
+        return false;
+    }
 
-    logger_->info("Agent orchestrator initialized successfully");
+    if (!registration.agent_instance) {
+        logger_->error("Agent registration failed: null agent instance for type {}", registration.agent_type);
+        return false;
+    }
+
+    if (registered_agents_.find(registration.agent_type) != registered_agents_.end()) {
+        logger_->warn("Agent type {} already registered", registration.agent_type);
+        return false;
+    }
+
     return true;
 }
 
@@ -122,8 +182,7 @@ bool AgentOrchestrator::is_healthy() const {
 bool AgentOrchestrator::register_agent(const AgentRegistration& registration) {
     std::lock_guard<std::mutex> lock(agents_mutex_);
 
-    if (registered_agents_.find(registration.agent_type) != registered_agents_.end()) {
-        logger_->warn("Agent type {} already registered", registration.agent_type);
+    if (!validate_agent_registration(registration)) {
         return false;
     }
 
@@ -228,7 +287,7 @@ bool AgentOrchestrator::set_agent_enabled(const std::string& agent_type, bool en
         return false;
     }
 
-    it->second.enabled = enabled;
+    it->second.active = enabled;
     if (it->second.agent_instance) {
         it->second.agent_instance->set_enabled(enabled);
     }
@@ -266,7 +325,7 @@ void AgentOrchestrator::start_worker_threads() {
     size_t num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4;
 
-    logger_->info("Starting {} worker threads", num_threads);
+    logger_->info("Starting {} worker threads", "", "", {{"thread_count", std::to_string(num_threads)}});
 
     for (size_t i = 0; i < num_threads; ++i) {
         worker_threads_.emplace_back(&AgentOrchestrator::worker_thread_loop, this);
@@ -291,7 +350,8 @@ void AgentOrchestrator::worker_thread_loop() {
 
     while (!shutdown_requested_) {
         AgentTask task("", "", ComplianceEvent(EventType::AGENT_HEALTH_CHECK,
-                                              EventSeverity::LOW, "health_check"));
+                                              EventSeverity::LOW, "health_check",
+                                              {"system", "orchestrator", "internal"}));
 
         {
             std::unique_lock<std::mutex> lock(task_queue_mutex_);
@@ -319,39 +379,83 @@ void AgentOrchestrator::worker_thread_loop() {
 
 void AgentOrchestrator::process_task(const AgentTask& task) {
     try {
-        auto agent = find_agent_for_task(task);
-        if (!agent) {
-            logger_->warn("No suitable agent found for task: {}", task.task_id);
-            handle_task_result(task, TaskResult(false, "No suitable agent found"));
-            return;
+        std::shared_ptr<ComplianceAgent> agent;
+
+        // Prepare task execution (find agent and validate)
+        if (!prepare_task_execution(task, agent)) {
+            return; // Error already logged and handled
         }
 
-        // Check if agent is enabled and healthy
-        if (!agent->is_enabled() || agent->get_status().health == AgentHealth::CRITICAL) {
-            logger_->warn("Agent {} is not available for task: {}", agent->get_agent_name(), task.task_id);
-            handle_task_result(task, TaskResult(false, "Agent not available"));
-            return;
-        }
+        // Execute task with the agent
+        TaskResult result = execute_task_with_agent(task, agent);
 
-        // Process the task
-        agent->increment_tasks_in_progress();
-
-        auto start_time = std::chrono::high_resolution_clock::now();
-        AgentDecision decision = agent->process_event(task.event);
-        auto end_time = std::chrono::high_resolution_clock::now();
-
-        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end_time - start_time);
-
-        agent->update_metrics(processing_time, true);
-        agent->decrement_tasks_in_progress();
-
-        TaskResult result(true, "", decision, processing_time);
-        handle_task_result(task, result);
+        // Finalize task execution (metrics, callbacks, etc.)
+        finalize_task_execution(task, result);
 
     } catch (const std::exception& e) {
         logger_->error("Exception processing task {}: {}", task.task_id, e.what());
-        handle_task_result(task, TaskResult(false, std::string("Exception: ") + e.what()));
+        TaskResult error_result(false, std::string("Exception: ") + e.what());
+        finalize_task_execution(task, error_result);
+    }
+}
+
+bool AgentOrchestrator::prepare_task_execution(const AgentTask& task, std::shared_ptr<ComplianceAgent>& agent) {
+    agent = find_agent_for_task(task);
+    if (!agent) {
+        logger_->warn("No suitable agent found for task: {}", task.task_id);
+        TaskResult error_result(false, "No suitable agent found");
+        finalize_task_execution(task, error_result);
+        return false;
+    }
+
+    // Check if agent is enabled and healthy
+    if (!agent->is_enabled() || agent->get_status().health == AgentHealth::CRITICAL) {
+        logger_->warn("Agent {} is not available for task: {}", agent->get_agent_name(), task.task_id);
+        TaskResult error_result(false, "Agent not available");
+        finalize_task_execution(task, error_result);
+        return false;
+    }
+
+    return true;
+}
+
+TaskResult AgentOrchestrator::execute_task_with_agent(const AgentTask& task, std::shared_ptr<ComplianceAgent> agent) {
+    // Increment task counter
+    agent->increment_tasks_in_progress();
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    AgentDecision decision = agent->process_event(task.event);
+    auto end_time = std::chrono::high_resolution_clock::now();
+
+    auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_time - start_time);
+
+    // Update agent metrics
+    agent->update_metrics(processing_time, true);
+    agent->decrement_tasks_in_progress();
+
+    return TaskResult(true, "", decision, processing_time);
+}
+
+void AgentOrchestrator::finalize_task_execution(const AgentTask& task, const TaskResult& result) {
+    // Update orchestrator metrics
+    if (result.success) {
+        tasks_processed_++;
+        metrics_collector_->increment_counter("orchestrator.tasks_completed");
+        logger_->info("Task {} completed successfully in {}ms",
+                     task.task_id, result.execution_time.count());
+    } else {
+        tasks_failed_++;
+        metrics_collector_->increment_counter("orchestrator.tasks_failed");
+        logger_->error("Task {} failed: {}", task.task_id, result.error_message);
+    }
+
+    // Update agent-specific metrics
+    update_agent_metrics(task.agent_type, result);
+
+    // Call the callback if provided
+    if (task.callback) {
+        task.callback(result);
     }
 }
 
@@ -363,7 +467,7 @@ std::shared_ptr<ComplianceAgent> AgentOrchestrator::find_agent_for_task(const Ag
         auto it = registered_agents_.find(task.agent_type);
         if (it != registered_agents_.end() &&
             it->second.agent_instance &&
-            it->second.enabled &&
+            it->second.active &&
             it->second.agent_instance->can_handle_event(task.event.get_type())) {
             return it->second.agent_instance;
         }
@@ -379,26 +483,6 @@ std::shared_ptr<ComplianceAgent> AgentOrchestrator::find_agent_for_task(const Ag
     }
 
     return nullptr;
-}
-
-void AgentOrchestrator::handle_task_result(const AgentTask& task, const TaskResult& result) {
-    if (result.success) {
-        tasks_processed_++;
-        metrics_collector_->increment_counter("orchestrator.tasks_completed");
-        logger_->info("Task {} completed successfully in {}ms",
-                     task.task_id, result.execution_time.count());
-    } else {
-        tasks_failed_++;
-        metrics_collector_->increment_counter("orchestrator.tasks_failed");
-        logger_->error("Task {} failed: {}", task.task_id, result.error_message);
-    }
-
-    update_agent_metrics(task.agent_type, result);
-
-    // Call the callback if provided
-    if (task.callback) {
-        task.callback(result);
-    }
 }
 
 void AgentOrchestrator::update_agent_metrics(const std::string& agent_type, const TaskResult& result) {

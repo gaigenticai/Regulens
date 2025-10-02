@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <variant>
 #include <chrono>
-#include "nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 
 namespace regulens {
 
@@ -219,6 +219,17 @@ inline std::string event_type_to_string(EventType type) {
         case EventType::AGENT_HEALTH_CHECK: return "AGENT_HEALTH_CHECK";
         case EventType::SYSTEM_PERFORMANCE_ALERT: return "SYSTEM_PERFORMANCE_ALERT";
         case EventType::DATA_QUALITY_ISSUE: return "DATA_QUALITY_ISSUE";
+        default: return "UNKNOWN";
+    }
+}
+
+// Event severity to string conversion for logging
+inline std::string event_severity_to_string(EventSeverity severity) {
+    switch (severity) {
+        case EventSeverity::LOW: return "LOW";
+        case EventSeverity::MEDIUM: return "MEDIUM";
+        case EventSeverity::HIGH: return "HIGH";
+        case EventSeverity::CRITICAL: return "CRITICAL";
         default: return "UNKNOWN";
     }
 }

@@ -5,11 +5,11 @@
 #include <unordered_map>
 #include <chrono>
 
-#include "shared/models/compliance_event.hpp"
-#include "shared/models/agent_decision.hpp"
-#include "shared/models/agent_state.hpp"
-#include "shared/logging/structured_logger.hpp"
-#include "shared/config/configuration_manager.hpp"
+#include "../shared/models/compliance_event.hpp"
+#include "../shared/models/agent_decision.hpp"
+#include "../shared/models/agent_state.hpp"
+#include "../shared/logging/structured_logger.hpp"
+#include "../shared/config/configuration_manager.hpp"
 
 namespace regulens {
 
@@ -100,8 +100,8 @@ public:
      */
     void set_enabled(bool enabled) {
         enabled_ = enabled;
-        logger_->info("Agent {} ({}) {}", agent_name_, agent_type_,
-                     enabled ? "enabled" : "disabled");
+        std::string status = enabled ? "enabled" : "disabled";
+        logger_->info("Agent " + agent_name_ + " (" + agent_type_ + ") " + status);
     }
 
     /**
@@ -139,7 +139,7 @@ public:
         }
 
         // Check if agent is processing too many tasks
-        if (metrics_.tasks_in_progress.load() > get_capabilities().max_concurrent_tasks) {
+        if (metrics_.tasks_in_progress.load() > static_cast<unsigned long>(get_capabilities().max_concurrent_tasks)) {
             health_ = AgentHealth::DEGRADED;
             logger_->warn("Agent {} has too many concurrent tasks", agent_name_);
         } else {
@@ -188,8 +188,8 @@ protected:
         state_ = new_state;
 
         if (old_state != new_state) {
-            logger_->info("Agent {} state changed: {} -> {}",
-                         agent_name_, agent_state_to_string(old_state),
+            logger_->info("Agent " + agent_name_ + " state changed: " +
+                         agent_state_to_string(old_state) + " -> " +
                          agent_state_to_string(new_state));
         }
     }
@@ -228,6 +228,7 @@ protected:
         metrics_.success_rate = static_cast<double>(successful_tasks) / total_tasks;
     }
 
+public:
     /**
      * @brief Increment tasks in progress counter
      */
@@ -243,6 +244,8 @@ protected:
             metrics_.tasks_in_progress--;
         }
     }
+
+protected:
 
     /**
      * @brief Validate agent configuration

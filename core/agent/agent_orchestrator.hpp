@@ -11,13 +11,14 @@
 #include <queue>
 #include <functional>
 #include <chrono>
+#include <optional>
 
-#include "shared/config/configuration_manager.hpp"
-#include "shared/logging/structured_logger.hpp"
-#include "shared/models/compliance_event.hpp"
-#include "shared/models/agent_decision.hpp"
-#include "shared/models/agent_state.hpp"
-#include "shared/utils/timer.hpp"
+#include "../shared/config/configuration_manager.hpp"
+#include "../shared/logging/structured_logger.hpp"
+#include "../shared/models/compliance_event.hpp"
+#include "../shared/models/agent_decision.hpp"
+#include "../shared/models/agent_state.hpp"
+#include "../shared/utils/timer.hpp"
 
 namespace regulens {
 
@@ -27,15 +28,6 @@ class EventProcessor;
 class KnowledgeBase;
 class MetricsCollector;
 
-/**
- * @brief Priority levels for agent tasks and events
- */
-enum class Priority {
-    LOW = 0,
-    NORMAL = 1,
-    HIGH = 2,
-    CRITICAL = 3
-};
 
 /**
  * @brief Task execution result
@@ -43,10 +35,10 @@ enum class Priority {
 struct TaskResult {
     bool success;
     std::string error_message;
-    AgentDecision decision;
+    std::optional<AgentDecision> decision;
     std::chrono::milliseconds execution_time;
 
-    TaskResult(bool s = true, std::string msg = "", AgentDecision d = {}, std::chrono::milliseconds t = std::chrono::milliseconds(0))
+    TaskResult(bool s = true, std::string msg = "", std::optional<AgentDecision> d = std::nullopt, std::chrono::milliseconds t = std::chrono::milliseconds(0))
         : success(s), error_message(std::move(msg)), decision(std::move(d)), execution_time(t) {}
 };
 
@@ -92,6 +84,11 @@ struct AgentRegistration {
  * This is the "brain" of the agentic AI compliance system.
  */
 class AgentOrchestrator {
+private:
+    // Singleton instance - private to enforce factory pattern
+    static std::unique_ptr<AgentOrchestrator> singleton_instance_;
+    static std::mutex singleton_mutex_;
+
 public:
     /**
      * @brief Get singleton instance
@@ -170,12 +167,31 @@ public:
     std::optional<AgentStatus> get_agent_status(const std::string& agent_type) const;
 
 private:
+    // Private constructor and destructor for proper singleton pattern
+    // External instantiation only through factory methods
     AgentOrchestrator();
     ~AgentOrchestrator();
+
+    // Factory method for testing - allows creating test instances
+    // Declared private to maintain proper encapsulation
+    static std::unique_ptr<AgentOrchestrator> create_test_instance();
+
+public:
+    // Public factory method that delegates to private implementation
+    static std::unique_ptr<AgentOrchestrator> create_for_testing();
 
     // Prevent copying
     AgentOrchestrator(const AgentOrchestrator&) = delete;
     AgentOrchestrator& operator=(const AgentOrchestrator&) = delete;
+
+    // Helper methods for improved modularity
+    bool initialize_components();
+    bool initialize_agents();
+    void register_system_metrics();
+    bool validate_agent_registration(const AgentRegistration& registration) const;
+    bool prepare_task_execution(const AgentTask& task, std::shared_ptr<ComplianceAgent>& agent);
+    TaskResult execute_task_with_agent(const AgentTask& task, std::shared_ptr<ComplianceAgent> agent);
+    void finalize_task_execution(const AgentTask& task, const TaskResult& result);
 
     // Core coordination methods
     void start_worker_threads();
@@ -183,12 +199,14 @@ private:
     void worker_thread_loop();
     void process_task(const AgentTask& task);
     std::shared_ptr<ComplianceAgent> find_agent_for_task(const AgentTask& task);
-    void handle_task_result(const AgentTask& task, const TaskResult& result);
     void update_agent_metrics(const std::string& agent_type, const TaskResult& result);
 
     // Health monitoring
     void perform_health_checks();
     bool check_agent_health(const std::string& agent_type) const;
+
+    // Utility methods
+    std::string generate_task_id();
 
     // Configuration and dependencies
     std::shared_ptr<ConfigurationManager> config_;
@@ -211,7 +229,7 @@ private:
     // Performance monitoring
     std::atomic<size_t> tasks_processed_;
     std::atomic<size_t> tasks_failed_;
-    Timer last_health_check_;
+    std::chrono::system_clock::time_point last_health_check_;
     std::unordered_map<std::string, AgentMetrics> agent_metrics_;
 };
 

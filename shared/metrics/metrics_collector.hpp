@@ -42,6 +42,32 @@ struct HistogramBucket {
     std::atomic<size_t> count{0};
 
     HistogramBucket(double bound) : upper_bound(bound) {}
+
+    // Copy constructor - atomic can't be copied, so we copy the value
+    HistogramBucket(const HistogramBucket& other)
+        : upper_bound(other.upper_bound), count(other.count.load()) {}
+
+    // Move constructor
+    HistogramBucket(HistogramBucket&& other) noexcept
+        : upper_bound(other.upper_bound), count(other.count.load()) {}
+
+    // Copy assignment
+    HistogramBucket& operator=(const HistogramBucket& other) {
+        if (this != &other) {
+            upper_bound = other.upper_bound;
+            count.store(other.count.load());
+        }
+        return *this;
+    }
+
+    // Move assignment
+    HistogramBucket& operator=(HistogramBucket&& other) noexcept {
+        if (this != &other) {
+            upper_bound = other.upper_bound;
+            count.store(other.count.load());
+        }
+        return *this;
+    }
 };
 
 /**

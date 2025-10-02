@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <atomic>
-#include "nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 
 namespace regulens {
 
@@ -69,6 +69,30 @@ struct AgentMetrics {
 
     AgentMetrics() : last_task_time(std::chrono::system_clock::now()),
                     startup_time(std::chrono::system_clock::now()) {}
+
+    // Copy constructor - atomic members need special handling
+    AgentMetrics(const AgentMetrics& other)
+        : tasks_processed(other.tasks_processed.load()),
+          tasks_failed(other.tasks_failed.load()),
+          tasks_in_progress(other.tasks_in_progress.load()),
+          average_processing_time_ms(other.average_processing_time_ms.load()),
+          success_rate(other.success_rate.load()),
+          last_task_time(other.last_task_time),
+          startup_time(other.startup_time) {}
+
+    // Copy assignment operator
+    AgentMetrics& operator=(const AgentMetrics& other) {
+        if (this != &other) {
+            tasks_processed.store(other.tasks_processed.load());
+            tasks_failed.store(other.tasks_failed.load());
+            tasks_in_progress.store(other.tasks_in_progress.load());
+            average_processing_time_ms.store(other.average_processing_time_ms.load());
+            success_rate.store(other.success_rate.load());
+            last_task_time = other.last_task_time;
+            startup_time = other.startup_time;
+        }
+        return *this;
+    }
 
     nlohmann::json to_json() const {
         return {

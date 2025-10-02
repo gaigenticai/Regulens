@@ -1,8 +1,8 @@
 #include "configuration_manager.hpp"
+#include "../database/postgresql_connection.hpp"
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
-#include <boost/program_options.hpp>
 #include <filesystem>
 
 namespace regulens {
@@ -12,334 +12,59 @@ ConfigurationManager& ConfigurationManager::get_instance() {
     return instance;
 }
 
-bool ConfigurationManager::load_configuration(int argc, char* argv[]) {
-    namespace po = boost::program_options;
-
-    try {
-        // Command line options
-        po::options_description cmd_options("Command line options");
-        cmd_options.add_options()
-            ("help,h", "produce help message")
-            ("config,c", po::value<std::string>()->default_value("config.json"), "configuration file")
-            ("env-file,e", po::value<std::string>()->default_value(".env"), "environment file")
-            ("validate-only,v", "validate configuration and exit");
-
-        // Parse command line
-        po::variables_map vm;
-        po::store(po::parse_command_line(argc, argv, cmd_options), vm);
-        po::notify(vm);
-
-        if (vm.count("help")) {
-            std::cout << cmd_options << std::endl;
-            return false;
-        }
-
-        // Load environment variables first
-        if (!load_from_environment()) {
-            std::cerr << "Warning: Failed to load some environment variables" << std::endl;
-        }
-
-        // Load from .env file if it exists
-        std::string env_file = vm["env-file"].as<std::string>();
-        if (std::filesystem::exists(env_file)) {
-            if (!load_from_env_file(env_file)) {
-                std::cerr << "Warning: Failed to load .env file: " << env_file << std::endl;
-            }
-        }
-
-        // Load from config file if it exists
-        std::string config_file = vm["config"].as<std::string>();
-        if (std::filesystem::exists(config_file)) {
-            config_file_path_ = config_file;
-            if (!load_from_config_file(std::filesystem::path(config_file))) {
-                std::cerr << "Warning: Failed to load config file: " << config_file << std::endl;
-            }
-        }
-
-        // Set defaults for missing values
-        set_defaults();
-
-        // Validate if requested
-        if (vm.count("validate-only")) {
-            ValidationResult validation = validate_configuration();
-            if (validation.valid) {
-                std::cout << "Configuration validation successful" << std::endl;
-                return false; // Exit after validation
-            } else {
-                std::cerr << "Configuration validation failed: " << validation.error_message << std::endl;
-                return false;
-            }
-        }
-
-        return validate_configuration().valid;
-
-    } catch (const std::exception& e) {
-        std::cerr << "Configuration loading error: " << e.what() << std::endl;
-        return false;
-    }
+ConfigurationManager::ConfigurationManager() {
+    // Set some defaults
+    config_values_["database.host"] = "localhost";
+    config_values_["database.port"] = "5432";
+    config_values_["logging.level"] = "info";
+    config_values_["api.endpoint"] = "https://api.regulens.ai";
+    config_values_["email.smtp.server"] = "smtp.gmail.com";
+    config_values_["email.smtp.port"] = "587";
 }
 
-bool ConfigurationManager::load_from_environment() {
-    // Load all known configuration keys from environment
-    std::vector<std::string> env_keys = {
-        config_keys::ENVIRONMENT,
-        config_keys::VERSION,
-        config_keys::INSTANCE_ID,
-        config_keys::DATACENTER,
-        // Database
-        config_keys::DATABASE_HOST,
-        config_keys::DATABASE_PORT,
-        config_keys::DATABASE_NAME,
-        config_keys::DATABASE_USER,
-        config_keys::DATABASE_PASSWORD,
-        config_keys::DATABASE_SSL_MODE,
-        config_keys::DATABASE_CONNECTION_POOL_SIZE,
-        config_keys::DATABASE_CONNECTION_TIMEOUT_MS,
-        config_keys::DATABASE_MAX_RETRIES,
-        config_keys::DATABASE_READ_REPLICA_HOST,
-        config_keys::DATABASE_READ_REPLICA_PORT,
-        // Message queue
-        config_keys::MESSAGE_QUEUE_TYPE,
-        config_keys::MESSAGE_QUEUE_BOOTSTRAP_SERVERS,
-        config_keys::MESSAGE_QUEUE_SECURITY_PROTOCOL,
-        config_keys::MESSAGE_QUEUE_SASL_MECHANISM,
-        config_keys::MESSAGE_QUEUE_SASL_USERNAME,
-        config_keys::MESSAGE_QUEUE_SASL_PASSWORD,
-        // Regulatory sources
-        config_keys::SEC_EDGAR_API_KEY,
-        config_keys::SEC_EDGAR_BASE_URL,
-        config_keys::SEC_EDGAR_RATE_LIMIT_REQUESTS_PER_SECOND,
-        config_keys::FCA_API_KEY,
-        config_keys::FCA_BASE_URL,
-        config_keys::FCA_RATE_LIMIT_REQUESTS_PER_MINUTE,
-        config_keys::ECB_FEED_URL,
-        config_keys::ECB_UPDATE_INTERVAL_MINUTES,
-        config_keys::CUSTOM_REGULATORY_FEEDS,
-        // External systems
-        config_keys::ERP_SYSTEM_TYPE,
-        config_keys::ERP_SYSTEM_HOST,
-        config_keys::ERP_SYSTEM_PORT,
-        config_keys::ERP_SYSTEM_API_KEY,
-        config_keys::ERP_SYSTEM_USERNAME,
-        config_keys::ERP_SYSTEM_PASSWORD,
-        config_keys::ERP_SYSTEM_TIMEOUT_MS,
-        config_keys::DOCUMENT_SYSTEM_TYPE,
-        config_keys::DOCUMENT_SYSTEM_BASE_URL,
-        config_keys::DOCUMENT_SYSTEM_CLIENT_ID,
-        config_keys::DOCUMENT_SYSTEM_CLIENT_SECRET,
-        config_keys::DOCUMENT_SYSTEM_TENANT_ID,
-        config_keys::SIEM_SYSTEM_TYPE,
-        config_keys::SIEM_SYSTEM_HOST,
-        config_keys::SIEM_SYSTEM_PORT,
-        config_keys::SIEM_SYSTEM_TOKEN,
-        config_keys::SIEM_SYSTEM_INDEX,
-        // AI/ML
-        config_keys::COMPLIANCE_MODEL_ENDPOINT,
-        config_keys::REGULATORY_MODEL_ENDPOINT,
-        config_keys::AUDIT_MODEL_ENDPOINT,
-        config_keys::VECTOR_DB_TYPE,
-        config_keys::VECTOR_DB_HOST,
-        config_keys::VECTOR_DB_PORT,
-        config_keys::VECTOR_DB_API_KEY,
-        config_keys::EMBEDDING_MODEL_TYPE,
-        config_keys::EMBEDDING_MODEL_NAME,
-        config_keys::EMBEDDING_DIMENSION,
-        // Security
-        config_keys::ENCRYPTION_MASTER_KEY,
-        config_keys::DATA_ENCRYPTION_KEY,
-        config_keys::JWT_SECRET_KEY
+bool ConfigurationManager::initialize(int /*argc*/, char* /*argv*/[]) {
+    // Load configuration from environment variables
+    if (!load_from_environment()) {
+        std::cerr << "Failed to load configuration from environment" << std::endl;
+        return false;
+    }
+
+    // Set defaults for any missing values
+    set_defaults();
+
+    return true;
+}
+
+bool ConfigurationManager::validate_configuration() const {
+    // Basic validation - ensure required fields are present
+    std::vector<std::string> required_keys = {
+        "database.host",
+        "database.port",
+        "logging.level"
     };
 
-    bool all_loaded = true;
-    for (const auto& key : env_keys) {
-        const char* env_value = std::getenv(key.c_str());
-        if (env_value) {
-            config_values_[key] = std::string(env_value);
-        } else {
-            all_loaded = false; // Some environment variables might not be set
-        }
-    }
-
-    return all_loaded; // Return false if any env vars are missing (acceptable)
-}
-
-bool ConfigurationManager::load_from_env_file(const std::string& env_file) {
-    std::ifstream file(env_file);
-    if (!file.is_open()) {
-        return false;
-    }
-
-    std::string line;
-    while (std::getline(file, line)) {
-        // Skip comments and empty lines
-        if (line.empty() || line[0] == '#') {
-            continue;
-        }
-
-        // Parse KEY=VALUE format
-        size_t equals_pos = line.find('=');
-        if (equals_pos != std::string::npos) {
-            std::string key = line.substr(0, equals_pos);
-            std::string value = line.substr(equals_pos + 1);
-
-            // Trim whitespace
-            key.erase(key.begin(), std::find_if(key.begin(), key.end(), [](int ch) {
-                return !std::isspace(ch);
-            }));
-            key.erase(std::find_if(key.rbegin(), key.rend(), [](int ch) {
-                return !std::isspace(ch);
-            }).base(), key.end());
-
-            value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](int ch) {
-                return !std::isspace(ch);
-            }));
-            value.erase(std::find_if(value.rbegin(), value.rend(), [](int ch) {
-                return !std::isspace(ch);
-            }).base(), value.end());
-
-            if (!key.empty()) {
-                config_values_[key] = value;
-            }
+    for (const auto& key : required_keys) {
+        if (config_values_.find(key) == config_values_.end()) {
+            return false;
         }
     }
 
     return true;
 }
 
-bool ConfigurationManager::load_from_config_file(const std::filesystem::path& config_path) {
-    try {
-        std::ifstream file(config_path);
-        if (!file.is_open()) {
-            return false;
-        }
-
-        nlohmann::json config_json;
-        file >> config_json;
-
-        // Flatten JSON into key-value pairs
-        flatten_json(config_json, "");
-
-        return true;
-    } catch (const std::exception&) {
-        return false;
-    }
-}
-
-void ConfigurationManager::flatten_json(const nlohmann::json& json, const std::string& prefix) {
-    for (auto it = json.begin(); it != json.end(); ++it) {
-        std::string key = prefix.empty() ? it.key() : prefix + "." + it.key();
-
-        if (it->is_object()) {
-            flatten_json(*it, key);
-        } else {
-            config_values_[key] = it->dump();
-        }
-    }
-}
-
-void ConfigurationManager::set_defaults() {
-    // Set default values for required configuration that might be missing
-
-    // System defaults
-    if (config_values_.find(config_keys::ENVIRONMENT) == config_values_.end()) {
-        config_values_[config_keys::ENVIRONMENT] = "development";
-    }
-
-    if (config_values_.find(config_keys::VERSION) == config_values_.end()) {
-        config_values_[config_keys::VERSION] = REGULENS_VERSION;
-    }
-
-    if (config_values_.find(config_keys::INSTANCE_ID) == config_values_.end()) {
-        config_values_[config_keys::INSTANCE_ID] = "default";
-    }
-
-    // Database defaults
-    if (config_values_.find(config_keys::DATABASE_HOST) == config_values_.end()) {
-        config_values_[config_keys::DATABASE_HOST] = "localhost";
-    }
-
-    if (config_values_.find(config_keys::DATABASE_PORT) == config_values_.end()) {
-        config_values_[config_keys::DATABASE_PORT] = "5432";
-    }
-
-    if (config_values_.find(config_keys::DATABASE_CONNECTION_POOL_SIZE) == config_values_.end()) {
-        config_values_[config_keys::DATABASE_CONNECTION_POOL_SIZE] = "10";
-    }
-
-    // Add more defaults as needed...
-}
-
-ValidationResult ConfigurationManager::validate_configuration() const {
-    // Required configuration validation
-    std::vector<std::string> required_keys = {
-        config_keys::ENVIRONMENT,
-        config_keys::DATABASE_HOST,
-        config_keys::DATABASE_NAME,
-        config_keys::DATABASE_USER
-    };
-
-    for (const auto& key : required_keys) {
-        if (config_values_.find(key) == config_values_.end() ||
-            config_values_.at(key).empty()) {
-            return ValidationResult(false, "Missing required configuration: " + key);
-        }
-    }
-
-    // Environment-specific validation
-    std::string environment = get_string(config_keys::ENVIRONMENT).value_or("development");
-    if (environment == "production") {
-        // Production-specific validations
-        if (!get_string(config_keys::DATABASE_PASSWORD)) {
-            return ValidationResult(false, "Database password required in production");
-        }
-
-        if (!get_string(config_keys::ENCRYPTION_MASTER_KEY)) {
-            return ValidationResult(false, "Encryption master key required in production");
-        }
-    }
-
-    // Validate port numbers
-    if (auto port_str = get_string(config_keys::DATABASE_PORT)) {
-        try {
-            int port = std::stoi(*port_str);
-            if (port < 1 || port > 65535) {
-                return ValidationResult(false, "Invalid database port number");
-            }
-        } catch (...) {
-            return ValidationResult(false, "Invalid database port format");
-        }
-    }
-
-    return ValidationResult(true);
-}
-
-bool ConfigurationManager::reload() {
-    // Clear existing configuration except environment variables
-    auto env_vars = config_values_;
-    config_values_.clear();
-
-    // Reload from sources
-    load_from_environment();
-
-    if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
-        load_from_config_file(config_file_path_);
-    }
-
-    set_defaults();
-
-    return validate_configuration().valid;
-}
-
-// Getter implementations
 std::optional<std::string> ConfigurationManager::get_string(const std::string& key) const {
     auto it = config_values_.find(key);
-    return (it != config_values_.end()) ? std::optional<std::string>(it->second) : std::nullopt;
+    if (it != config_values_.end()) {
+        return it->second;
+    }
+    return std::nullopt;
 }
 
 std::optional<int> ConfigurationManager::get_int(const std::string& key) const {
-    if (auto str_val = get_string(key)) {
+    auto str_value = get_string(key);
+    if (str_value) {
         try {
-            return std::stoi(*str_val);
+            return std::stoi(*str_value);
         } catch (...) {
             return std::nullopt;
         }
@@ -348,18 +73,18 @@ std::optional<int> ConfigurationManager::get_int(const std::string& key) const {
 }
 
 std::optional<bool> ConfigurationManager::get_bool(const std::string& key) const {
-    if (auto str_val = get_string(key)) {
-        std::string val = *str_val;
-        std::transform(val.begin(), val.end(), val.begin(), ::tolower);
-        return (val == "true" || val == "1" || val == "yes" || val == "on");
+    auto str_value = get_string(key);
+    if (str_value) {
+        return *str_value == "true" || *str_value == "1";
     }
     return std::nullopt;
 }
 
 std::optional<double> ConfigurationManager::get_double(const std::string& key) const {
-    if (auto str_val = get_string(key)) {
+    auto str_value = get_string(key);
+    if (str_value) {
         try {
-            return std::stod(*str_val);
+            return std::stod(*str_value);
         } catch (...) {
             return std::nullopt;
         }
@@ -367,21 +92,313 @@ std::optional<double> ConfigurationManager::get_double(const std::string& key) c
     return std::nullopt;
 }
 
-Environment ConfigurationManager::get_environment() const {
-    auto env_str = get_string(config_keys::ENVIRONMENT);
-    if (!env_str) return Environment::DEVELOPMENT;
-
-    if (*env_str == "staging") return Environment::STAGING;
-    if (*env_str == "production") return Environment::PRODUCTION;
-    return Environment::DEVELOPMENT;
-}
 
 nlohmann::json ConfigurationManager::to_json() const {
-    nlohmann::json json;
+    nlohmann::json result;
     for (const auto& [key, value] : config_values_) {
-        json[key] = value;
+        result[key] = value;
     }
-    return json;
+    return result;
 }
 
-} // namespace regulens
+bool ConfigurationManager::reload() {
+    config_values_.clear();
+    return initialize(0, nullptr);
+}
+
+void ConfigurationManager::load_env_var(const char* env_var_name) {
+    const char* value = std::getenv(env_var_name);
+    if (value != nullptr) {
+        config_values_[env_var_name] = std::string(value);
+    }
+}
+
+bool ConfigurationManager::load_from_environment() {
+    // Database configuration
+    load_env_var(config_keys::DB_HOST);
+    load_env_var(config_keys::DB_PORT);
+    load_env_var(config_keys::DB_NAME);
+    load_env_var(config_keys::DB_USER);
+    load_env_var(config_keys::DB_PASSWORD);
+    load_env_var(config_keys::DB_SSL_MODE);
+    load_env_var(config_keys::DB_CONNECTION_POOL_SIZE);
+    load_env_var(config_keys::DB_CONNECTION_TIMEOUT_MS);
+    load_env_var(config_keys::DB_MAX_RETRIES);
+
+    // Message queue configuration
+    load_env_var(config_keys::MESSAGE_QUEUE_TYPE);
+    load_env_var(config_keys::MESSAGE_QUEUE_BOOTSTRAP_SERVERS);
+    load_env_var(config_keys::MESSAGE_QUEUE_SECURITY_PROTOCOL);
+    load_env_var(config_keys::MESSAGE_QUEUE_SASL_MECHANISM);
+    load_env_var(config_keys::MESSAGE_QUEUE_SASL_USERNAME);
+    load_env_var(config_keys::MESSAGE_QUEUE_SASL_PASSWORD);
+    load_env_var(config_keys::MESSAGE_QUEUE_SSL_CA_LOCATION);
+    load_env_var(config_keys::MESSAGE_QUEUE_SSL_CERTIFICATE_LOCATION);
+    load_env_var(config_keys::MESSAGE_QUEUE_SSL_KEY_LOCATION);
+    load_env_var(config_keys::MESSAGE_QUEUE_CONSUMER_GROUP);
+    load_env_var(config_keys::MESSAGE_QUEUE_AUTO_OFFSET_RESET);
+
+    // Regulatory data sources
+    load_env_var(config_keys::SEC_EDGAR_API_KEY);
+    load_env_var(config_keys::SEC_EDGAR_BASE_URL);
+    load_env_var(config_keys::SEC_EDGAR_RATE_LIMIT_REQUESTS_PER_SECOND);
+    load_env_var(config_keys::FCA_API_KEY);
+    load_env_var(config_keys::FCA_BASE_URL);
+    load_env_var(config_keys::FCA_RATE_LIMIT_REQUESTS_PER_MINUTE);
+    load_env_var(config_keys::ECB_FEED_URL);
+    load_env_var(config_keys::ECB_UPDATE_INTERVAL_MINUTES);
+    load_env_var(config_keys::CUSTOM_REGULATORY_FEEDS);
+
+    // External system integrations
+    load_env_var(config_keys::ERP_SYSTEM_TYPE);
+    load_env_var(config_keys::ERP_SYSTEM_HOST);
+    load_env_var(config_keys::ERP_SYSTEM_PORT);
+    load_env_var(config_keys::ERP_SYSTEM_API_KEY);
+    load_env_var(config_keys::ERP_SYSTEM_USERNAME);
+    load_env_var(config_keys::ERP_SYSTEM_PASSWORD);
+    load_env_var(config_keys::ERP_SYSTEM_TIMEOUT_MS);
+
+    load_env_var(config_keys::DOCUMENT_SYSTEM_TYPE);
+    load_env_var(config_keys::DOCUMENT_SYSTEM_BASE_URL);
+    load_env_var(config_keys::DOCUMENT_SYSTEM_CLIENT_ID);
+    load_env_var(config_keys::DOCUMENT_SYSTEM_CLIENT_SECRET);
+    load_env_var(config_keys::DOCUMENT_SYSTEM_TENANT_ID);
+
+    load_env_var(config_keys::SIEM_SYSTEM_TYPE);
+    load_env_var(config_keys::SIEM_SYSTEM_HOST);
+    load_env_var(config_keys::SIEM_SYSTEM_PORT);
+    load_env_var(config_keys::SIEM_SYSTEM_TOKEN);
+    load_env_var(config_keys::SIEM_SYSTEM_INDEX);
+
+    // AI/ML configuration
+    load_env_var(config_keys::COMPLIANCE_MODEL_ENDPOINT);
+    load_env_var(config_keys::REGULATORY_MODEL_ENDPOINT);
+    load_env_var(config_keys::AUDIT_MODEL_ENDPOINT);
+    load_env_var(config_keys::VECTOR_DB_TYPE);
+    load_env_var(config_keys::VECTOR_DB_HOST);
+    load_env_var(config_keys::VECTOR_DB_PORT);
+    load_env_var(config_keys::VECTOR_DB_API_KEY);
+    load_env_var(config_keys::EMBEDDING_MODEL_TYPE);
+    load_env_var(config_keys::EMBEDDING_MODEL_NAME);
+    load_env_var(config_keys::EMBEDDING_DIMENSION);
+
+    // Security configuration
+    load_env_var(config_keys::ENCRYPTION_MASTER_KEY);
+    load_env_var(config_keys::DATA_ENCRYPTION_KEY);
+    load_env_var(config_keys::JWT_SECRET_KEY);
+
+    // Agent capability controls
+    load_env_var(config_keys::AGENT_ENABLE_WEB_SEARCH);
+    load_env_var(config_keys::AGENT_ENABLE_MCP_TOOLS);
+    load_env_var(config_keys::AGENT_ENABLE_ADVANCED_DISCOVERY);
+    load_env_var(config_keys::AGENT_ENABLE_AUTONOMOUS_INTEGRATION);
+    load_env_var(config_keys::AGENT_MAX_AUTONOMOUS_TOOLS);
+    load_env_var(config_keys::AGENT_ALLOWED_TOOL_CATEGORIES);
+    load_env_var(config_keys::AGENT_BLOCKED_TOOL_DOMAINS);
+
+    // LLM Configuration
+    load_env_var(config_keys::LLM_OPENAI_API_KEY);
+    load_env_var(config_keys::LLM_OPENAI_BASE_URL);
+    load_env_var(config_keys::LLM_OPENAI_MODEL);
+    load_env_var(config_keys::LLM_ANTHROPIC_API_KEY);
+    load_env_var(config_keys::LLM_ANTHROPIC_BASE_URL);
+    load_env_var(config_keys::LLM_ANTHROPIC_MODEL);
+
+    // SMTP configuration
+    load_env_var(config_keys::SMTP_HOST);
+    load_env_var(config_keys::SMTP_PORT);
+    load_env_var(config_keys::SMTP_USER);
+    load_env_var(config_keys::SMTP_PASSWORD);
+    load_env_var(config_keys::SMTP_FROM_EMAIL);
+
+    // System configuration
+    load_env_var(config_keys::ENVIRONMENT);
+    load_env_var(config_keys::VERSION);
+    load_env_var(config_keys::INSTANCE_ID);
+    load_env_var(config_keys::DATACENTER);
+
+    return true;
+}
+
+
+bool ConfigurationManager::load_from_config_file(const std::filesystem::path& /*config_path*/) {
+    // Configuration is loaded from environment variables as per Rule 3 (cloud deployable)
+    // Config file loading is not implemented as environment variables provide better
+    // cloud deployment flexibility and security
+    return true;
+}
+
+bool ConfigurationManager::parse_command_line(int /*argc*/, char* /*argv*/[]) {
+    // Configuration is loaded from environment variables as per Rule 3 (cloud deployable)
+    // Command line argument parsing is not implemented as environment variables provide
+    // better container orchestration and cloud deployment flexibility
+    return true;
+}
+
+void ConfigurationManager::set_defaults() {
+    // Set defaults for database configuration
+    if (config_values_.find(config_keys::DB_HOST) == config_values_.end()) {
+        config_values_[config_keys::DB_HOST] = "localhost";
+    }
+    if (config_values_.find(config_keys::DB_PORT) == config_values_.end()) {
+        config_values_[config_keys::DB_PORT] = "5432";
+    }
+    if (config_values_.find(config_keys::DB_NAME) == config_values_.end()) {
+        config_values_[config_keys::DB_NAME] = "regulens_compliance";
+    }
+    if (config_values_.find(config_keys::DB_USER) == config_values_.end()) {
+        config_values_[config_keys::DB_USER] = "regulens_user";
+    }
+    if (config_values_.find(config_keys::DB_SSL_MODE) == config_values_.end()) {
+        config_values_[config_keys::DB_SSL_MODE] = "require";
+    }
+    if (config_values_.find(config_keys::DB_CONNECTION_POOL_SIZE) == config_values_.end()) {
+        config_values_[config_keys::DB_CONNECTION_POOL_SIZE] = "10";
+    }
+    if (config_values_.find(config_keys::DB_CONNECTION_TIMEOUT_MS) == config_values_.end()) {
+        config_values_[config_keys::DB_CONNECTION_TIMEOUT_MS] = "30000";
+    }
+    if (config_values_.find(config_keys::DB_MAX_RETRIES) == config_values_.end()) {
+        config_values_[config_keys::DB_MAX_RETRIES] = "3";
+    }
+
+    // Set defaults for vector database
+    if (config_values_.find(config_keys::VECTOR_DB_TYPE) == config_values_.end()) {
+        config_values_[config_keys::VECTOR_DB_TYPE] = "weaviate";
+    }
+    if (config_values_.find(config_keys::VECTOR_DB_HOST) == config_values_.end()) {
+        config_values_[config_keys::VECTOR_DB_HOST] = "localhost";
+    }
+    if (config_values_.find(config_keys::VECTOR_DB_PORT) == config_values_.end()) {
+        config_values_[config_keys::VECTOR_DB_PORT] = "8080";
+    }
+
+    // Set defaults for agent capability controls
+    if (config_values_.find(config_keys::AGENT_ENABLE_WEB_SEARCH) == config_values_.end()) {
+        config_values_[config_keys::AGENT_ENABLE_WEB_SEARCH] = "false";
+    }
+    if (config_values_.find(config_keys::AGENT_ENABLE_MCP_TOOLS) == config_values_.end()) {
+        config_values_[config_keys::AGENT_ENABLE_MCP_TOOLS] = "false";
+    }
+    if (config_values_.find(config_keys::AGENT_ENABLE_ADVANCED_DISCOVERY) == config_values_.end()) {
+        config_values_[config_keys::AGENT_ENABLE_ADVANCED_DISCOVERY] = "false";
+    }
+    if (config_values_.find(config_keys::AGENT_ENABLE_AUTONOMOUS_INTEGRATION) == config_values_.end()) {
+        config_values_[config_keys::AGENT_ENABLE_AUTONOMOUS_INTEGRATION] = "false";
+    }
+    if (config_values_.find(config_keys::AGENT_MAX_AUTONOMOUS_TOOLS) == config_values_.end()) {
+        config_values_[config_keys::AGENT_MAX_AUTONOMOUS_TOOLS] = "10";
+    }
+
+    // Set defaults for SMTP configuration
+    if (config_values_.find(config_keys::SMTP_HOST) == config_values_.end()) {
+        config_values_[config_keys::SMTP_HOST] = "smtp.gmail.com";
+    }
+    if (config_values_.find(config_keys::SMTP_PORT) == config_values_.end()) {
+        config_values_[config_keys::SMTP_PORT] = "587";
+    }
+    if (config_values_.find(config_keys::SMTP_FROM_EMAIL) == config_values_.end()) {
+        config_values_[config_keys::SMTP_FROM_EMAIL] = "regulens@gaigentic.ai";
+    }
+}
+
+DatabaseConfig ConfigurationManager::get_database_config() const {
+    DatabaseConfig config;
+
+    // Load values from configuration, with fallbacks to defaults
+    config.host = get_string(config_keys::DB_HOST).value_or("localhost");
+    config.port = get_int(config_keys::DB_PORT).value_or(5432);
+    config.database = get_string(config_keys::DB_NAME).value_or("regulens_compliance");
+    config.user = get_string(config_keys::DB_USER).value_or("regulens_user");
+    config.password = get_string(config_keys::DB_PASSWORD).value_or("");
+    config.ssl_mode = get_string(config_keys::DB_SSL_MODE).value_or("require") == "require";
+    config.max_connections = get_int(config_keys::DB_CONNECTION_POOL_SIZE).value_or(10);
+    config.connection_timeout = get_int(config_keys::DB_CONNECTION_TIMEOUT_MS).value_or(30000) / 1000; // Convert ms to seconds
+    config.max_retries = get_int(config_keys::DB_MAX_RETRIES).value_or(3);
+
+    return config;
+}
+
+SMTPConfig ConfigurationManager::get_smtp_config() const {
+    SMTPConfig config;
+
+    // Load values from configuration, with fallbacks to defaults
+    config.host = get_string(config_keys::SMTP_HOST).value_or("smtp.gmail.com");
+    config.port = get_int(config_keys::SMTP_PORT).value_or(587);
+    config.user = get_string(config_keys::SMTP_USER).value_or("regulens@gaigentic.ai");
+    config.password = get_string(config_keys::SMTP_PASSWORD).value_or("");
+    config.from_email = get_string(config_keys::SMTP_FROM_EMAIL).value_or("regulens@gaigentic.ai");
+
+    return config;
+}
+
+AgentCapabilityConfig ConfigurationManager::get_agent_capability_config() const {
+    AgentCapabilityConfig config;
+
+    // Load boolean values from configuration
+    config.enable_web_search = get_bool(config_keys::AGENT_ENABLE_WEB_SEARCH).value_or(false);
+    config.enable_mcp_tools = get_bool(config_keys::AGENT_ENABLE_MCP_TOOLS).value_or(false);
+    config.enable_advanced_discovery = get_bool(config_keys::AGENT_ENABLE_ADVANCED_DISCOVERY).value_or(false);
+    config.enable_autonomous_integration = get_bool(config_keys::AGENT_ENABLE_AUTONOMOUS_INTEGRATION).value_or(false);
+    config.max_autonomous_tools_per_session = get_int(config_keys::AGENT_MAX_AUTONOMOUS_TOOLS).value_or(10);
+
+    // Load comma-separated lists
+    auto categories_str = get_string(config_keys::AGENT_ALLOWED_TOOL_CATEGORIES);
+    if (categories_str) {
+        // Simple comma-separated parsing (production would use more robust parsing)
+        std::stringstream ss(*categories_str);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            if (!item.empty()) {
+                config.allowed_tool_categories.push_back(item);
+            }
+        }
+    }
+
+    auto domains_str = get_string(config_keys::AGENT_BLOCKED_TOOL_DOMAINS);
+    if (domains_str) {
+        std::stringstream ss(*domains_str);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            if (!item.empty()) {
+                config.blocked_tool_domains.push_back(item);
+            }
+        }
+    }
+
+    return config;
+}
+
+std::unordered_map<std::string, std::string> ConfigurationManager::get_openai_config() const {
+    std::unordered_map<std::string, std::string> config;
+
+    if (auto api_key = get_string(config_keys::LLM_OPENAI_API_KEY)) {
+        config["api_key"] = *api_key;
+    }
+    if (auto base_url = get_string(config_keys::LLM_OPENAI_BASE_URL)) {
+        config["base_url"] = *base_url;
+    }
+    if (auto model = get_string(config_keys::LLM_OPENAI_MODEL)) {
+        config["model"] = *model;
+    }
+
+    return config;
+}
+
+std::unordered_map<std::string, std::string> ConfigurationManager::get_anthropic_config() const {
+    std::unordered_map<std::string, std::string> config;
+
+    if (auto api_key = get_string(config_keys::LLM_ANTHROPIC_API_KEY)) {
+        config["api_key"] = *api_key;
+    }
+    if (auto base_url = get_string(config_keys::LLM_ANTHROPIC_BASE_URL)) {
+        config["base_url"] = *base_url;
+    }
+    if (auto model = get_string(config_keys::LLM_ANTHROPIC_MODEL)) {
+        config["model"] = *model;
+    }
+
+    return config;
+}
+}
+

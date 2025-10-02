@@ -1,6 +1,7 @@
 ---
 alwaysApply: true
 ---
+0. WE DO THINGS RIGHT THE FIRST TIME. WE ARE IN NO HURRY, WE ARE BUILDING A PRODUCTION PRODUCT NOT A DEMO PRODUCT, TAKE YOUR TIME AND DO THINGS RIGHT!!
 1. No stubbs - which means you code will have no placeholder code, no fake code, no dummy code,no simplied,no simple,no mock,no in production, no hardcoded values, no simulate. The code must be production grade and as advanced as technologically possible.
 2. Code you write must be modular, which means in the future if we need to extended to add features, it must be easy to add without breaking existing functionality.
 3. Even though we are testing this in a local system, this whole product must be deployable on the cloud as well. So whereever you are using localhost now, should be tackled in a way that we can deploy on client's on-prem infra or cloud server like AWS, GCP, AZure or any other cloud provider.
@@ -9,3 +10,4 @@ alwaysApply: true
 6. After every feature is developed, you will 100% ensure that there is way to test that feature via a proper UI component.
 7. UNDER NO CIRCUMSTANCE WILL YOU CREATE A MAKE SHIFT OR WORKAROUND OR SIMPLIED VERSION OF ANY CODE JUST TO PASS TESTS OR MAKE THINGS WORK. THINGS MUST BE PRODUCTION GRADE.
 8. Please do not name anything with phase references like "Phase1_api.py" or UI names which includes the word "Phase". Use proper feature names instead. Do not use "Task1" or "Task2" or task as names in code or UI. It should have the actual feature name.
+9. When you start the build something, you will take into account what is already built and what this new development does to the old development and if they need changes as well to accomodate the new development.

@@ -195,7 +195,7 @@ jobs:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `REGULENS_ENVIRONMENT` | Deployment environment | `development` |
-| `DATABASE_HOST` | PostgreSQL host | `localhost` |
+| `DB_HOST` | PostgreSQL host | `localhost` |
 | `MESSAGE_QUEUE_TYPE` | Event streaming platform | `kafka` |
 | `VECTOR_DB_TYPE` | Vector database for knowledge | `weaviate` |
 | `ENCRYPTION_MASTER_KEY` | Data encryption key | *required in production* |

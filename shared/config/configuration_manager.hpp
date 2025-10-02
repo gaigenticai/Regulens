@@ -5,12 +5,19 @@
 #include <memory>
 #include <filesystem>
 #include <optional>
-#include "nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
+
+// Include for configuration struct definitions
+#include "config_types.hpp"
 
 namespace regulens {
 
 // Forward declarations
 class Logger;
+
+// Forward declarations for configuration structs
+struct DatabaseConfig;
+struct SMTPConfig;
 
 /**
  * @brief Configuration validation result
@@ -50,18 +57,23 @@ public:
     ConfigurationManager& operator=(ConfigurationManager&&) = delete;
 
     /**
+     * @brief Constructor with default initialization
+     */
+    ConfigurationManager();
+
+    /**
      * @brief Load configuration from command line and environment
      * @param argc Command line argument count
      * @param argv Command line arguments
      * @return true if configuration loaded successfully
      */
-    bool load_configuration(int argc, char* argv[]);
+    bool initialize(int argc, char* argv[]);
 
     /**
      * @brief Validate current configuration
-     * @return ValidationResult indicating success/failure with details
+     * @return true if configuration is valid
      */
-    ValidationResult validate_configuration() const;
+    bool validate_configuration() const;
 
     /**
      * @brief Get configuration value as string
@@ -109,11 +121,41 @@ public:
      */
     bool reload();
 
+    /**
+     * @brief Create database configuration from loaded settings
+     * @return DatabaseConfig struct populated with configuration values
+     */
+    DatabaseConfig get_database_config() const;
+
+    /**
+     * @brief Create SMTP configuration from loaded settings
+     * @return SMTPConfig struct populated with configuration values
+     */
+    SMTPConfig get_smtp_config() const;
+
+    /**
+     * @brief Get agent capability configuration
+     * @return AgentCapabilityConfig struct with agent settings
+     */
+    AgentCapabilityConfig get_agent_capability_config() const;
+
+    /**
+     * @brief Get LLM configuration for OpenAI
+     * @return map of OpenAI LLM configuration
+     */
+    std::unordered_map<std::string, std::string> get_openai_config() const;
+
+    /**
+     * @brief Get LLM configuration for Anthropic
+     * @return map of Anthropic LLM configuration
+     */
+    std::unordered_map<std::string, std::string> get_anthropic_config() const;
+
 private:
-    ConfigurationManager() = default;
     ~ConfigurationManager() = default;
 
     bool load_from_environment();
+    void load_env_var(const char* env_var_name);
     bool load_from_config_file(const std::filesystem::path& config_path);
     bool parse_command_line(int argc, char* argv[]);
     void set_defaults();
@@ -138,15 +180,15 @@ inline constexpr const char* INSTANCE_ID = "REGULENS_INSTANCE_ID";
 inline constexpr const char* DATACENTER = "REGULENS_DATACENTER";
 
 // Database configuration
-inline constexpr const char* DATABASE_HOST = "DATABASE_HOST";
-inline constexpr const char* DATABASE_PORT = "DATABASE_PORT";
-inline constexpr const char* DATABASE_NAME = "DATABASE_NAME";
-inline constexpr const char* DATABASE_USER = "DATABASE_USER";
-inline constexpr const char* DATABASE_PASSWORD = "DATABASE_PASSWORD";
-inline constexpr const char* DATABASE_SSL_MODE = "DATABASE_SSL_MODE";
-inline constexpr const char* DATABASE_CONNECTION_POOL_SIZE = "DATABASE_CONNECTION_POOL_SIZE";
-inline constexpr const char* DATABASE_CONNECTION_TIMEOUT_MS = "DATABASE_CONNECTION_TIMEOUT_MS";
-inline constexpr const char* DATABASE_MAX_RETRIES = "DATABASE_MAX_RETRIES";
+inline constexpr const char* DB_HOST = "DB_HOST";
+inline constexpr const char* DB_PORT = "DB_PORT";
+inline constexpr const char* DB_NAME = "DB_NAME";
+inline constexpr const char* DB_USER = "DB_USER";
+inline constexpr const char* DB_PASSWORD = "DB_PASSWORD";
+inline constexpr const char* DB_SSL_MODE = "DB_SSL_MODE";
+inline constexpr const char* DB_CONNECTION_POOL_SIZE = "DB_CONNECTION_POOL_SIZE";
+inline constexpr const char* DB_CONNECTION_TIMEOUT_MS = "DB_CONNECTION_TIMEOUT_MS";
+inline constexpr const char* DB_MAX_RETRIES = "DB_MAX_RETRIES";
 
 // Message queue configuration
 inline constexpr const char* MESSAGE_QUEUE_TYPE = "MESSAGE_QUEUE_TYPE";
@@ -213,6 +255,31 @@ inline constexpr const char* EMBEDDING_DIMENSION = "EMBEDDING_DIMENSION";
 // Security configuration
 inline constexpr const char* ENCRYPTION_MASTER_KEY = "ENCRYPTION_MASTER_KEY";
 inline constexpr const char* DATA_ENCRYPTION_KEY = "DATA_ENCRYPTION_KEY";
+
+// SMTP configuration
+// Agent capability controls
+inline constexpr const char* AGENT_ENABLE_WEB_SEARCH = "AGENT_ENABLE_WEB_SEARCH";
+inline constexpr const char* AGENT_ENABLE_MCP_TOOLS = "AGENT_ENABLE_MCP_TOOLS";
+inline constexpr const char* AGENT_ENABLE_ADVANCED_DISCOVERY = "AGENT_ENABLE_ADVANCED_DISCOVERY";
+inline constexpr const char* AGENT_ENABLE_AUTONOMOUS_INTEGRATION = "AGENT_ENABLE_AUTONOMOUS_INTEGRATION";
+inline constexpr const char* AGENT_MAX_AUTONOMOUS_TOOLS = "AGENT_MAX_AUTONOMOUS_TOOLS";
+inline constexpr const char* AGENT_ALLOWED_TOOL_CATEGORIES = "AGENT_ALLOWED_TOOL_CATEGORIES";
+inline constexpr const char* AGENT_BLOCKED_TOOL_DOMAINS = "AGENT_BLOCKED_TOOL_DOMAINS";
+
+// LLM Configuration
+inline constexpr const char* LLM_OPENAI_API_KEY = "LLM_OPENAI_API_KEY";
+inline constexpr const char* LLM_OPENAI_BASE_URL = "LLM_OPENAI_BASE_URL";
+inline constexpr const char* LLM_OPENAI_MODEL = "LLM_OPENAI_MODEL";
+inline constexpr const char* LLM_ANTHROPIC_API_KEY = "LLM_ANTHROPIC_API_KEY";
+inline constexpr const char* LLM_ANTHROPIC_BASE_URL = "LLM_ANTHROPIC_BASE_URL";
+inline constexpr const char* LLM_ANTHROPIC_MODEL = "LLM_ANTHROPIC_MODEL";
+
+// SMTP configuration
+inline constexpr const char* SMTP_HOST = "SMTP_HOST";
+inline constexpr const char* SMTP_PORT = "SMTP_PORT";
+inline constexpr const char* SMTP_USER = "SMTP_USER";
+inline constexpr const char* SMTP_PASSWORD = "SMTP_PASSWORD";
+inline constexpr const char* SMTP_FROM_EMAIL = "SMTP_FROM_EMAIL";
 
 inline constexpr const char* JWT_SECRET_KEY = "JWT_SECRET_KEY";
 }

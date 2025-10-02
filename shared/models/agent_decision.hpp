@@ -4,7 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <chrono>
-#include "nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 
 namespace regulens {
 
@@ -31,6 +31,51 @@ enum class ConfidenceLevel {
     HIGH,
     VERY_HIGH
 };
+
+/**
+ * @brief Action priority levels
+ */
+enum class Priority {
+    LOW,
+    NORMAL,
+    HIGH,
+    CRITICAL
+};
+
+// Helper functions declared after enums for use in class methods
+inline std::string decision_type_to_string(DecisionType type) {
+    switch (type) {
+        case DecisionType::APPROVE: return "APPROVE";
+        case DecisionType::DENY: return "DENY";
+        case DecisionType::ESCALATE: return "ESCALATE";
+        case DecisionType::MONITOR: return "MONITOR";
+        case DecisionType::INVESTIGATE: return "INVESTIGATE";
+        case DecisionType::REPORT: return "REPORT";
+        case DecisionType::ALERT: return "ALERT";
+        case DecisionType::NO_ACTION: return "NO_ACTION";
+        default: return "UNKNOWN";
+    }
+}
+
+inline std::string confidence_to_string(ConfidenceLevel level) {
+    switch (level) {
+        case ConfidenceLevel::LOW: return "LOW";
+        case ConfidenceLevel::MEDIUM: return "MEDIUM";
+        case ConfidenceLevel::HIGH: return "HIGH";
+        case ConfidenceLevel::VERY_HIGH: return "VERY_HIGH";
+        default: return "UNKNOWN";
+    }
+}
+
+inline std::string priority_to_string(Priority priority) {
+    switch (priority) {
+        case Priority::LOW: return "LOW";
+        case Priority::NORMAL: return "NORMAL";
+        case Priority::HIGH: return "HIGH";
+        case Priority::CRITICAL: return "CRITICAL";
+        default: return "UNKNOWN";
+    }
+}
 
 /**
  * @brief Decision reasoning component
@@ -110,8 +155,8 @@ public:
                  std::string agent_id, std::string event_id)
         : decision_type_(type), confidence_(confidence),
           agent_id_(std::move(agent_id)), event_id_(std::move(event_id)),
-          timestamp_(std::chrono::system_clock::now()),
-          decision_id_(generate_decision_id()) {}
+          decision_id_(generate_decision_id()),
+          timestamp_(std::chrono::system_clock::now()) {}
 
     // Getters
     DecisionType get_type() const { return decision_type_; }
@@ -276,29 +321,5 @@ private:
     std::optional<RiskAssessment> risk_assessment_;
 };
 
-// Helper functions
-inline std::string decision_type_to_string(DecisionType type) {
-    switch (type) {
-        case DecisionType::APPROVE: return "APPROVE";
-        case DecisionType::DENY: return "DENY";
-        case DecisionType::ESCALATE: return "ESCALATE";
-        case DecisionType::MONITOR: return "MONITOR";
-        case DecisionType::INVESTIGATE: return "INVESTIGATE";
-        case DecisionType::REPORT: return "REPORT";
-        case DecisionType::ALERT: return "ALERT";
-        case DecisionType::NO_ACTION: return "NO_ACTION";
-        default: return "UNKNOWN";
-    }
-}
-
-inline std::string confidence_to_string(ConfidenceLevel level) {
-    switch (level) {
-        case ConfidenceLevel::LOW: return "LOW";
-        case ConfidenceLevel::MEDIUM: return "MEDIUM";
-        case ConfidenceLevel::HIGH: return "HIGH";
-        case ConfidenceLevel::VERY_HIGH: return "VERY_HIGH";
-        default: return "UNKNOWN";
-    }
-}
 
 } // namespace regulens

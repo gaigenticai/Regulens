@@ -63,7 +63,7 @@ void EventProcessor::processing_thread() {
         static size_t last_size = 0;
         size_t current_size = event_queue_.size();
         if (current_size != last_size && current_size % 10 == 0) {
-            logger_->info("Event queue size: {}", current_size);
+            logger_->info("Event queue size: {}", std::to_string(current_size));
             last_size = current_size;
         }
     }

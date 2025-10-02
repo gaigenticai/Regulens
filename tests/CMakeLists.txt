@@ -3,12 +3,24 @@
 # Find Google Test (optional)
 find_package(GTest QUIET)
 
-if(GTest_FOUND)
-    add_executable(regulens_tests
-        # TODO: Add test files here
-        test_main.cpp
-    )
+# Always include test infrastructure
+add_executable(regulens_tests
+    test_main.cpp
+    infrastructure/test_framework.cpp
+    infrastructure/test_environment.cpp
+    example_tests.cpp
+    advanced_agent_tests.cpp
+    advanced_agent_test_runner.cpp
+    # Add more test files here as they are created
+)
 
+target_include_directories(regulens_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/infrastructure
+)
+
+if(GTest_FOUND)
     target_link_libraries(regulens_tests
         PRIVATE
             regulens_core
@@ -21,9 +33,13 @@ if(GTest_FOUND)
     include(GoogleTest)
     gtest_discover_tests(regulens_tests)
 else()
-    # Create a dummy test target if GTest is not available
-    add_executable(regulens_tests test_main.cpp)
+    # Define NO_GTEST when Google Test is not available
     target_compile_definitions(regulens_tests PRIVATE NO_GTEST)
+    target_link_libraries(regulens_tests
+        PRIVATE
+            regulens_core
+            regulens_shared
+    )
 endif()
 
 # Create test_main.cpp if it doesn't exist
@@ -47,4 +63,20 @@ int main(int argc, char **argv) {
 ")
 endif()
 
+# Advanced Agent Test Runner (standalone executable)
+add_executable(regulens_advanced_tests
+    advanced_agent_tests.cpp
+    advanced_agent_test_runner.cpp
+)
 
+target_include_directories(regulens_advanced_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/infrastructure
+)
+
+target_link_libraries(regulens_advanced_tests
+    PRIVATE
+        regulens_core
+        regulens_shared
+)

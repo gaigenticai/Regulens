@@ -1631,3 +1631,113 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+-- =============================================================================
+-- NEW FEATURES TABLES (Added for Circuit Breaker, Redis, Kubernetes, Monitoring)
+-- =============================================================================
+
+-- Circuit Breaker Metrics and State Tracking
+CREATE TABLE IF NOT EXISTS circuit_breaker_states (
+    state_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    service_name VARCHAR(100) NOT NULL,
+    current_state VARCHAR(20) NOT NULL CHECK (current_state IN ('CLOSED', 'OPEN', 'HALF_OPEN')),
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    consecutive_successes INTEGER NOT NULL DEFAULT 0,
+    last_failure_time TIMESTAMP WITH TIME ZONE,
+    last_success_time TIMESTAMP WITH TIME ZONE,
+    state_change_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    failure_threshold INTEGER NOT NULL,
+    recovery_timeout_seconds INTEGER NOT NULL,
+    monitoring_enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(service_name)
+);
+
+-- Circuit Breaker Events and Transitions
+CREATE TABLE IF NOT EXISTS circuit_breaker_events (
+    event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    service_name VARCHAR(100) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    from_state VARCHAR(20),
+    to_state VARCHAR(20),
+    failure_count INTEGER,
+    success_count INTEGER,
+    error_message TEXT,
+    request_duration_ms INTEGER,
+    metadata JSONB,
+    event_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Redis Cache Operations and Metrics
+CREATE TABLE IF NOT EXISTS redis_cache_operations (
+    operation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cache_type VARCHAR(50) NOT NULL,
+    operation VARCHAR(20) NOT NULL CHECK (operation IN ('GET', 'SET', 'DELETE', 'EXISTS')),
+    key_hash VARCHAR(128) NOT NULL,
+    success BOOLEAN NOT NULL,
+    response_time_ms INTEGER NOT NULL,
+    hit BOOLEAN,
+    ttl_seconds INTEGER,
+    data_size_bytes INTEGER,
+    error_message TEXT,
+    operation_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Health Check Results and Metrics
+CREATE TABLE IF NOT EXISTS health_check_results (
+    result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    check_name VARCHAR(100) NOT NULL,
+    check_type VARCHAR(20) NOT NULL CHECK (check_type IN ('READINESS', 'LIVENESS', 'STARTUP')),
+    healthy BOOLEAN NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    message TEXT,
+    response_time_ms INTEGER,
+    details JSONB,
+    check_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Kubernetes Operator Events and Actions
+CREATE TABLE IF NOT EXISTS kubernetes_operator_events (
+    event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    operator_name VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(50) NOT NULL,
+    resource_name VARCHAR(255) NOT NULL,
+    namespace VARCHAR(100) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    reason VARCHAR(100),
+    message TEXT,
+    involved_object JSONB,
+    metadata JSONB,
+    event_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Alert History and Resolution Tracking
+CREATE TABLE IF NOT EXISTS alert_history (
+    alert_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    alert_name VARCHAR(255) NOT NULL,
+    severity VARCHAR(20) NOT NULL CHECK (severity IN ('critical', 'warning', 'info')),
+    status VARCHAR(20) NOT NULL DEFAULT 'firing' CHECK (status IN ('firing', 'resolved', 'acknowledged')),
+    description TEXT,
+    summary TEXT,
+    labels JSONB,
+    annotations JSONB,
+    starts_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    ends_at TIMESTAMP WITH TIME ZONE,
+    resolved_by VARCHAR(100),
+    resolution_notes TEXT,
+    false_positive BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_circuit_breaker_states_service ON circuit_breaker_states(service_name);
+CREATE INDEX IF NOT EXISTS idx_circuit_breaker_events_service ON circuit_breaker_events(service_name);
+CREATE INDEX IF NOT EXISTS idx_circuit_breaker_events_time ON circuit_breaker_events(event_time);
+CREATE INDEX IF NOT EXISTS idx_redis_operations_type_time ON redis_cache_operations(cache_type, operation_time);
+CREATE INDEX IF NOT EXISTS idx_k8s_operator_events_resource ON kubernetes_operator_events(resource_type, resource_name);
+CREATE INDEX IF NOT EXISTS idx_k8s_operator_events_time ON kubernetes_operator_events(event_time);
+CREATE INDEX IF NOT EXISTS idx_health_results_check_time ON health_check_results(check_name, check_time);
+CREATE INDEX IF NOT EXISTS idx_alert_history_status_time ON alert_history(status, starts_at);

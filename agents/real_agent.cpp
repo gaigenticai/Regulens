@@ -31,7 +31,10 @@ RealRegulatoryFetcher::RealRegulatoryFetcher(std::shared_ptr<HttpClient> http_cl
     ecb_circuit_breaker_ = create_circuit_breaker(
         config_manager, "ecb_api", logger.get(), error_handler.get());
 
-    logger_->info("Real regulatory fetcher initialized with circuit breaker protection");
+    // Initialize Redis client for regulatory data caching
+    redis_client_ = create_redis_client(config_manager, logger, error_handler);
+
+    logger_->info("Real regulatory fetcher initialized with circuit breaker protection and Redis caching");
 }
 
 RealRegulatoryFetcher::~RealRegulatoryFetcher() {
@@ -104,6 +107,35 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
     try {
         logger_->info("🌐 Connecting to SEC EDGAR...");
 
+        // Check Redis cache first for recent SEC data
+        if (redis_client_) {
+            std::string cache_key = "sec:recent_filings";
+            auto cached_result = redis_client_->get(cache_key);
+
+            if (cached_result.success && cached_result.value) {
+                try {
+                    auto cached_data = nlohmann::json::parse(*cached_result.value);
+                    if (cached_data.contains("updates") && cached_data.contains("timestamp")) {
+                        auto cache_time = std::chrono::system_clock::time_point(
+                            std::chrono::milliseconds(cached_data["timestamp"]));
+                        auto now = std::chrono::system_clock::now();
+                        auto age = now - cache_time;
+
+                        // Use cache if less than 5 minutes old
+                        if (age < std::chrono::minutes(5)) {
+                            updates = cached_data["updates"];
+                            logger_->info("✅ SEC data served from cache ({} updates)",
+                                         updates.size());
+                            return updates;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    logger_->warn("Failed to parse cached SEC data, proceeding with API call",
+                                 {{"error", e.what()}});
+                }
+            }
+        }
+
         // Use circuit breaker for SEC EDGAR API calls
         auto breaker_result = sec_circuit_breaker_->execute(
             [this]() -> CircuitBreakerResult {
@@ -136,6 +168,30 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
                 }
             }
 
+            // Cache the SEC data for future use
+            if (redis_client_ && !updates.empty()) {
+                try {
+                    nlohmann::json cache_data = {
+                        {"updates", updates},
+                        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count()},
+                        {"source", "sec_edgar"}
+                    };
+
+                    auto cache_result = redis_client_->set("sec:recent_filings",
+                                                         cache_data.dump(),
+                                                         std::chrono::minutes(10)); // Cache for 10 minutes
+
+                    if (cache_result.success) {
+                        logger_->debug("SEC data cached successfully for {} updates", updates.size());
+                    } else {
+                        logger_->warn("Failed to cache SEC data: {}", cache_result.error_message);
+                    }
+                } catch (const std::exception& e) {
+                    logger_->warn("Exception during SEC data caching: {}", e.what());
+                }
+            }
+
         } else {
             logger_->warn("⚠️ SEC EDGAR circuit breaker is OPEN or failed - using cached data fallback");
             // Could implement cached data fallback here
@@ -153,6 +209,35 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
 
     try {
         logger_->info("🌐 Connecting to FCA website...");
+
+        // Check Redis cache first for recent FCA data
+        if (redis_client_) {
+            std::string cache_key = "fca:recent_news";
+            auto cached_result = redis_client_->get(cache_key);
+
+            if (cached_result.success && cached_result.value) {
+                try {
+                    auto cached_data = nlohmann::json::parse(*cached_result.value);
+                    if (cached_data.contains("updates") && cached_data.contains("timestamp")) {
+                        auto cache_time = std::chrono::system_clock::time_point(
+                            std::chrono::milliseconds(cached_data["timestamp"]));
+                        auto now = std::chrono::system_clock::now();
+                        auto age = now - cache_time;
+
+                        // Use cache if less than 5 minutes old
+                        if (age < std::chrono::minutes(5)) {
+                            updates = cached_data["updates"];
+                            logger_->info("✅ FCA data served from cache ({} updates)",
+                                         updates.size());
+                            return updates;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    logger_->warn("Failed to parse cached FCA data, proceeding with API call",
+                                 {{"error", e.what()}});
+                }
+            }
+        }
 
         // Use circuit breaker for FCA API calls
         auto breaker_result = fca_circuit_breaker_->execute(
@@ -186,6 +271,30 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
                 }
             }
 
+            // Cache the FCA data for future use
+            if (redis_client_ && !updates.empty()) {
+                try {
+                    nlohmann::json cache_data = {
+                        {"updates", updates},
+                        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count()},
+                        {"source", "fca"}
+                    };
+
+                    auto cache_result = redis_client_->set("fca:recent_news",
+                                                         cache_data.dump(),
+                                                         std::chrono::minutes(10)); // Cache for 10 minutes
+
+                    if (cache_result.success) {
+                        logger_->debug("FCA data cached successfully for {} updates", updates.size());
+                    } else {
+                        logger_->warn("Failed to cache FCA data: {}", cache_result.error_message);
+                    }
+                } catch (const std::exception& e) {
+                    logger_->warn("Exception during FCA data caching: {}", e.what());
+                }
+            }
+
         } else {
             logger_->warn("⚠️ FCA circuit breaker is OPEN or failed - using cached data fallback");
             // Could implement cached data fallback here
@@ -203,6 +312,35 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
 
     try {
         logger_->info("🌐 Connecting to ECB website...");
+
+        // Check Redis cache first for recent ECB data
+        if (redis_client_) {
+            std::string cache_key = "ecb:recent_press";
+            auto cached_result = redis_client_->get(cache_key);
+
+            if (cached_result.success && cached_result.value) {
+                try {
+                    auto cached_data = nlohmann::json::parse(*cached_result.value);
+                    if (cached_data.contains("updates") && cached_data.contains("timestamp")) {
+                        auto cache_time = std::chrono::system_clock::time_point(
+                            std::chrono::milliseconds(cached_data["timestamp"]));
+                        auto now = std::chrono::system_clock::now();
+                        auto age = now - cache_time;
+
+                        // Use cache if less than 5 minutes old
+                        if (age < std::chrono::minutes(5)) {
+                            updates = cached_data["updates"];
+                            logger_->info("✅ ECB data served from cache ({} updates)",
+                                         updates.size());
+                            return updates;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    logger_->warn("Failed to parse cached ECB data, proceeding with API call",
+                                 {{"error", e.what()}});
+                }
+            }
+        }
 
         // Use circuit breaker for ECB API calls
         auto breaker_result = ecb_circuit_breaker_->execute(
@@ -233,6 +371,30 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
                 if (is_new_content(update["hash"])) {
                     updates.push_back(update);
                     logger_->info("📄 Found new ECB regulatory announcement: {}", update["title"]);
+                }
+            }
+
+            // Cache the ECB data for future use
+            if (redis_client_ && !updates.empty()) {
+                try {
+                    nlohmann::json cache_data = {
+                        {"updates", updates},
+                        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count()},
+                        {"source", "ecb"}
+                    };
+
+                    auto cache_result = redis_client_->set("ecb:recent_press",
+                                                         cache_data.dump(),
+                                                         std::chrono::minutes(10)); // Cache for 10 minutes
+
+                    if (cache_result.success) {
+                        logger_->debug("ECB data cached successfully for {} updates", updates.size());
+                    } else {
+                        logger_->warn("Failed to cache ECB data: {}", cache_result.error_message);
+                    }
+                } catch (const std::exception& e) {
+                    logger_->warn("Exception during ECB data caching: {}", e.what());
                 }
             }
 

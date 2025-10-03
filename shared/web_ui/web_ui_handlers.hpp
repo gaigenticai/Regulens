@@ -29,6 +29,7 @@
 #include "../pattern_recognition.hpp"
 #include "../feedback_incorporation.hpp"
 #include "../error_handler.hpp"
+#include "health_handlers.hpp"
 #include "../llm/openai_client.hpp"
 #include "../llm/anthropic_client.hpp"
 #include "../risk_assessment.hpp"
@@ -254,6 +255,9 @@ private:
     // Database connection for testing
     std::shared_ptr<PostgreSQLConnection> db_connection_;
     std::shared_ptr<ConnectionPool> db_pool_;
+
+    // Health check handler for Kubernetes probes
+    std::shared_ptr<HealthCheckHandler> health_check_handler_;
 
     // HTML templates
     std::string generate_dashboard_html() const;

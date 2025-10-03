@@ -1,0 +1,27 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: regulens-crds
+  labels:
+    app.kubernetes.io/name: regulens
+    app.kubernetes.io/component: crds
+    app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - agent_orchestrator_crd.yaml
+  - compliance_agent_crd.yaml
+  - regulatory_data_source_crd.yaml
+
+commonLabels:
+  app.kubernetes.io/name: regulens
+  app.kubernetes.io/component: operator
+  app.kubernetes.io/managed-by: kustomize
+
+commonAnnotations:
+  config.kubernetes.io/function: |
+    objectSet:
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: operator

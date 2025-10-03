@@ -1,0 +1,184 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Regulens - Kubernetes Operators",
+    "tags": ["regulens", "kubernetes", "operators", "k8s"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Operator Health Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"regulens-operator\"}",
+            "legendFormat": "Operator Status"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Agent Orchestrator Resources",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(regulens_agent_orchestrator_info)",
+            "legendFormat": "Active Orchestrators"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Compliance Agents",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(regulens_compliance_agent_info)",
+            "legendFormat": "Active Agents"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Regulatory Data Sources",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(regulens_regulatory_data_source_info)",
+            "legendFormat": "Active Data Sources"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Agent Orchestrator Scaling Events",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_agent_orchestrator_scaling_events_total[5m])",
+            "legendFormat": "{{orchestrator}} Scaling Events/sec"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Compliance Agent Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_compliance_agent_decisions_total[5m])",
+            "legendFormat": "{{agent}} Decisions/sec"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Data Source Processing Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_data_source_documents_processed_total[5m])",
+            "legendFormat": "{{source}} Documents/sec"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Operator Reconciliation Duration",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(regulens_operator_reconciliation_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 Reconciliation Time"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(regulens_operator_reconciliation_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50 Reconciliation Time"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Resource Scaling Summary",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "regulens_resource_scaling_info",
+            "legendFormat": "{{resource_type}} {{resource_name}}"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Operator Event Processing",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_operator_events_processed_total[5m])",
+            "legendFormat": "{{resource_type}} Events/sec"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Kubernetes API Requests",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_k8s_api_requests_total[5m])",
+            "legendFormat": "{{operation}} {{resource}} API Requests/sec"
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Resource Health Status",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "regulens_resource_health_status",
+            "legendFormat": "{{resource_type}} {{resource_name}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "healthy": {
+                    "text": "HEALTHY",
+                    "color": "green"
+                  },
+                  "degraded": {
+                    "text": "DEGRADED",
+                    "color": "orange"
+                  },
+                  "unhealthy": {
+                    "text": "UNHEALTHY",
+                    "color": "red"
+                  }
+                },
+                "type": "value"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": []
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Regulens - Compliance Operations",
+    "tags": ["regulens", "compliance", "operations", "decisions"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Compliance Decision Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_compliance_decisions_total[5m])",
+            "legendFormat": "{{decision_type}} Decisions/sec"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Compliance Decision Accuracy",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "regulens_compliance_decision_accuracy",
+            "legendFormat": "{{decision_type}} Accuracy %"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Compliance Processing Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(regulens_compliance_processing_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{decision_type}} P95 Processing Time"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(regulens_compliance_processing_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{decision_type}} P50 Processing Time"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Compliance Risk Assessment",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "regulens_compliance_risk_score",
+            "legendFormat": "{{entity_type}} {{entity_id}} Risk Score"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Compliance Coverage by Jurisdiction",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "regulens_compliance_coverage_documents_total",
+            "legendFormat": "{{jurisdiction}}"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Regulatory Updates Processed",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_regulatory_updates_processed_total[5m])",
+            "legendFormat": "{{source}} Updates/sec"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Compliance Agent Performance",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "regulens_agent_performance",
+            "legendFormat": "{{agent_name}}"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Risk Assessment Distribution",
+        "type": "histogram",
+        "targets": [
+          {
+            "expr": "regulens_compliance_risk_score",
+            "legendFormat": "Risk Scores"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Compliance Decision Outcomes",
+        "type": "bargauge",
+        "targets": [
+          {
+            "expr": "regulens_compliance_decision_outcomes_total",
+            "legendFormat": "{{outcome}}"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Regulatory Compliance SLA",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "regulens_compliance_sla_met_percentage",
+            "legendFormat": "SLA Compliance %"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": [
+        {
+          "name": "decision_type",
+          "query": "label_values(regulens_compliance_decisions_total, decision_type)",
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

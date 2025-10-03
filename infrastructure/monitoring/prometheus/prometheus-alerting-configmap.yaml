@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: regulens-prometheus-alerting
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: alerting-rules
+    system: regulens
+data:
+  alerting-rules.yml: |
+    groups:
+      # System Health Alerts
+      - name: system_health
+        rules:
+          - alert: RegulensServiceDown
+            expr: up{job="regulens"} == 0
+            for: 5m
+            labels:
+              severity: critical
+              service: regulens
+            annotations:
+              summary: "Regulens service is down"
+              description: "Regulens service {{ $labels.instance }} has been down for more than 5 minutes."
+              runbook_url: "https://regulens.ai/runbooks/service-down"
+
+          - alert: RegulensHighErrorRate
+            expr: rate(http_requests_total{status=~"[5-9].*"}[5m]) / rate(http_requests_total[5m]) * 100 > 10
+            for: 5m
+            labels:
+              severity: warning
+              service: regulens
+            annotations:
+              summary: "High error rate detected"
+              description: "Error rate for {{ $labels.instance }} is {{ $value }}% (threshold: 10%)"
+              runbook_url: "https://regulens.ai/runbooks/high-error-rate"
+
+          - alert: RegulensHighMemoryUsage
+            expr: (1 - system_memory_available_bytes / system_memory_total_bytes) * 100 > 85
+            for: 5m
+            labels:
+              severity: warning
+              service: regulens
+            annotations:
+              summary: "High memory usage"
+              description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+              runbook_url: "https://regulens.ai/runbooks/high-memory"
+
+      # Circuit Breaker Alerts
+      - name: circuit_breaker_alerts
+        rules:
+          - alert: CircuitBreakerOpen
+            expr: regulens_circuit_breaker_state{state="OPEN"} == 1
+            for: 1m
+            labels:
+              severity: critical
+              component: circuit_breaker
+            annotations:
+              summary: "Circuit breaker is OPEN"
+              description: "Circuit breaker for {{ $labels.service }} is OPEN, blocking all requests"
+              runbook_url: "https://regulens.ai/runbooks/circuit-breaker-open"
+
+          - alert: CircuitBreakerHighFailureRate
+            expr: rate(regulens_circuit_breaker_failures_total[5m]) / rate(regulens_circuit_breaker_requests_total[5m]) * 100 > 20
+            for: 5m
+            labels:
+              severity: warning
+              component: circuit_breaker
+            annotations:
+              summary: "High circuit breaker failure rate"
+              description: "Failure rate for {{ $labels.service }} is {{ $value }}% (threshold: 20%)"
+              runbook_url: "https://regulens.ai/runbooks/high-circuit-failure-rate"
+
+      # LLM Performance Alerts
+      - name: llm_performance_alerts
+        rules:
+          - alert: LLMAPIUnavailable
+            expr: rate(regulens_llm_requests_total[5m]) == 0
+            for: 5m
+            labels:
+              severity: critical
+              component: llm
+            annotations:
+              summary: "LLM API unavailable"
+              description: "No LLM requests processed in the last 5 minutes for {{ $labels.provider }}"
+              runbook_url: "https://regulens.ai/runbooks/llm-api-unavailable"
+
+          - alert: LLMHighErrorRate
+            expr: rate(regulens_llm_errors_total[5m]) / rate(regulens_llm_requests_total[5m]) * 100 > 15
+            for: 5m
+            labels:
+              severity: warning
+              component: llm
+            annotations:
+              summary: "High LLM error rate"
+              description: "Error rate for {{ $labels.provider }} is {{ $value }}% (threshold: 15%)"
+              runbook_url: "https://regulens.ai/runbooks/high-llm-error-rate"
+
+          - alert: LLMHighCost
+            expr: rate(regulens_llm_estimated_cost_usd[5m]) > 100
+            for: 5m
+            labels:
+              severity: warning
+              component: llm
+            annotations:
+              summary: "High LLM API costs"
+              description: "LLM costs for {{ $labels.provider }} are ${{ $value }}/minute (threshold: $100/min)"
+              runbook_url: "https://regulens.ai/runbooks/high-llm-costs"
+
+      # Redis Cache Alerts
+      - name: redis_cache_alerts
+        rules:
+          - alert: RedisUnavailable
+            expr: up{job="redis"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: redis
+            annotations:
+              summary: "Redis is unavailable"
+              description: "Redis instance {{ $labels.instance }} is down"
+              runbook_url: "https://regulens.ai/runbooks/redis-unavailable"
+
+          - alert: RedisLowCacheHitRate
+            expr: regulens_redis_cache_hit_rate < 60
+            for: 10m
+            labels:
+              severity: warning
+              component: redis_cache
+            annotations:
+              summary: "Low Redis cache hit rate"
+              description: "Redis cache hit rate is {{ $value }}% (threshold: 60%)"
+              runbook_url: "https://regulens.ai/runbooks/low-redis-cache-hit-rate"
+
+      # Compliance Operation Alerts
+      - name: compliance_alerts
+        rules:
+          - alert: ComplianceDecisionFailure
+            expr: rate(regulens_compliance_decision_failures_total[5m]) / rate(regulens_compliance_decisions_total[5m]) * 100 > 10
+            for: 5m
+            labels:
+              severity: critical
+              component: compliance
+            annotations:
+              summary: "High compliance decision failure rate"
+              description: "Compliance decision failure rate is {{ $value }}% (threshold: 10%)"
+              runbook_url: "https://regulens.ai/runbooks/compliance-decision-failures"
+
+          - alert: ComplianceLowAccuracy
+            expr: regulens_compliance_decision_accuracy < 95
+            for: 10m
+            labels:
+              severity: warning
+              component: compliance
+            annotations:
+              summary: "Low compliance decision accuracy"
+              description: "Compliance decision accuracy is {{ $value }}% (threshold: 95%)"
+              runbook_url: "https://regulens.ai/runbooks/low-compliance-accuracy"
+
+      # Data Ingestion Alerts
+      - name: data_ingestion_alerts
+        rules:
+          - alert: DataIngestionFailure
+            expr: rate(regulens_ingestion_errors_total[5m]) / rate(regulens_ingestion_operations_total[5m]) * 100 > 15
+            for: 5m
+            labels:
+              severity: critical
+              component: data_ingestion
+            annotations:
+              summary: "Data ingestion failure"
+              description: "Data ingestion error rate for {{ $labels.source }} is {{ $value }}% (threshold: 15%)"
+              runbook_url: "https://regulens.ai/runbooks/data-ingestion-failure"
+
+      # Kubernetes Operator Alerts
+      - name: kubernetes_operator_alerts
+        rules:
+          - alert: KubernetesOperatorDown
+            expr: up{job="regulens-operator"} == 0
+            for: 5m
+            labels:
+              severity: critical
+              component: k8s_operator
+            annotations:
+              summary: "Kubernetes operator is down"
+              description: "Regulens Kubernetes operator has been down for more than 5 minutes"
+              runbook_url: "https://regulens.ai/runbooks/operator-down"

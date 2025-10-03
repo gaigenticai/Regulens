@@ -254,6 +254,84 @@ private:
 };
 
 /**
+ * @brief Redis cache metrics collector
+ */
+class RedisMetricsCollector {
+public:
+    RedisMetricsCollector(std::shared_ptr<StructuredLogger> logger);
+
+    /**
+     * @brief Record Redis operation
+     * @param operation_type Operation type (GET, SET, DEL, EXISTS, etc.)
+     * @param cache_type Cache type (llm, regulatory, session, temp, preferences)
+     * @param success Whether operation succeeded
+     * @param response_time_ms Operation time
+     * @param hit Whether cache hit (for GET operations)
+     */
+    void record_redis_operation(const std::string& operation_type, const std::string& cache_type,
+                              bool success, long response_time_ms, bool hit = false);
+
+    /**
+     * @brief Record Redis connection pool metrics
+     * @param total_connections Total connections in pool
+     * @param active_connections Currently active connections
+     * @param available_connections Available connections
+     */
+    void record_connection_pool_metrics(size_t total_connections, size_t active_connections,
+                                      size_t available_connections);
+
+    /**
+     * @brief Record cache eviction
+     * @param cache_type Type of cache
+     * @param evicted_count Number of entries evicted
+     */
+    void record_cache_eviction(const std::string& cache_type, size_t evicted_count);
+
+    /**
+     * @brief Record cache size metrics
+     * @param cache_type Type of cache
+     * @param entry_count Current number of entries
+     * @param memory_usage_bytes Memory usage in bytes
+     */
+    void record_cache_size(const std::string& cache_type, size_t entry_count, size_t memory_usage_bytes);
+
+    /**
+     * @brief Collect Redis metrics
+     * @return Vector of metric definitions
+     */
+    std::vector<MetricDefinition> collect_metrics();
+
+private:
+    std::shared_ptr<StructuredLogger> logger_;
+
+    // Operation metrics
+    std::atomic<size_t> redis_operations_total_{0};
+    std::atomic<size_t> redis_operations_successful_{0};
+    std::atomic<size_t> redis_cache_hits_{0};
+    std::atomic<size_t> redis_cache_misses_{0};
+    std::atomic<long> redis_avg_response_time_{0};
+
+    // Connection pool metrics
+    std::atomic<size_t> pool_total_connections_{0};
+    std::atomic<size_t> pool_active_connections_{0};
+    std::atomic<size_t> pool_available_connections_{0};
+
+    // Cache-specific metrics
+    std::atomic<size_t> llm_cache_operations_{0};
+    std::atomic<size_t> regulatory_cache_operations_{0};
+    std::atomic<size_t> session_cache_operations_{0};
+    std::atomic<size_t> temp_cache_operations_{0};
+    std::atomic<size_t> preferences_cache_operations_{0};
+
+    // Eviction metrics
+    std::atomic<size_t> cache_evictions_total_{0};
+
+    // Size metrics
+    std::atomic<size_t> current_cache_entries_{0};
+    std::atomic<size_t> current_memory_usage_{0};
+};
+
+/**
  * @brief System performance metrics collector
  */
 class SystemMetricsCollector {
@@ -372,6 +450,12 @@ public:
     ComplianceMetricsCollector& get_compliance_collector() { return *compliance_collector_; }
 
     /**
+     * @brief Get Redis metrics collector
+     * @return Reference to Redis collector
+     */
+    RedisMetricsCollector& get_redis_collector() { return *redis_collector_; }
+
+    /**
      * @brief Get system metrics collector
      * @return Reference to system collector
      */
@@ -397,6 +481,7 @@ private:
     std::unique_ptr<CircuitBreakerMetricsCollector> circuit_breaker_collector_;
     std::unique_ptr<LLMMetricsCollector> llm_collector_;
     std::unique_ptr<ComplianceMetricsCollector> compliance_collector_;
+    std::unique_ptr<RedisMetricsCollector> redis_collector_;
     std::unique_ptr<SystemMetricsCollector> system_collector_;
 
     std::atomic<bool> initialized_{false};

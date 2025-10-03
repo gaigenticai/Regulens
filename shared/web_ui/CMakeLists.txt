@@ -4,6 +4,7 @@ add_library(regulens_web_ui STATIC
     web_ui_server.cpp
     web_ui_handlers.cpp
     regulatory_monitor_ui.cpp
+    health_handlers.cpp
 )
 
 target_include_directories(regulens_web_ui

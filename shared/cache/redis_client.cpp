@@ -32,16 +32,18 @@ RedisConnectionWrapper::~RedisConnectionWrapper() {
 bool RedisConnectionWrapper::connect() {
     try {
         // In production, this would use hiredis or similar library:
-        // connection_ = redisConnectWithTimeout(config_.host.c_str(), config_.port,
-        //                                      config_.connect_timeout);
+        // PRODUCTION REQUIREMENT: Redis client must be properly integrated with hiredis library
+        // This implementation currently throws an error as Redis integration requires:
+        // 1. hiredis library installation and linking
+        // 2. Proper connection management
+        // 3. Error handling and reconnection logic
+        // 4. Connection pooling implementation
+        //
+        // For now, this is a placeholder that throws an error to prevent silent failures
 
-        // For this implementation, simulate connection establishment
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Simulate connection time
-
-        // Simulate connection success (in real implementation, check connection_ != nullptr)
-        bool connection_successful = true; // This would be: connection_ != nullptr && connection_->err == 0
-
-        if (connection_successful) {
+        throw std::runtime_error("Redis client requires proper hiredis integration. "
+                               "This is a production requirement and cannot use simulation code. "
+                               "Please integrate with hiredis library and implement real Redis connectivity.");
             update_activity();
 
             if (logger_) {
@@ -346,13 +348,19 @@ void RedisConnectionPool::cleanup_expired_connections() {
 
 RedisClient::RedisClient(std::shared_ptr<ConfigurationManager> config,
                         std::shared_ptr<StructuredLogger> logger,
-                        std::shared_ptr<ErrorHandler> error_handler)
+                        std::shared_ptr<ErrorHandler> error_handler,
+                        std::shared_ptr<PrometheusMetricsCollector> metrics_collector)
     : config_(config), logger_(logger), error_handler_(error_handler),
-      initialized_(false), total_commands_(0), successful_commands_(0),
-      failed_commands_(0), cache_hits_(0), cache_misses_(0), total_command_time_ms_(0) {}
+      metrics_collector_(metrics_collector), initialized_(false), total_commands_(0),
+      successful_commands_(0), failed_commands_(0), cache_hits_(0), cache_misses_(0),
+      total_command_time_ms_(0) {}
 
 RedisClient::~RedisClient() {
     shutdown();
+}
+
+void RedisClient::set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector) {
+    metrics_collector_ = metrics_collector;
 }
 
 bool RedisClient::initialize() {
@@ -417,7 +425,10 @@ bool RedisClient::is_healthy() const {
 void RedisClient::load_config() {
     if (!config_) return;
 
-    redis_config_.host = config_->get_string("REDIS_HOST").value_or("localhost");
+    redis_config_.host = config_->get_string("REDIS_HOST").value_or("");
+    if (redis_config_.host.empty()) {
+        throw std::runtime_error("REDIS_HOST environment variable must be configured for production deployment");
+    }
     redis_config_.port = static_cast<int>(config_->get_int("REDIS_PORT").value_or(6379));
     redis_config_.password = config_->get_string("REDIS_PASSWORD").value_or("");
     redis_config_.database = static_cast<int>(config_->get_int("REDIS_DATABASE").value_or(0));
@@ -451,9 +462,26 @@ void RedisClient::load_config() {
 }
 
 RedisResult RedisClient::get(const std::string& key) {
-    return execute_with_connection([key](std::shared_ptr<RedisConnectionWrapper> conn) {
+    auto result = execute_with_connection([key](std::shared_ptr<RedisConnectionWrapper> conn) {
         return conn->execute_command("GET", {key});
     });
+
+    // Record metrics
+    if (metrics_collector_) {
+        std::string cache_type = "unknown";
+        if (key.find("llm:") != std::string::npos) cache_type = "llm";
+        else if (key.find("regulatory:") != std::string::npos) cache_type = "regulatory";
+        else if (key.find("session:") != std::string::npos) cache_type = "session";
+        else if (key.find("temp:") != std::string::npos) cache_type = "temp";
+        else if (key.find("preferences:") != std::string::npos) cache_type = "preferences";
+
+        metrics_collector_->get_redis_collector().record_redis_operation(
+            "GET", cache_type, result.success,
+            std::chrono::duration_cast<std::chrono::milliseconds>(result.execution_time).count(),
+            result.success && result.value); // Hit if successful and has value
+    }
+
+    return result;
 }
 
 RedisResult RedisClient::set(const std::string& key, const std::string& value,
@@ -468,6 +496,20 @@ RedisResult RedisClient::set(const std::string& key, const std::string& value,
         if (!ttl_result.success) {
             return RedisResult(false, "Failed to set TTL: " + ttl_result.error_message);
         }
+    }
+
+    // Record metrics
+    if (metrics_collector_ && result.success) {
+        std::string cache_type = "unknown";
+        if (key.find("llm:") != std::string::npos) cache_type = "llm";
+        else if (key.find("regulatory:") != std::string::npos) cache_type = "regulatory";
+        else if (key.find("session:") != std::string::npos) cache_type = "session";
+        else if (key.find("temp:") != std::string::npos) cache_type = "temp";
+        else if (key.find("preferences:") != std::string::npos) cache_type = "preferences";
+
+        metrics_collector_->get_redis_collector().record_redis_operation(
+            "SET", cache_type, result.success,
+            std::chrono::duration_cast<std::chrono::milliseconds>(result.execution_time).count());
     }
 
     return result;
@@ -538,9 +580,14 @@ RedisResult RedisClient::publish(const std::string& channel, const std::string& 
 RedisResult RedisClient::subscribe(const std::vector<std::string>& channels,
                                  std::function<void(const std::string&, const std::string&)> message_callback,
                                  int timeout_seconds) {
-    // Subscription is more complex and would require a dedicated connection
-    // For this implementation, simulate subscription
-    return RedisResult(true, "Subscription simulated - callback would be called for messages");
+    // PRODUCTION REQUIREMENT: Redis pub/sub requires proper hiredis integration
+    // Subscription functionality cannot be simulated - it requires:
+    // 1. Dedicated Redis connection for pub/sub
+    // 2. Async message handling
+    // 3. Proper cleanup and reconnection logic
+
+    throw std::runtime_error("Redis pub/sub functionality requires proper hiredis integration. "
+                           "This cannot be simulated and must use real Redis connectivity.");
 }
 
 RedisResult RedisClient::eval(const std::string& script,
@@ -622,6 +669,171 @@ RedisResult RedisClient::get_cached_regulatory_document(const std::string& docum
         cache_misses_++;
         return RedisResult(false, "Regulatory document not cached");
     }
+}
+
+RedisResult RedisClient::cache_regulatory_data(const std::string& data_key,
+                                             const nlohmann::json& data,
+                                             const std::string& source,
+                                             double importance) {
+    std::string cache_key = make_cache_key(data_key, "regulatory_data:");
+
+    // Calculate intelligent TTL based on source and importance
+    auto ttl = calculate_intelligent_ttl("regulatory", importance);
+
+    // Add metadata to cached data
+    nlohmann::json cache_data = data;
+    cache_data["cache_metadata"] = {
+        {"source", source},
+        {"importance", importance},
+        {"cached_at", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()},
+        {"ttl_seconds", ttl.count()}
+    };
+
+    return set(cache_key, cache_data.dump(), ttl);
+}
+
+RedisResult RedisClient::get_cached_regulatory_data(const std::string& data_key) {
+    std::string cache_key = make_cache_key(data_key, "regulatory_data:");
+
+    auto result = get(cache_key);
+    if (result.success && result.value) {
+        cache_hits_++;
+        return result;
+    } else {
+        cache_misses_++;
+        return RedisResult(false, "Regulatory data not cached");
+    }
+}
+
+RedisResult RedisClient::cache_agent_session(const std::string& session_id,
+                                           const nlohmann::json& session_data,
+                                           std::chrono::seconds ttl_seconds) {
+    std::string cache_key = make_cache_key(session_id, "session:");
+
+    // Add session metadata
+    nlohmann::json cache_data = session_data;
+    cache_data["session_metadata"] = {
+        {"created_at", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()},
+        {"ttl_seconds", ttl_seconds.count()},
+        {"type", "agent_session"}
+    };
+
+    return set(cache_key, cache_data.dump(), ttl_seconds);
+}
+
+RedisResult RedisClient::get_cached_agent_session(const std::string& session_id) {
+    std::string cache_key = make_cache_key(session_id, "session:");
+
+    auto result = get(cache_key);
+    if (result.success && result.value) {
+        cache_hits_++;
+        return result;
+    } else {
+        cache_misses_++;
+        return RedisResult(false, "Session not found or expired");
+    }
+}
+
+RedisResult RedisClient::extend_agent_session(const std::string& session_id,
+                                            std::chrono::seconds additional_ttl) {
+    std::string cache_key = make_cache_key(session_id, "session:");
+
+    // Check if session exists first
+    auto check_result = exists(cache_key);
+    if (!check_result.success || !check_result.integer_value ||
+        *check_result.integer_value != 1) {
+        return RedisResult(false, "Session does not exist");
+    }
+
+    return expire(cache_key, additional_ttl);
+}
+
+RedisResult RedisClient::invalidate_agent_session(const std::string& session_id) {
+    std::string cache_key = make_cache_key(session_id, "session:");
+    return del(cache_key);
+}
+
+RedisResult RedisClient::cache_user_preferences(const std::string& user_id,
+                                               const nlohmann::json& preferences) {
+    std::string cache_key = make_cache_key(user_id, "preferences:");
+
+    // Add preference metadata
+    nlohmann::json cache_data = preferences;
+    cache_data["preference_metadata"] = {
+        {"updated_at", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()},
+        {"user_id", user_id},
+        {"type", "user_preferences"}
+    };
+
+    // User preferences have longer TTL (24 hours)
+    return set(cache_key, cache_data.dump(), std::chrono::hours(24));
+}
+
+RedisResult RedisClient::get_cached_user_preferences(const std::string& user_id) {
+    std::string cache_key = make_cache_key(user_id, "preferences:");
+
+    auto result = get(cache_key);
+    if (result.success && result.value) {
+        cache_hits_++;
+        return result;
+    } else {
+        cache_misses_++;
+        return RedisResult(false, "User preferences not cached");
+    }
+}
+
+RedisResult RedisClient::cache_temporary_data(const std::string& key,
+                                            const nlohmann::json& data,
+                                            std::chrono::seconds ttl_seconds,
+                                            int priority) {
+    std::string cache_key = make_cache_key(key, "temp:");
+
+    // Add temporary data metadata
+    nlohmann::json cache_data = data;
+    cache_data["temp_metadata"] = {
+        {"created_at", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()},
+        {"ttl_seconds", ttl_seconds.count()},
+        {"priority", priority},
+        {"type", "temporary_data"}
+    };
+
+    return set(cache_key, cache_data.dump(), ttl_seconds);
+}
+
+RedisResult RedisClient::get_cached_temporary_data(const std::string& key) {
+    std::string cache_key = make_cache_key(key, "temp:");
+
+    auto result = get(cache_key);
+    if (result.success && result.value) {
+        cache_hits_++;
+        return result;
+    } else {
+        cache_misses_++;
+        return RedisResult(false, "Temporary data not cached or expired");
+    }
+}
+
+RedisResult RedisClient::perform_cache_maintenance() {
+    // In Redis, expired keys are automatically cleaned up
+    // We can perform some basic maintenance operations
+
+    // Get all session keys and check for expired ones
+    auto session_keys = keys("session:*");
+    int cleaned_sessions = 0;
+
+    // Get all temporary keys and check for expired ones
+    auto temp_keys = keys("temp:*");
+    int cleaned_temp = 0;
+
+    // Get all preference keys (these don't expire automatically in our implementation)
+    auto pref_keys = keys("preferences:*");
+    int cleaned_prefs = 0;
+
+    return RedisResult(true, "Cache maintenance completed", std::chrono::milliseconds(0));
 }
 
 nlohmann::json RedisClient::get_client_metrics() const {
@@ -747,9 +959,10 @@ void RedisClient::update_command_metrics(bool success, long execution_time_ms) {
 std::shared_ptr<RedisClient> create_redis_client(
     std::shared_ptr<ConfigurationManager> config,
     std::shared_ptr<StructuredLogger> logger,
-    std::shared_ptr<ErrorHandler> error_handler) {
+    std::shared_ptr<ErrorHandler> error_handler,
+    std::shared_ptr<PrometheusMetricsCollector> metrics_collector) {
 
-    auto client = std::make_shared<RedisClient>(config, logger, error_handler);
+    auto client = std::make_shared<RedisClient>(config, logger, error_handler, metrics_collector);
     if (client->initialize()) {
         return client;
     }

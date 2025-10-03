@@ -1,0 +1,167 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Regulens - Regulatory Data Ingestion",
+    "tags": ["regulens", "regulatory", "data", "ingestion"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Data Sources Active",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(regulens_data_source_info{status=\"active\"})",
+            "legendFormat": "Active Sources"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Documents Processed Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_documents_processed_total[5m])",
+            "legendFormat": "{{source}} Documents/sec"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Data Volume Processed",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_data_volume_processed_bytes[5m]) / 1024 / 1024",
+            "legendFormat": "{{source}} MB/sec"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Data Ingestion Success Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "(rate(regulens_ingestion_operations_total[5m]) - rate(regulens_ingestion_errors_total[5m])) / rate(regulens_ingestion_operations_total[5m]) * 100",
+            "legendFormat": "{{source}} Success Rate %"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Data Source Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(regulens_data_source_response_time_seconds_bucket[5m]))",
+            "legendFormat": "{{source}} P95 Response Time"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(regulens_data_source_response_time_seconds_bucket[5m]))",
+            "legendFormat": "P50 Response Time"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Regulatory Updates by Source",
+        "type": "bargauge",
+        "targets": [
+          {
+            "expr": "rate(regulens_regulatory_updates_total[5m])",
+            "legendFormat": "{{source}}"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Data Transformation Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(regulens_data_transformation_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{transformation_type}} P95 Transform Time"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Cache Effectiveness",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_data_cache_hits_total[5m]) / (rate(regulens_data_cache_hits_total[5m]) + rate(regulens_data_cache_misses_total[5m])) * 100",
+            "legendFormat": "{{source}} Cache Hit Rate %"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Data Quality Metrics",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "regulens_data_quality_score",
+            "legendFormat": "{{source}}"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Ingestion Pipeline Health",
+        "type": "status-history",
+        "targets": [
+          {
+            "expr": "regulens_ingestion_pipeline_health",
+            "legendFormat": "{{pipeline}}"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Data Source Scaling Events",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_data_source_scaling_events_total[5m])",
+            "legendFormat": "{{source}} Scaling Events/sec"
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Regulatory Compliance Coverage",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "regulens_regulatory_coverage_percentage",
+            "legendFormat": "{{jurisdiction}}"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": [
+        {
+          "name": "source",
+          "query": "label_values(regulens_documents_processed_total, source)",
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

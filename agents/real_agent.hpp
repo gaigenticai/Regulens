@@ -15,6 +15,7 @@
 #include "../shared/models/compliance_event.hpp"
 #include "../shared/models/agent_decision.hpp"
 #include "../shared/resilience/circuit_breaker.hpp"
+#include "../shared/cache/redis_client.hpp"
 
 namespace regulens {
 
@@ -132,6 +133,10 @@ private:
     std::shared_ptr<CircuitBreaker> sec_circuit_breaker_;
     std::shared_ptr<CircuitBreaker> fca_circuit_breaker_;
     std::shared_ptr<CircuitBreaker> ecb_circuit_breaker_;
+
+    // Redis client for regulatory data caching
+    std::shared_ptr<RedisClient> redis_client_;
+
     mutable std::mutex content_mutex_;
 };
 

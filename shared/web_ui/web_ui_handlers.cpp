@@ -43,6 +43,63 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
     error_handler_ = std::make_shared<ErrorHandler>(config, logger);
     error_handler_->initialize();
 
+    // Initialize health check handler for Kubernetes probes
+    auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
+    health_check_handler_ = create_health_check_handler(config, logger, error_handler_, prometheus_metrics);
+
+    // Register service-specific health checks
+    if (health_check_handler_) {
+        // Database connectivity check
+        health_check_handler_->register_health_check("database_connectivity",
+            [this]() -> HealthCheckResult {
+                try {
+                    if (db_connection_ && db_connection_->is_connected()) {
+                        return HealthCheckResult{true, "healthy", "Database connection active"};
+                    } else {
+                        return HealthCheckResult{false, "unhealthy", "Database connection lost"};
+                    }
+                } catch (const std::exception& e) {
+                    return HealthCheckResult{false, "unhealthy", "Database check failed: " + std::string(e.what())};
+                }
+            },
+            true,  // critical for readiness
+            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+
+        // OpenAI client health check
+        health_check_handler_->register_health_check("openai_client",
+            [this]() -> HealthCheckResult {
+                try {
+                    if (openai_client_ && openai_client_->is_healthy()) {
+                        return HealthCheckResult{true, "healthy", "OpenAI client operational"};
+                    } else {
+                        return HealthCheckResult{false, "unhealthy", "OpenAI client unavailable"};
+                    }
+                } catch (const std::exception& e) {
+                    return HealthCheckResult{false, "unhealthy", "OpenAI client check failed: " + std::string(e.what())};
+                }
+            },
+            false,  // not critical for basic operation
+            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+
+        // Redis connectivity check
+        health_check_handler_->register_health_check("redis_connectivity",
+            health_checks::redis_health_check(),
+            true,  // critical for readiness
+            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+
+        // Disk space check
+        health_check_handler_->register_health_check("disk_space",
+            health_checks::disk_space_health_check(15.0),  // 15% free space required
+            true,  // critical for readiness
+            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+
+        // Memory usage check
+        health_check_handler_->register_health_check("memory_usage",
+            health_checks::memory_health_check(85.0),  // 85% max memory usage
+            true,  // critical for readiness
+            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+    }
+
     // Initialize OpenAI client
     openai_client_ = std::make_shared<OpenAIClient>(config, logger, error_handler_);
     openai_client_->initialize();
@@ -1243,7 +1300,12 @@ HTTPResponse WebUIHandlers::handle_health_status(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
-    auto health_data = error_handler_->get_health_dashboard();
+    if (!health_check_handler_) {
+        return create_error_response(500, "Health check handler not initialized");
+    }
+
+    // Get detailed health status from health check handler
+    auto health_data = health_check_handler_->get_detailed_health();
     return create_json_response(health_data.dump(2));
 }
 
@@ -2642,7 +2704,50 @@ HTTPResponse WebUIHandlers::handle_health_check(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
-    return create_json_response(generate_health_json());
+    if (!health_check_handler_) {
+        return create_error_response(500, "Health check handler not initialized");
+    }
+
+    // Determine probe type from URL path or query parameter
+    std::string probe_type = "detailed"; // default to detailed health check
+
+    // Check URL path for probe type
+    if (request.path.find("/health/ready") != std::string::npos) {
+        probe_type = "readiness";
+    } else if (request.path.find("/health/live") != std::string::npos) {
+        probe_type = "liveness";
+    } else if (request.path.find("/health/startup") != std::string::npos) {
+        probe_type = "startup";
+    }
+
+    // Check query parameter
+    auto probe_param = request.params.find("probe");
+    if (probe_param != request.params.end()) {
+        probe_type = probe_param->second;
+    }
+
+    int status_code;
+    std::string response_body;
+
+    if (probe_type == "readiness") {
+        std::tie(status_code, response_body) = health_check_handler_->readiness_probe();
+    } else if (probe_type == "liveness") {
+        std::tie(status_code, response_body) = health_check_handler_->liveness_probe();
+    } else if (probe_type == "startup") {
+        std::tie(status_code, response_body) = health_check_handler_->startup_probe();
+    } else {
+        // Detailed health check
+        auto health_data = health_check_handler_->get_detailed_health();
+        status_code = 200;
+        response_body = health_data.dump(2);
+    }
+
+    HTTPResponse response;
+    response.status_code = status_code;
+    response.content_type = "application/json";
+    response.body = response_body;
+
+    return response;
 }
 
 HTTPResponse WebUIHandlers::handle_detailed_health_report(const HTTPRequest& request) {

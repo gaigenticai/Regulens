@@ -543,6 +543,214 @@ std::vector<MetricDefinition> ComplianceMetricsCollector::collect_metrics() {
     return metrics;
 }
 
+// RedisMetricsCollector Implementation
+
+RedisMetricsCollector::RedisMetricsCollector(std::shared_ptr<StructuredLogger> logger)
+    : logger_(logger) {}
+
+void RedisMetricsCollector::record_redis_operation(const std::string& operation_type, const std::string& cache_type,
+                                                 bool success, long response_time_ms, bool hit) {
+    redis_operations_total_++;
+
+    if (success) {
+        redis_operations_successful_++;
+    }
+
+    if (hit) {
+        redis_cache_hits_++;
+    } else if (operation_type == "GET") {
+        redis_cache_misses_++;
+    }
+
+    // Update average response time (simple moving average)
+    if (response_time_ms > 0) {
+        redis_avg_response_time_ = (redis_avg_response_time_ + response_time_ms) / 2;
+    }
+
+    // Update cache-specific counters
+    if (cache_type == "llm") {
+        llm_cache_operations_++;
+    } else if (cache_type == "regulatory") {
+        regulatory_cache_operations_++;
+    } else if (cache_type == "session") {
+        session_cache_operations_++;
+    } else if (cache_type == "temp") {
+        temp_cache_operations_++;
+    } else if (cache_type == "preferences") {
+        preferences_cache_operations_++;
+    }
+}
+
+void RedisMetricsCollector::record_connection_pool_metrics(size_t total_connections, size_t active_connections,
+                                                         size_t available_connections) {
+    pool_total_connections_ = total_connections;
+    pool_active_connections_ = active_connections;
+    pool_available_connections_ = available_connections;
+}
+
+void RedisMetricsCollector::record_cache_eviction(const std::string& cache_type, size_t evicted_count) {
+    cache_evictions_total_ += evicted_count;
+}
+
+void RedisMetricsCollector::record_cache_size(const std::string& cache_type, size_t entry_count, size_t memory_usage_bytes) {
+    current_cache_entries_ = entry_count;
+    current_memory_usage_ = memory_usage_bytes;
+}
+
+std::vector<MetricDefinition> RedisMetricsCollector::collect_metrics() {
+    std::vector<MetricDefinition> metrics;
+
+    // Redis operation metrics
+    metrics.emplace_back(
+        "regulens_redis_operations_total",
+        "Total number of Redis operations",
+        MetricType::COUNTER,
+        MetricLabels{},
+        std::to_string(redis_operations_total_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_operations_successful_total",
+        "Total number of successful Redis operations",
+        MetricType::COUNTER,
+        MetricLabels{},
+        std::to_string(redis_operations_successful_)
+    );
+
+    // Cache hit/miss metrics
+    metrics.emplace_back(
+        "regulens_redis_cache_hits_total",
+        "Total number of Redis cache hits",
+        MetricType::COUNTER,
+        MetricLabels{},
+        std::to_string(redis_cache_hits_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_cache_misses_total",
+        "Total number of Redis cache misses",
+        MetricType::COUNTER,
+        MetricLabels{},
+        std::to_string(redis_cache_misses_)
+    );
+
+    // Cache hit rate
+    size_t total_cache_requests = redis_cache_hits_.load() + redis_cache_misses_.load();
+    double cache_hit_rate = total_cache_requests > 0 ?
+        static_cast<double>(redis_cache_hits_) / total_cache_requests : 0.0;
+
+    metrics.emplace_back(
+        "regulens_redis_cache_hit_rate",
+        "Redis cache hit rate (0.0 to 1.0)",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(cache_hit_rate)
+    );
+
+    // Response time metrics
+    metrics.emplace_back(
+        "regulens_redis_avg_response_time_ms",
+        "Average Redis operation response time in milliseconds",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(redis_avg_response_time_)
+    );
+
+    // Connection pool metrics
+    metrics.emplace_back(
+        "regulens_redis_pool_connections_total",
+        "Total Redis connections in pool",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(pool_total_connections_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_pool_connections_active",
+        "Active Redis connections in pool",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(pool_active_connections_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_pool_connections_available",
+        "Available Redis connections in pool",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(pool_available_connections_)
+    );
+
+    // Cache-specific operation metrics
+    metrics.emplace_back(
+        "regulens_redis_cache_operations_total",
+        "Total Redis cache operations by type",
+        MetricType::COUNTER,
+        MetricLabels{{"cache_type", "llm"}},
+        std::to_string(llm_cache_operations_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_cache_operations_total",
+        "Total Redis cache operations by type",
+        MetricType::COUNTER,
+        MetricLabels{{"cache_type", "regulatory"}},
+        std::to_string(regulatory_cache_operations_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_cache_operations_total",
+        "Total Redis cache operations by type",
+        MetricType::COUNTER,
+        MetricLabels{{"cache_type", "session"}},
+        std::to_string(session_cache_operations_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_cache_operations_total",
+        "Total Redis cache operations by type",
+        MetricType::COUNTER,
+        MetricLabels{{"cache_type", "temp"}},
+        std::to_string(temp_cache_operations_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_cache_operations_total",
+        "Total Redis cache operations by type",
+        MetricType::COUNTER,
+        MetricLabels{{"cache_type", "preferences"}},
+        std::to_string(preferences_cache_operations_)
+    );
+
+    // Eviction metrics
+    metrics.emplace_back(
+        "regulens_redis_cache_evictions_total",
+        "Total number of Redis cache evictions",
+        MetricType::COUNTER,
+        MetricLabels{},
+        std::to_string(cache_evictions_total_)
+    );
+
+    // Cache size metrics
+    metrics.emplace_back(
+        "regulens_redis_cache_entries_current",
+        "Current number of entries in Redis cache",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(current_cache_entries_)
+    );
+
+    metrics.emplace_back(
+        "regulens_redis_memory_usage_bytes",
+        "Current Redis memory usage in bytes",
+        MetricType::GAUGE,
+        MetricLabels{},
+        std::to_string(current_memory_usage_)
+    );
+
+    return metrics;
+}
+
 // SystemMetricsCollector Implementation
 
 SystemMetricsCollector::SystemMetricsCollector(std::shared_ptr<StructuredLogger> logger)
@@ -734,6 +942,7 @@ bool PrometheusMetricsCollector::initialize() {
         circuit_breaker_collector_ = std::make_unique<CircuitBreakerMetricsCollector>(logger_);
         llm_collector_ = std::make_unique<LLMMetricsCollector>(logger_);
         compliance_collector_ = std::make_unique<ComplianceMetricsCollector>(logger_);
+        redis_collector_ = std::make_unique<RedisMetricsCollector>(logger_);
         system_collector_ = std::make_unique<SystemMetricsCollector>(logger_);
 
         initialized_ = true;
@@ -782,16 +991,18 @@ std::string PrometheusMetricsCollector::collect_all_metrics() {
     auto circuit_metrics = circuit_breaker_collector_->collect_metrics();
     auto llm_metrics = llm_collector_->collect_metrics();
     auto compliance_metrics = compliance_collector_->collect_metrics();
+    auto redis_metrics = redis_collector_->collect_metrics();
     auto system_metrics = system_collector_->collect_metrics();
 
     // Combine all metrics
     std::vector<MetricDefinition> all_metrics;
     all_metrics.reserve(circuit_metrics.size() + llm_metrics.size() +
-                       compliance_metrics.size() + system_metrics.size());
+                       compliance_metrics.size() + redis_metrics.size() + system_metrics.size());
 
     all_metrics.insert(all_metrics.end(), circuit_metrics.begin(), circuit_metrics.end());
     all_metrics.insert(all_metrics.end(), llm_metrics.begin(), llm_metrics.end());
     all_metrics.insert(all_metrics.end(), compliance_metrics.begin(), compliance_metrics.end());
+    all_metrics.insert(all_metrics.end(), redis_metrics.begin(), redis_metrics.end());
     all_metrics.insert(all_metrics.end(), system_metrics.begin(), system_metrics.end());
 
     // Format as Prometheus output

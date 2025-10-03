@@ -1,0 +1,445 @@
+groups:
+  # System Health Alerts
+  - name: system_health
+    rules:
+      - alert: RegulensServiceDown
+        expr: up{job="regulens"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: regulens
+        annotations:
+          summary: "Regulens service is down"
+          description: "Regulens service {{ $labels.instance }} has been down for more than 5 minutes."
+          runbook_url: "https://regulens.ai/runbooks/service-down"
+
+      - alert: RegulensHighErrorRate
+        expr: rate(http_requests_total{status=~"[5-9].*"}[5m]) / rate(http_requests_total[5m]) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: regulens
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate for {{ $labels.instance }} is {{ $value }}% (threshold: 10%)"
+          runbook_url: "https://regulens.ai/runbooks/high-error-rate"
+
+      - alert: RegulensHighMemoryUsage
+        expr: (1 - system_memory_available_bytes / system_memory_total_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: regulens
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://regulens.ai/runbooks/high-memory"
+
+      - alert: RegulensHighCPUUsage
+        expr: rate(process_cpu_user_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: regulens
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://regulens.ai/runbooks/high-cpu"
+
+      - alert: RegulensLowDiskSpace
+        expr: (1 - filesystem_avail_bytes / filesystem_size_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: regulens
+        annotations:
+          summary: "Low disk space"
+          description: "Disk usage is {{ $value }}% on {{ $labels.instance }} mountpoint {{ $labels.mountpoint }}"
+          runbook_url: "https://regulens.ai/runbooks/low-disk-space"
+
+  # Circuit Breaker Alerts
+  - name: circuit_breaker_alerts
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: regulens_circuit_breaker_state{state="OPEN"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: circuit_breaker
+        annotations:
+          summary: "Circuit breaker is OPEN"
+          description: "Circuit breaker for {{ $labels.service }} is OPEN, blocking all requests"
+          runbook_url: "https://regulens.ai/runbooks/circuit-breaker-open"
+
+      - alert: CircuitBreakerHighFailureRate
+        expr: rate(regulens_circuit_breaker_failures_total[5m]) / rate(regulens_circuit_breaker_requests_total[5m]) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: circuit_breaker
+        annotations:
+          summary: "High circuit breaker failure rate"
+          description: "Failure rate for {{ $labels.service }} is {{ $value }}% (threshold: 20%)"
+          runbook_url: "https://regulens.ai/runbooks/high-circuit-failure-rate"
+
+      - alert: CircuitBreakerHighLatency
+        expr: histogram_quantile(0.95, rate(regulens_circuit_breaker_request_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: circuit_breaker
+        annotations:
+          summary: "High circuit breaker latency"
+          description: "95th percentile latency for {{ $labels.service }} is {{ $value }}s (threshold: 10s)"
+          runbook_url: "https://regulens.ai/runbooks/high-circuit-latency"
+
+  # LLM Performance Alerts
+  - name: llm_performance_alerts
+    rules:
+      - alert: LLMAPIUnavailable
+        expr: rate(regulens_llm_requests_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: llm
+        annotations:
+          summary: "LLM API unavailable"
+          description: "No LLM requests processed in the last 5 minutes for {{ $labels.provider }}"
+          runbook_url: "https://regulens.ai/runbooks/llm-api-unavailable"
+
+      - alert: LLMHighErrorRate
+        expr: rate(regulens_llm_errors_total[5m]) / rate(regulens_llm_requests_total[5m]) * 100 > 15
+        for: 5m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "High LLM error rate"
+          description: "Error rate for {{ $labels.provider }} is {{ $value }}% (threshold: 15%)"
+          runbook_url: "https://regulens.ai/runbooks/high-llm-error-rate"
+
+      - alert: LLMHighLatency
+        expr: histogram_quantile(0.95, rate(regulens_llm_request_duration_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "High LLM response latency"
+          description: "95th percentile latency for {{ $labels.provider }} is {{ $value }}s (threshold: 30s)"
+          runbook_url: "https://regulens.ai/runbooks/high-llm-latency"
+
+      - alert: LLMHighCost
+        expr: rate(regulens_llm_estimated_cost_usd[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "High LLM API costs"
+          description: "LLM costs for {{ $labels.provider }} are ${{ $value }}/minute (threshold: $100/min)"
+          runbook_url: "https://regulens.ai/runbooks/high-llm-costs"
+
+      - alert: LLMLowCacheHitRate
+        expr: rate(regulens_llm_cache_hits_total[5m]) / (rate(regulens_llm_cache_hits_total[5m]) + rate(regulens_llm_cache_misses_total[5m])) * 100 < 70
+        for: 10m
+        labels:
+          severity: info
+          component: llm_cache
+        annotations:
+          summary: "Low LLM cache hit rate"
+          description: "LLM cache hit rate is {{ $value }}% (threshold: 70%)"
+          runbook_url: "https://regulens.ai/runbooks/low-cache-hit-rate"
+
+  # Redis Cache Alerts
+  - name: redis_cache_alerts
+    rules:
+      - alert: RedisUnavailable
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis is unavailable"
+          description: "Redis instance {{ $labels.instance }} is down"
+          runbook_url: "https://regulens.ai/runbooks/redis-unavailable"
+
+      - alert: RedisHighErrorRate
+        expr: (rate(regulens_redis_operations_total[5m]) - rate(regulens_redis_operations_successful_total[5m])) / rate(regulens_redis_operations_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "High Redis error rate"
+          description: "Redis error rate is {{ $value }}% (threshold: 5%)"
+          runbook_url: "https://regulens.ai/runbooks/high-redis-error-rate"
+
+      - alert: RedisLowCacheHitRate
+        expr: regulens_redis_cache_hit_rate < 60
+        for: 10m
+        labels:
+          severity: warning
+          component: redis_cache
+        annotations:
+          summary: "Low Redis cache hit rate"
+          description: "Redis cache hit rate is {{ $value }}% (threshold: 60%)"
+          runbook_url: "https://regulens.ai/runbooks/low-redis-cache-hit-rate"
+
+      - alert: RedisHighMemoryUsage
+        expr: regulens_redis_memory_usage_bytes / 1024 / 1024 / 1024 > 8
+        for: 5m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "High Redis memory usage"
+          description: "Redis memory usage is {{ $value }}GB (threshold: 8GB)"
+          runbook_url: "https://regulens.ai/runbooks/high-redis-memory"
+
+      - alert: RedisHighEvictionRate
+        expr: rate(regulens_redis_cache_evictions_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: redis_cache
+        annotations:
+          summary: "High Redis eviction rate"
+          description: "Redis evictions per minute: {{ $value }} (threshold: 100/min)"
+          runbook_url: "https://regulens.ai/runbooks/high-redis-evictions"
+
+  # Compliance Operation Alerts
+  - name: compliance_alerts
+    rules:
+      - alert: ComplianceDecisionFailure
+        expr: rate(regulens_compliance_decision_failures_total[5m]) / rate(regulens_compliance_decisions_total[5m]) * 100 > 10
+        for: 5m
+        labels:
+          severity: critical
+          component: compliance
+        annotations:
+          summary: "High compliance decision failure rate"
+          description: "Compliance decision failure rate is {{ $value }}% (threshold: 10%)"
+          runbook_url: "https://regulens.ai/runbooks/compliance-decision-failures"
+
+      - alert: ComplianceLowAccuracy
+        expr: regulens_compliance_decision_accuracy < 95
+        for: 10m
+        labels:
+          severity: warning
+          component: compliance
+        annotations:
+          summary: "Low compliance decision accuracy"
+          description: "Compliance decision accuracy is {{ $value }}% (threshold: 95%)"
+          runbook_url: "https://regulens.ai/runbooks/low-compliance-accuracy"
+
+      - alert: ComplianceHighProcessingLatency
+        expr: histogram_quantile(0.95, rate(regulens_compliance_processing_duration_seconds_bucket[5m])) > 60
+        for: 5m
+        labels:
+          severity: warning
+          component: compliance
+        annotations:
+          summary: "High compliance processing latency"
+          description: "95th percentile compliance processing time is {{ $value }}s (threshold: 60s)"
+          runbook_url: "https://regulens.ai/runbooks/high-compliance-latency"
+
+      - alert: ComplianceSLABreach
+        expr: regulens_compliance_sla_met_percentage < 99.5
+        for: 5m
+        labels:
+          severity: critical
+          component: compliance
+        annotations:
+          summary: "Compliance SLA breach"
+          description: "Compliance SLA met percentage is {{ $value }}% (threshold: 99.5%)"
+          runbook_url: "https://regulens.ai/runbooks/compliance-sla-breach"
+
+      - alert: RiskAssessmentFailure
+        expr: rate(regulens_risk_assessment_failures_total[5m]) / rate(regulens_risk_assessments_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: risk_assessment
+        annotations:
+          summary: "Risk assessment failures"
+          description: "Risk assessment failure rate is {{ $value }}% (threshold: 5%)"
+          runbook_url: "https://regulens.ai/runbooks/risk-assessment-failures"
+
+  # Data Ingestion Alerts
+  - name: data_ingestion_alerts
+    rules:
+      - alert: DataIngestionFailure
+        expr: rate(regulens_ingestion_errors_total[5m]) / rate(regulens_ingestion_operations_total[5m]) * 100 > 15
+        for: 5m
+        labels:
+          severity: critical
+          component: data_ingestion
+        annotations:
+          summary: "Data ingestion failure"
+          description: "Data ingestion error rate for {{ $labels.source }} is {{ $value }}% (threshold: 15%)"
+          runbook_url: "https://regulens.ai/runbooks/data-ingestion-failure"
+
+      - alert: DataIngestionHighLatency
+        expr: histogram_quantile(0.95, rate(regulens_data_source_response_time_seconds_bucket[5m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: data_ingestion
+        annotations:
+          summary: "High data ingestion latency"
+          description: "95th percentile data source response time for {{ $labels.source }} is {{ $value }}s (threshold: 300s)"
+          runbook_url: "https://regulens.ai/runbooks/high-data-ingestion-latency"
+
+      - alert: RegulatoryDataStale
+        expr: (time() - regulens_regulatory_data_last_update_timestamp) / 3600 > 24
+        for: 5m
+        labels:
+          severity: warning
+          component: regulatory_data
+        annotations:
+          summary: "Regulatory data is stale"
+          description: "Regulatory data for {{ $labels.source }} hasn't been updated for {{ $value }} hours (threshold: 24h)"
+          runbook_url: "https://regulens.ai/runbooks/stale-regulatory-data"
+
+      - alert: DataIngestionLowThroughput
+        expr: rate(regulens_documents_processed_total[5m]) < 1
+        for: 15m
+        labels:
+          severity: warning
+          component: data_ingestion
+        annotations:
+          summary: "Low data ingestion throughput"
+          description: "Document processing rate for {{ $labels.source }} is {{ $value }}/min (threshold: 1/min)"
+          runbook_url: "https://regulens.ai/runbooks/low-data-throughput"
+
+  # Kubernetes Operator Alerts
+  - name: kubernetes_operator_alerts
+    rules:
+      - alert: KubernetesOperatorDown
+        expr: up{job="regulens-operator"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: k8s_operator
+        annotations:
+          summary: "Kubernetes operator is down"
+          description: "Regulens Kubernetes operator has been down for more than 5 minutes"
+          runbook_url: "https://regulens.ai/runbooks/operator-down"
+
+      - alert: KubernetesOperatorHighReconciliationLatency
+        expr: histogram_quantile(0.95, rate(regulens_operator_reconciliation_duration_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+          component: k8s_operator
+        annotations:
+          summary: "High operator reconciliation latency"
+          description: "95th percentile operator reconciliation time is {{ $value }}s (threshold: 30s)"
+          runbook_url: "https://regulens.ai/runbooks/high-operator-latency"
+
+      - alert: KubernetesResourceUnhealthy
+        expr: regulens_resource_health_status{status="unhealthy"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: k8s_resources
+        annotations:
+          summary: "Kubernetes resource is unhealthy"
+          description: "{{ $labels.resource_type }} {{ $labels.resource_name }} is in unhealthy state"
+          runbook_url: "https://regulens.ai/runbooks/unhealthy-resource"
+
+      - alert: KubernetesScalingFailure
+        expr: rate(regulens_resource_scaling_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: k8s_scaling
+        annotations:
+          summary: "Kubernetes scaling failure"
+          description: "Failed to scale {{ $labels.resource_type }} {{ $labels.resource_name }}"
+          runbook_url: "https://regulens.ai/runbooks/scaling-failure"
+
+  # Business Logic Alerts
+  - name: business_logic_alerts
+    rules:
+      - alert: AgentActivityLow
+        expr: rate(regulens_agent_activity_events_total[5m]) < 1
+        for: 10m
+        labels:
+          severity: info
+          component: agent_activity
+        annotations:
+          summary: "Low agent activity"
+          description: "Agent activity rate is {{ $value }}/min (threshold: 1/min)"
+          runbook_url: "https://regulens.ai/runbooks/low-agent-activity"
+
+      - alert: HumanAICollaborationStale
+        expr: (time() - regulens_human_ai_last_interaction_timestamp) / 3600 > 2
+        for: 5m
+        labels:
+          severity: info
+          component: human_ai
+        annotations:
+          summary: "Human-AI collaboration inactive"
+          description: "No human-AI interactions for {{ $value }} hours (threshold: 2h)"
+          runbook_url: "https://regulens.ai/runbooks/stale-human-ai-interaction"
+
+      - alert: PatternRecognitionDrift
+        expr: regulens_pattern_recognition_accuracy < 90
+        for: 10m
+        labels:
+          severity: warning
+          component: pattern_recognition
+        annotations:
+          summary: "Pattern recognition accuracy drift"
+          description: "Pattern recognition accuracy is {{ $value }}% (threshold: 90%)"
+          runbook_url: "https://regulens.ai/runbooks/pattern-recognition-drift"
+
+      - alert: FeedbackIncorporationBacklog
+        expr: regulens_feedback_backlog_size > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: feedback_system
+        annotations:
+          summary: "Feedback incorporation backlog"
+          description: "Feedback backlog size is {{ $value }} (threshold: 1000)"
+          runbook_url: "https://regulens.ai/runbooks/feedback-backlog"
+
+  # Security Alerts
+  - name: security_alerts
+    rules:
+      - alert: SuspiciousActivityDetected
+        expr: rate(regulens_security_events_total{severity="high"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+        annotations:
+          summary: "Suspicious security activity detected"
+          description: "High-severity security events detected: {{ $value }}"
+          runbook_url: "https://regulens.ai/runbooks/security-incident"
+
+      - alert: AuthenticationFailures
+        expr: rate(regulens_authentication_failures_total[5m]) / rate(regulens_authentication_attempts_total[5m]) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failure rate is {{ $value }}% (threshold: 10%)"
+          runbook_url: "https://regulens.ai/runbooks/auth-failures"
+
+      - alert: UnauthorizedAccessAttempts
+        expr: rate(regulens_unauthorized_access_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Unauthorized access attempts"
+          description: "Unauthorized access attempts: {{ $value }}/min (threshold: 10/min)"
+          runbook_url: "https://regulens.ai/runbooks/unauthorized-access"

@@ -246,7 +246,8 @@ class RedisClient {
 public:
     RedisClient(std::shared_ptr<ConfigurationManager> config,
                std::shared_ptr<StructuredLogger> logger,
-               std::shared_ptr<ErrorHandler> error_handler);
+               std::shared_ptr<ErrorHandler> error_handler,
+               std::shared_ptr<PrometheusMetricsCollector> metrics_collector = nullptr);
 
     ~RedisClient();
 
@@ -411,6 +412,102 @@ public:
      */
     RedisResult get_cached_regulatory_document(const std::string& document_id);
 
+    /**
+     * @brief Cache regulatory data with intelligent warming
+     * @param data_key Unique key for the data
+     * @param data JSON data to cache
+     * @param source Regulatory source (SEC, FCA, ECB)
+     * @param importance Importance score (0.0-1.0) affects TTL
+     * @return RedisResult indicating caching success
+     */
+    RedisResult cache_regulatory_data(const std::string& data_key,
+                                     const nlohmann::json& data,
+                                     const std::string& source,
+                                     double importance = 0.5);
+
+    /**
+     * @brief Get cached regulatory data
+     * @param data_key Data key
+     * @return RedisResult with cached data or miss
+     */
+    RedisResult get_cached_regulatory_data(const std::string& data_key);
+
+    /**
+     * @brief Cache agent session data
+     * @param session_id Unique session identifier
+     * @param session_data JSON session data
+     * @param ttl_seconds Session TTL in seconds (default 1 hour)
+     * @return RedisResult indicating caching success
+     */
+    RedisResult cache_agent_session(const std::string& session_id,
+                                   const nlohmann::json& session_data,
+                                   std::chrono::seconds ttl_seconds = std::chrono::hours(1));
+
+    /**
+     * @brief Get cached agent session
+     * @param session_id Session identifier
+     * @return RedisResult with session data or miss
+     */
+    RedisResult get_cached_agent_session(const std::string& session_id);
+
+    /**
+     * @brief Extend agent session TTL
+     * @param session_id Session identifier
+     * @param additional_ttl Additional TTL to add
+     * @return RedisResult indicating success
+     */
+    RedisResult extend_agent_session(const std::string& session_id,
+                                    std::chrono::seconds additional_ttl = std::chrono::hours(1));
+
+    /**
+     * @brief Invalidate agent session
+     * @param session_id Session identifier
+     * @return RedisResult indicating deletion success
+     */
+    RedisResult invalidate_agent_session(const std::string& session_id);
+
+    /**
+     * @brief Cache user preferences
+     * @param user_id User identifier
+     * @param preferences JSON preferences data
+     * @return RedisResult indicating caching success
+     */
+    RedisResult cache_user_preferences(const std::string& user_id,
+                                     const nlohmann::json& preferences);
+
+    /**
+     * @brief Get cached user preferences
+     * @param user_id User identifier
+     * @return RedisResult with preferences or miss
+     */
+    RedisResult get_cached_user_preferences(const std::string& user_id);
+
+    /**
+     * @brief Cache temporary data with automatic eviction
+     * @param key Cache key
+     * @param data JSON data to cache
+     * @param ttl_seconds TTL in seconds
+     * @param priority Eviction priority (higher = less likely to be evicted)
+     * @return RedisResult indicating caching success
+     */
+    RedisResult cache_temporary_data(const std::string& key,
+                                    const nlohmann::json& data,
+                                    std::chrono::seconds ttl_seconds,
+                                    int priority = 1);
+
+    /**
+     * @brief Get cached temporary data
+     * @param key Cache key
+     * @return RedisResult with data or miss
+     */
+    RedisResult get_cached_temporary_data(const std::string& key);
+
+    /**
+     * @brief Perform cache maintenance (cleanup expired entries)
+     * @return RedisResult with maintenance statistics
+     */
+    RedisResult perform_cache_maintenance();
+
     // ===== METRICS AND MONITORING =====
 
     /**
@@ -426,6 +523,12 @@ public:
     nlohmann::json get_pool_metrics() const;
 
     /**
+     * @brief Set metrics collector for monitoring
+     * @param metrics_collector Prometheus metrics collector
+     */
+    void set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector);
+
+    /**
      * @brief Perform health check
      * @return JSON with health status
      */
@@ -435,6 +538,7 @@ private:
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
     std::shared_ptr<ErrorHandler> error_handler_;
+    std::shared_ptr<PrometheusMetricsCollector> metrics_collector_;
 
     RedisConfig redis_config_;
     std::unique_ptr<RedisConnectionPool> connection_pool_;
@@ -497,6 +601,7 @@ private:
 std::shared_ptr<RedisClient> create_redis_client(
     std::shared_ptr<ConfigurationManager> config,
     std::shared_ptr<StructuredLogger> logger,
-    std::shared_ptr<ErrorHandler> error_handler);
+    std::shared_ptr<ErrorHandler> error_handler,
+    std::shared_ptr<PrometheusMetricsCollector> metrics_collector = nullptr);
 
 } // namespace regulens

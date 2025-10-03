@@ -1,0 +1,134 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Regulens - LLM Performance",
+    "tags": ["regulens", "llm", "performance", "openai", "anthropic"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "LLM API Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_llm_requests_total[5m])",
+            "legendFormat": "{{provider}} Requests/sec"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "LLM API Success Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_llm_requests_success_total[5m]) / rate(regulens_llm_requests_total[5m]) * 100",
+            "legendFormat": "{{provider}} Success Rate %"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "LLM API Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(regulens_llm_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{provider}} P95 Response Time"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(regulens_llm_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{provider}} P50 Response Time"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "LLM Token Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_llm_tokens_used_total[5m])",
+            "legendFormat": "{{provider}} {{token_type}} Tokens/sec"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "LLM Cost per Minute",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_llm_estimated_cost_usd[5m]) * 60",
+            "legendFormat": "{{provider}} Cost $/min"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "LLM Cache Hit Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_llm_cache_hits_total[5m]) / (rate(regulens_llm_cache_hits_total[5m]) + rate(regulens_llm_cache_misses_total[5m])) * 100",
+            "legendFormat": "{{provider}} Cache Hit Rate %"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "LLM Error Rate by Type",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_llm_errors_total[5m])",
+            "legendFormat": "{{provider}} {{error_type}} Errors/sec"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "LLM Model Performance",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "regulens_llm_model_performance",
+            "legendFormat": "{{provider}} {{model}}"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "LLM Rate Limiting",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "regulens_llm_rate_limit_remaining",
+            "legendFormat": "{{provider}} Remaining Requests"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": [
+        {
+          "name": "provider",
+          "query": "label_values(regulens_llm_requests_total, provider)",
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

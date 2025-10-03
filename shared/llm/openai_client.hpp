@@ -11,6 +11,7 @@
 #include "../logging/structured_logger.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../error_handler.hpp"
+#include "../cache/redis_client.hpp"
 #include "streaming_handler.hpp"
 #include "function_calling.hpp"
 
@@ -322,6 +323,7 @@ private:
     std::shared_ptr<ErrorHandler> error_handler_;
     std::shared_ptr<HttpClient> http_client_;
     std::shared_ptr<StreamingResponseHandler> streaming_handler_;
+    std::shared_ptr<RedisClient> redis_client_;
 
     // Configuration
     std::string api_key_;
@@ -461,6 +463,20 @@ private:
      * @return true if function calls present
      */
     bool response_contains_function_calls(const OpenAIResponse& response);
+
+    /**
+     * @brief Generate hash for prompt content for caching
+     * @param request Completion request
+     * @return SHA-256 hash of prompt content
+     */
+    std::string generate_prompt_hash(const OpenAICompletionRequest& request);
+
+    /**
+     * @brief Calculate prompt complexity for intelligent TTL
+     * @param request Completion request
+     * @return Complexity score (0.0-1.0)
+     */
+    double calculate_prompt_complexity(const OpenAICompletionRequest& request);
 
     // Fallback responses removed - Rule 7 compliance: No makeshift workarounds
 };

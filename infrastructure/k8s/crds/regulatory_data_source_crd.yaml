@@ -1,0 +1,412 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: regulatorydatasources.regulens.ai
+  labels:
+    app.kubernetes.io/name: regulens
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  group: regulens.ai
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: ["sec_edgar", "fca", "ecb", "esma", "fed", "mas", "apra", "rest_api", "web_scraping", "database"]
+                description: "Type of regulatory data source"
+              source:
+                type: string
+                enum: ["us", "uk", "eu", "sg", "au", "custom"]
+                description: "Regulatory jurisdiction"
+              enabled:
+                type: boolean
+                default: true
+                description: "Whether this data source is enabled"
+              priority:
+                type: string
+                enum: ["low", "medium", "high", "critical"]
+                default: "medium"
+                description: "Processing priority"
+              image:
+                type: string
+                description: "Container image for data ingestion"
+                default: "regulens/data-ingestor:latest"
+              resources:
+                type: object
+                properties:
+                  requests:
+                    type: object
+                    properties:
+                      cpu:
+                        type: string
+                        default: "100m"
+                      memory:
+                        type: string
+                        default: "256Mi"
+                  limits:
+                    type: object
+                    properties:
+                      cpu:
+                        type: string
+                        default: "500m"
+                      memory:
+                        type: string
+                        default: "1Gi"
+              config:
+                type: object
+                properties:
+                  pollingIntervalMinutes:
+                    type: integer
+                    minimum: 5
+                    maximum: 1440
+                    default: 60
+                    description: "How often to check for new data"
+                  batchSize:
+                    type: integer
+                    minimum: 1
+                    maximum: 1000
+                    default: 50
+                    description: "Number of documents to process in each batch"
+                  retryAttempts:
+                    type: integer
+                    minimum: 0
+                    maximum: 10
+                    default: 3
+                    description: "Number of retry attempts on failure"
+                  retryDelaySeconds:
+                    type: integer
+                    minimum: 1
+                    maximum: 300
+                    default: 30
+                    description: "Delay between retry attempts"
+                  timeoutSeconds:
+                    type: integer
+                    minimum: 10
+                    maximum: 1800
+                    default: 300
+                    description: "Timeout for data fetching operations"
+                  enableCircuitBreaker:
+                    type: boolean
+                    default: true
+                    description: "Enable circuit breaker for resilience"
+                  circuitBreakerThreshold:
+                    type: integer
+                    minimum: 1
+                    maximum: 20
+                    default: 3
+                    description: "Failure threshold for circuit breaker"
+                  enableCaching:
+                    type: boolean
+                    default: true
+                    description: "Enable caching of fetched data"
+                  cacheTTLHours:
+                    type: integer
+                    minimum: 1
+                    maximum: 168
+                    default: 24
+                    description: "Cache TTL in hours"
+                  enableEmbeddings:
+                    type: boolean
+                    default: true
+                    description: "Generate embeddings for semantic search"
+                  enableNLP:
+                    type: boolean
+                    default: true
+                    description: "Enable NLP processing of documents"
+                  language:
+                    type: string
+                    enum: ["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko"]
+                    default: "en"
+                    description: "Primary language for NLP processing"
+              endpoints:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: "Endpoint name"
+                    url:
+                      type: string
+                      description: "API endpoint URL"
+                    method:
+                      type: string
+                      enum: ["GET", "POST", "PUT", "DELETE"]
+                      default: "GET"
+                    headers:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "HTTP headers for requests"
+                    authentication:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["none", "basic", "bearer", "api_key"]
+                          default: "none"
+                        secretName:
+                          type: string
+                          description: "Kubernetes secret containing credentials"
+                        apiKeyHeader:
+                          type: string
+                          description: "Header name for API key"
+                    rateLimit:
+                      type: object
+                      properties:
+                        requestsPerMinute:
+                          type: integer
+                          minimum: 1
+                          maximum: 1000
+                          default: 60
+                        burstLimit:
+                          type: integer
+                          minimum: 1
+                          maximum: 100
+                          default: 10
+                description: "API endpoints to fetch from"
+              scrapingConfig:
+                type: object
+                properties:
+                  baseUrl:
+                    type: string
+                    description: "Base URL for web scraping"
+                  selectors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          description: "Selector name"
+                        cssSelector:
+                          type: string
+                          description: "CSS selector for content extraction"
+                        attribute:
+                          type: string
+                          description: "HTML attribute to extract (optional)"
+                        required:
+                          type: boolean
+                          default: false
+                          description: "Whether this selector is required"
+                    description: "CSS selectors for content extraction"
+                  userAgent:
+                    type: string
+                    default: "Regulens-Compliance-Agent/1.0"
+                    description: "User agent string for requests"
+                  respectRobotsTxt:
+                    type: boolean
+                    default: true
+                    description: "Respect robots.txt directives"
+                  crawlDelaySeconds:
+                    type: integer
+                    minimum: 1
+                    maximum: 60
+                    default: 5
+                    description: "Delay between requests"
+                description: "Web scraping configuration"
+              databaseConfig:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: ["postgresql", "mysql", "oracle", "sqlserver"]
+                    description: "Database type"
+                  host:
+                    type: string
+                    description: "Database host"
+                  port:
+                    type: integer
+                    description: "Database port"
+                  name:
+                    type: string
+                    description: "Database name"
+                  table:
+                    type: string
+                    description: "Table name"
+                  user:
+                    type: string
+                    description: "Database user"
+                  passwordSecret:
+                    type: string
+                    description: "Kubernetes secret containing password"
+                  query:
+                    type: string
+                    description: "SQL query to execute"
+                  incrementalColumn:
+                    type: string
+                    description: "Column for incremental updates"
+                  incrementalValue:
+                    type: string
+                    description: "Last incremental value processed"
+                description: "Database connection configuration"
+              transformation:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    default: true
+                    description: "Enable data transformation"
+                  rules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          description: "Transformation rule name"
+                        type:
+                          type: string
+                          enum: ["filter", "map", "validate", "enrich"]
+                          description: "Type of transformation"
+                        condition:
+                          type: string
+                          description: "Condition for applying rule"
+                        action:
+                          type: string
+                          description: "Transformation action"
+                    description: "Data transformation rules"
+                description: "Data transformation configuration"
+              scaling:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    default: true
+                  minReplicas:
+                    type: integer
+                    minimum: 1
+                    maximum: 5
+                    default: 1
+                  maxReplicas:
+                    type: integer
+                    minimum: 1
+                    maximum: 20
+                    default: 5
+                  targetDataVolume:
+                    type: integer
+                    minimum: 10
+                    maximum: 10000
+                    default: 100
+                    description: "Target documents per minute"
+                description: "Auto-scaling configuration"
+              monitoring:
+                type: object
+                properties:
+                  prometheusEnabled:
+                    type: boolean
+                    default: true
+                  alertOnFailure:
+                    type: boolean
+                    default: true
+                  alertOnDataDelay:
+                    type: boolean
+                    default: true
+                  dataDelayThresholdMinutes:
+                    type: integer
+                    minimum: 5
+                    maximum: 1440
+                    default: 120
+                    description: "Alert if no data received for this many minutes"
+            required:
+            - type
+            - source
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum: ["Pending", "Running", "Failed", "Paused", "Suspended"]
+              lastFetchTime:
+                type: string
+                format: date-time
+              nextFetchTime:
+                type: string
+                format: date-time
+              documentsProcessed:
+                type: integer
+              documentsFailed:
+                type: integer
+              documentsCached:
+                type: integer
+              dataVolume:
+                type: object
+                properties:
+                  bytesProcessed:
+                    type: integer
+                  documentsPerHour:
+                    type: number
+                  averageDocumentSize:
+                    type: integer
+              circuitBreaker:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum: ["closed", "open", "half_open"]
+                  failureCount:
+                    type: integer
+                  lastFailureTime:
+                    type: string
+                    format: date-time
+                  recoveryAttempts:
+                    type: integer
+              cache:
+                type: object
+                properties:
+                  hitRate:
+                    type: number
+                  totalRequests:
+                    type: integer
+                  cacheSize:
+                    type: integer
+              health:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: ["Healthy", "Degraded", "Unhealthy"]
+                  lastHealthCheck:
+                    type: string
+                    format: date-time
+                  consecutiveFailures:
+                    type: integer
+                  lastError:
+                    type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+    subresources:
+      status: {}
+  scope: Namespaced
+  names:
+    plural: regulatorydatasources
+    singular: regulatorydatasource
+    kind: RegulatoryDataSource
+    shortNames:
+    - rds
+    - rdss

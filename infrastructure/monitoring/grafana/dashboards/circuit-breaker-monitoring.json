@@ -1,0 +1,145 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Regulens - Circuit Breaker Monitoring",
+    "tags": ["regulens", "circuit-breaker", "resilience"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Circuit Breaker States",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "regulens_circuit_breaker_state{state=\"CLOSED\"}",
+            "legendFormat": "CLOSED"
+          },
+          {
+            "expr": "regulens_circuit_breaker_state{state=\"OPEN\"}",
+            "legendFormat": "OPEN"
+          },
+          {
+            "expr": "regulens_circuit_breaker_state{state=\"HALF_OPEN\"}",
+            "legendFormat": "HALF_OPEN"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Circuit Breaker Failure Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_circuit_breaker_failures_total[5m]) / rate(regulens_circuit_breaker_requests_total[5m]) * 100",
+            "legendFormat": "{{service}} Failure Rate %"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Circuit Breaker Transitions",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(regulens_circuit_breaker_state_changes_total[5m])",
+            "legendFormat": "{{service}} State Changes"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Circuit Breaker Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_circuit_breaker_requests_total[5m])",
+            "legendFormat": "{{service}} Requests/sec"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Circuit Breaker Success Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(regulens_circuit_breaker_successes_total[5m]) / rate(regulens_circuit_breaker_requests_total[5m]) * 100",
+            "legendFormat": "{{service}} Success Rate %"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Circuit Breaker Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(regulens_circuit_breaker_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{service}} P95 Response Time"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(regulens_circuit_breaker_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{service}} P50 Response Time"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Circuit Breaker Status Table",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "regulens_circuit_breaker_info",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "displayMode": "json-view"
+            }
+          }
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": [
+        {
+          "name": "service",
+          "query": "label_values(regulens_circuit_breaker_requests_total, service)",
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

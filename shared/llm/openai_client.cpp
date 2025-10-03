@@ -16,6 +16,7 @@ OpenAIClient::OpenAIClient(std::shared_ptr<ConfigurationManager> config,
       error_handler_(error_handler),
       http_client_(std::make_shared<HttpClient>()),
       streaming_handler_(std::make_shared<StreamingResponseHandler>(config, logger.get(), error_handler.get())),
+      redis_client_(create_redis_client(config, logger, error_handler)),
       max_tokens_(4096),
       temperature_(0.7),
       request_timeout_seconds_(30),
@@ -62,6 +63,16 @@ bool OpenAIClient::initialize() {
         use_advanced_circuit_breaker_ = config_manager_->get_bool("LLM_OPENAI_USE_ADVANCED_CIRCUIT_BREAKER")
                                        .value_or(false);
 
+        // Initialize Redis client for caching
+        if (redis_client_) {
+            if (!redis_client_->initialize()) {
+                logger_->warn("Redis client initialization failed - LLM caching will be disabled");
+                redis_client_.reset();
+            } else {
+                logger_->info("Redis client initialized for LLM response caching");
+            }
+        }
+
         // Validate configuration
         if (api_key_.empty() || base_url_.empty()) {
             logger_->error("OpenAI client configuration incomplete - missing API key or base URL");
@@ -92,6 +103,55 @@ std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAIC
         handle_api_error("rate_limit", "Rate limit exceeded",
                         {{"requests_per_minute", std::to_string(max_requests_per_minute_)}});
         return std::nullopt;
+    }
+
+    // Check Redis cache for LLM response if caching is enabled
+    if (redis_client_) {
+        // Generate cache key from request content
+        std::string prompt_hash = generate_prompt_hash(request);
+        auto cached_result = redis_client_->get_cached_llm_response(prompt_hash, request.model);
+
+        if (cached_result.success && cached_result.value) {
+            try {
+                // Parse cached response
+                nlohmann::json cached_json = nlohmann::json::parse(*cached_result.value);
+                if (cached_json.contains("response")) {
+                    std::string response_text = cached_json["response"];
+
+                    // Create OpenAIResponse from cached data
+                    OpenAIResponse response;
+                    response.id = "cached-" + prompt_hash.substr(0, 8);
+                    response.object = "chat.completion";
+                    response.created = std::chrono::system_clock::now();
+                    response.model = request.model;
+
+                    // Create choice with cached response
+                    OpenAIChoice choice;
+                    choice.index = 0;
+                    choice.message.role = "assistant";
+                    choice.message.content = response_text;
+                    choice.finish_reason = "stop";
+                    response.choices.push_back(choice);
+
+                    // Estimate usage from cached data
+                    if (cached_json.contains("input_tokens") && cached_json.contains("output_tokens")) {
+                        response.usage.prompt_tokens = cached_json["input_tokens"];
+                        response.usage.completion_tokens = cached_json["output_tokens"];
+                        response.usage.total_tokens = response.usage.prompt_tokens + response.usage.completion_tokens;
+                    }
+
+                    logger_->debug("LLM response served from cache",
+                                 "OpenAIClient", "create_chat_completion",
+                                 {{"prompt_hash", prompt_hash}, {"model", request.model}});
+
+                    return response;
+                }
+            } catch (const std::exception& e) {
+                logger_->warn("Failed to parse cached LLM response, proceeding with API call",
+                             "OpenAIClient", "create_chat_completion",
+                             {{"error", e.what()}});
+            }
+        }
     }
 
     // Use circuit breaker protection (advanced or basic based on configuration)
@@ -177,6 +237,36 @@ std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAIC
 
     if (result && *result) {
         successful_requests_++;
+
+        // Cache the successful response if caching is enabled
+        if (redis_client_ && result->choices.size() > 0) {
+            try {
+                std::string prompt_hash = generate_prompt_hash(request);
+                std::string response_text = result->choices[0].message.content;
+
+                // Calculate prompt complexity for TTL
+                double complexity = calculate_prompt_complexity(request);
+
+                // Cache the response
+                auto cache_result = redis_client_->cache_llm_response(
+                    prompt_hash, request.model, response_text, complexity);
+
+                if (cache_result.success) {
+                    logger_->debug("LLM response cached successfully",
+                                 "OpenAIClient", "create_chat_completion",
+                                 {{"prompt_hash", prompt_hash}, {"model", request.model}});
+                } else {
+                    logger_->warn("Failed to cache LLM response",
+                                 "OpenAIClient", "create_chat_completion",
+                                 {{"error", cache_result.error_message}});
+                }
+            } catch (const std::exception& e) {
+                logger_->warn("Exception during LLM response caching",
+                             "OpenAIClient", "create_chat_completion",
+                             {{"error", e.what()}});
+            }
+        }
+
         return *result;
     } else {
         failed_requests_++;
@@ -934,6 +1024,72 @@ bool OpenAIClient::response_contains_function_calls(const OpenAIResponse& respon
 bool OpenAIClient::is_healthy() const {
     // Simple health check - could be enhanced with actual API ping
     return !api_key_.empty() && !base_url_.empty();
+}
+
+std::string OpenAIClient::generate_prompt_hash(const OpenAICompletionRequest& request) {
+    std::stringstream content;
+
+    // Include all messages in the hash
+    for (const auto& message : request.messages) {
+        content << message.role << ":" << message.content;
+        if (message.name) {
+            content << ":" << *message.name;
+        }
+        content << "|";
+    }
+
+    // Include key parameters that affect the response
+    content << "model:" << request.model << "|";
+    content << "temperature:" << request.temperature << "|";
+    content << "max_tokens:" << request.max_tokens << "|";
+
+    // Include function/tool definitions if present
+    if (request.functions) {
+        content << "functions:" << request.functions->dump() << "|";
+    }
+    if (request.tools) {
+        content << "tools:" << request.tools->dump() << "|";
+    }
+
+    // Simple hash function (in production, use proper crypto hash)
+    std::hash<std::string> hasher;
+    size_t hash_value = hasher(content.str());
+
+    // Convert to hex string
+    std::stringstream hash_stream;
+    hash_stream << std::hex << hash_value;
+    return hash_stream.str();
+}
+
+double OpenAIClient::calculate_prompt_complexity(const OpenAICompletionRequest& request) {
+    double complexity = 0.0;
+
+    // Base complexity from message count and length
+    size_t total_chars = 0;
+    for (const auto& message : request.messages) {
+        total_chars += message.content.length();
+    }
+
+    // Normalize character count to 0-0.5 range
+    double length_score = std::min(1.0, static_cast<double>(total_chars) / 8000.0) * 0.5;
+
+    // Temperature affects complexity (lower temp = more deterministic = higher complexity)
+    double temp_score = (1.0 - request.temperature) * 0.2;
+
+    // Function/tool calling increases complexity
+    double function_score = 0.0;
+    if (request.functions || request.tools) {
+        function_score = 0.3;
+    }
+
+    // Model complexity (GPT-4 is more complex than GPT-3.5)
+    double model_score = 0.0;
+    if (request.model.find("gpt-4") != std::string::npos) {
+        model_score = 0.2;
+    }
+
+    complexity = length_score + temp_score + function_score + model_score;
+    return std::min(1.0, complexity);
 }
 
 } // namespace regulens

@@ -1,0 +1,307 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: regulens-grafana-dashboards
+  namespace: monitoring
+  labels:
+    app: grafana
+    component: dashboards
+    system: regulens
+data:
+  system-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - System Overview",
+        "tags": ["regulens", "system", "overview"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "System Health Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"regulens\"}",
+                "legendFormat": "{{instance}}"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total[5m])",
+                "legendFormat": "Requests/sec"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{status=~\"5..\"}[5m]) / rate(http_requests_total[5m]) * 100",
+                "legendFormat": "Error Rate %"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }
+
+  circuit-breaker-monitoring.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - Circuit Breaker Monitoring",
+        "tags": ["regulens", "circuit-breaker", "resilience"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Circuit Breaker States",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "regulens_circuit_breaker_state{state=\"CLOSED\"}",
+                "legendFormat": "CLOSED"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Circuit Breaker Failure Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(regulens_circuit_breaker_failures_total[5m]) / rate(regulens_circuit_breaker_requests_total[5m]) * 100",
+                "legendFormat": "{{service}} Failure Rate %"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }
+
+  llm-performance.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - LLM Performance",
+        "tags": ["regulens", "llm", "performance"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "LLM API Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(regulens_llm_requests_total[5m])",
+                "legendFormat": "{{provider}} Requests/sec"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "LLM API Success Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(regulens_llm_requests_success_total[5m]) / rate(regulens_llm_requests_total[5m]) * 100",
+                "legendFormat": "{{provider}} Success Rate %"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }
+
+  redis-cache-performance.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - Redis Cache Performance",
+        "tags": ["regulens", "redis", "cache"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Redis Cache Hit Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "regulens_redis_cache_hit_rate",
+                "legendFormat": "Cache Hit Rate %"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Redis Operations Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(regulens_redis_operations_total[5m])",
+                "legendFormat": "Operations/sec"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }
+
+  compliance-operations.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - Compliance Operations",
+        "tags": ["regulens", "compliance", "operations"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Compliance Decision Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(regulens_compliance_decisions_total[5m])",
+                "legendFormat": "{{decision_type}} Decisions/sec"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Compliance Decision Accuracy",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "regulens_compliance_decision_accuracy",
+                "legendFormat": "{{decision_type}} Accuracy %"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }
+
+  kubernetes-operators.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - Kubernetes Operators",
+        "tags": ["regulens", "kubernetes", "operators"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Operator Health Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"regulens-operator\"}",
+                "legendFormat": "Operator Status"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Active Resources",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "count(regulens_agent_orchestrator_info) + count(regulens_compliance_agent_info) + count(regulens_regulatory_data_source_info)",
+                "legendFormat": "Total Resources"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }
+
+  regulatory-data-ingestion.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Regulens - Regulatory Data Ingestion",
+        "tags": ["regulens", "regulatory", "data", "ingestion"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Documents Processed Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(regulens_documents_processed_total[5m])",
+                "legendFormat": "{{source}} Documents/sec"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Data Ingestion Success Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "(rate(regulens_ingestion_operations_total[5m]) - rate(regulens_ingestion_errors_total[5m])) / rate(regulens_ingestion_operations_total[5m]) * 100",
+                "legendFormat": "{{source}} Success Rate %"
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 0
+      }
+    }

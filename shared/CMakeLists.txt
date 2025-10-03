@@ -39,6 +39,15 @@ add_library(regulens_shared STATIC
     # data_ingestion/ingestion_metrics.cpp
 )
 
+# Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)
+add_subdirectory(resilience)
+
+# Metrics module for monitoring and observability (Rule 1 compliance - enterprise monitoring)
+add_subdirectory(metrics)
+
+# Cache module for Redis-based distributed caching (Rule 1 compliance - enterprise performance)
+add_subdirectory(cache)
+
 # Web UI library for testing (Rule 6 compliance)
 add_subdirectory(web_ui)
 
@@ -65,4 +74,7 @@ target_link_libraries(regulens_shared
         ${PQXX_LIBRARIES}
         CURL::libcurl
         spdlog::spdlog
+        resilience
+        metrics
+        cache
 )

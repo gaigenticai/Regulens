@@ -14,6 +14,7 @@
 #include "../shared/logging/structured_logger.hpp"
 #include "../shared/models/compliance_event.hpp"
 #include "../shared/models/agent_decision.hpp"
+#include "../shared/resilience/circuit_breaker.hpp"
 
 namespace regulens {
 
@@ -126,6 +127,11 @@ private:
     std::atomic<size_t> total_fetches_;
     std::chrono::system_clock::time_point last_fetch_time_;
     std::unordered_set<std::string> seen_content_hashes_;
+
+    // Circuit breakers for regulatory API resilience
+    std::shared_ptr<CircuitBreaker> sec_circuit_breaker_;
+    std::shared_ptr<CircuitBreaker> fca_circuit_breaker_;
+    std::shared_ptr<CircuitBreaker> ecb_circuit_breaker_;
     mutable std::mutex content_mutex_;
 };
 

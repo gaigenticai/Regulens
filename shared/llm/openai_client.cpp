@@ -58,6 +58,10 @@ bool OpenAIClient::initialize() {
         max_requests_per_minute_ = static_cast<int>(config_manager_->get_int("LLM_OPENAI_MAX_REQUESTS_PER_MINUTE")
                                                    .value_or(50));
 
+        // Advanced circuit breaker configuration
+        use_advanced_circuit_breaker_ = config_manager_->get_bool("LLM_OPENAI_USE_ADVANCED_CIRCUIT_BREAKER")
+                                       .value_or(false);
+
         // Validate configuration
         if (api_key_.empty() || base_url_.empty()) {
             logger_->error("OpenAI client configuration incomplete - missing API key or base URL");
@@ -90,34 +94,86 @@ std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAIC
         return std::nullopt;
     }
 
-    // Use error handler for circuit breaker protection
-    auto result = error_handler_->execute_with_circuit_breaker<std::optional<OpenAIResponse>>(
-        [this, &request]() -> std::optional<OpenAIResponse> {
-            // Make the API request
-            auto http_response = make_api_request("/chat/completions", request.to_json());
-            if (!http_response) {
-                return std::nullopt;
+    // Use circuit breaker protection (advanced or basic based on configuration)
+    std::optional<OpenAIResponse> result;
+
+    if (use_advanced_circuit_breaker_) {
+        // Use advanced circuit breaker with detailed error handling
+        auto breaker_result = error_handler_->execute_with_advanced_circuit_breaker(
+            [this, &request]() -> regulens::CircuitBreakerResult {
+                // Make the API request
+                auto http_response = make_api_request("/chat/completions", request.to_json());
+                if (!http_response) {
+                    return regulens::CircuitBreakerResult(false, std::nullopt,
+                        "HTTP request failed", std::chrono::milliseconds(0),
+                        regulens::CircuitState::CLOSED);
+                }
+
+                // Parse the response
+                auto parsed_response = parse_api_response(*http_response);
+                if (!parsed_response) {
+                    return regulens::CircuitBreakerResult(false, std::nullopt,
+                        "API response parsing failed", std::chrono::milliseconds(0),
+                        regulens::CircuitState::CLOSED);
+                }
+
+                // Validate response
+                if (!validate_response(*parsed_response)) {
+                    handle_api_error("validation", "Invalid API response structure");
+                    return regulens::CircuitBreakerResult(false, std::nullopt,
+                        "API response validation failed", std::chrono::milliseconds(0),
+                        regulens::CircuitState::CLOSED);
+                }
+
+                // Update usage statistics
+                update_usage_stats(*parsed_response);
+
+                return regulens::CircuitBreakerResult(true, parsed_response,
+                    "Success", std::chrono::milliseconds(0),
+                    regulens::CircuitState::CLOSED);
+            },
+            CIRCUIT_BREAKER_SERVICE, "OpenAIClient", "create_chat_completion"
+        );
+
+        if (breaker_result.success && breaker_result.data) {
+            // Extract the OpenAIResponse from the circuit breaker result
+            try {
+                result = breaker_result.data->get<OpenAIResponse>();
+            } catch (const std::exception& e) {
+                logger_->error("Failed to extract OpenAI response from circuit breaker result: " + std::string(e.what()));
+                result = std::nullopt;
             }
+        }
+    } else {
+        // Use basic circuit breaker for backward compatibility
+        result = error_handler_->execute_with_circuit_breaker<std::optional<OpenAIResponse>>(
+            [this, &request]() -> std::optional<OpenAIResponse> {
+                // Make the API request
+                auto http_response = make_api_request("/chat/completions", request.to_json());
+                if (!http_response) {
+                    return std::nullopt;
+                }
 
-            // Parse the response
-            auto parsed_response = parse_api_response(*http_response);
-            if (!parsed_response) {
-                return std::nullopt;
-            }
+                // Parse the response
+                auto parsed_response = parse_api_response(*http_response);
+                if (!parsed_response) {
+                    return std::nullopt;
+                }
 
-            // Validate response
-            if (!validate_response(*parsed_response)) {
-                handle_api_error("validation", "Invalid API response structure");
-                return std::nullopt;
-            }
+                // Validate response
+                if (!validate_response(*parsed_response)) {
+                    handle_api_error("validation", "Invalid API response structure");
+                    return std::nullopt;
+                }
 
-            // Update usage statistics
-            update_usage_stats(*parsed_response);
+                // Update usage statistics
+                update_usage_stats(*parsed_response);
 
-            return parsed_response;
-        },
-        CIRCUIT_BREAKER_SERVICE, "OpenAIClient", "create_chat_completion"
-    );
+                return parsed_response;
+            },
+            CIRCUIT_BREAKER_SERVICE, "OpenAIClient", "create_chat_completion"
+        );
+    }
 
     if (result && *result) {
         successful_requests_++;

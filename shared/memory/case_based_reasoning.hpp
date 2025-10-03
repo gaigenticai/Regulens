@@ -378,6 +378,37 @@ private:
      */
     std::vector<std::pair<ComplianceCase, double>> find_similar_context_decisions(
         const nlohmann::json& context, const nlohmann::json& decision);
+
+    /**
+     * @brief Analyze risk score from context information
+     * @param context Transaction context
+     * @return Risk score (0.0-1.0)
+     */
+    double analyze_context_risk(const nlohmann::json& context);
+
+    /**
+     * @brief Generate synthetic similar case for prediction
+     * @param context Original context
+     * @param decision Original decision
+     * @param risk_score Calculated risk score
+     * @param case_index Index for case generation
+     * @return Generated compliance case
+     */
+    ComplianceCase generate_synthetic_similar_case(
+        const nlohmann::json& context, const nlohmann::json& decision,
+        double risk_score, int case_index);
+
+    /**
+     * @brief Calculate similarity between contexts and decisions
+     * @param context Original context
+     * @param decision Original decision
+     * @param similar_case Generated similar case
+     * @param risk_score Risk score
+     * @return Similarity score (0.0-1.0)
+     */
+    double calculate_synthetic_similarity(
+        const nlohmann::json& context, const nlohmann::json& decision,
+        const ComplianceCase& similar_case, double risk_score);
 };
 
 /**
@@ -427,6 +458,18 @@ private:
      */
     bool decisions_are_contradictory(const nlohmann::json& decision1,
                                    const nlohmann::json& decision2) const;
+
+    /**
+     * @brief Generate synthetic contradictory case for validation
+     * @param context Original context
+     * @param decision Original decision
+     * @param risk_score Risk score
+     * @param case_index Index for case generation
+     * @return Generated contradictory case
+     */
+    ComplianceCase generate_contradictory_case(
+        const nlohmann::json& context, const nlohmann::json& decision,
+        double risk_score, int case_index);
 };
 
 /**

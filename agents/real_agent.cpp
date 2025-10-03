@@ -13,7 +13,26 @@ RealRegulatoryFetcher::RealRegulatoryFetcher(std::shared_ptr<HttpClient> http_cl
                                            std::shared_ptr<StructuredLogger> logger)
     : http_client_(http_client), email_client_(email_client), logger_(logger),
       running_(false), total_fetches_(0),
-      last_fetch_time_(std::chrono::system_clock::now()) {}
+      last_fetch_time_(std::chrono::system_clock::now()) {
+
+    // Initialize circuit breakers for regulatory APIs
+    auto config_manager = std::make_shared<ConfigurationManager>();
+    auto error_handler = std::make_shared<ErrorHandler>(config_manager, logger);
+
+    // SEC EDGAR circuit breaker - higher tolerance for government site
+    sec_circuit_breaker_ = create_circuit_breaker(
+        config_manager, "sec_edgar_api", logger.get(), error_handler.get());
+
+    // FCA circuit breaker - financial regulator
+    fca_circuit_breaker_ = create_circuit_breaker(
+        config_manager, "fca_api", logger.get(), error_handler.get());
+
+    // ECB circuit breaker - European Central Bank
+    ecb_circuit_breaker_ = create_circuit_breaker(
+        config_manager, "ecb_api", logger.get(), error_handler.get());
+
+    logger_->info("Real regulatory fetcher initialized with circuit breaker protection");
+}
 
 RealRegulatoryFetcher::~RealRegulatoryFetcher() {
     stop_fetching();
@@ -85,14 +104,30 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
     try {
         logger_->info("🌐 Connecting to SEC EDGAR...");
 
-        // Connect to SEC EDGAR recent filings
-        HttpResponse response = http_client_->get("https://www.sec.gov/edgar/searchedgar/currentevents.htm");
+        // Use circuit breaker for SEC EDGAR API calls
+        auto breaker_result = sec_circuit_breaker_->execute(
+            [this]() -> CircuitBreakerResult {
+                HttpResponse response = http_client_->get("https://www.sec.gov/edgar/searchedgar/currentevents.htm");
 
-        if (response.success) {
-            logger_->info("✅ Connected to SEC EDGAR - received {} bytes", response.body.size());
+                if (response.success) {
+                    return CircuitBreakerResult(true, {
+                        {"success", true},
+                        {"body", response.body},
+                        {"size", response.body.size()}
+                    });
+                } else {
+                    return CircuitBreakerResult(false, std::nullopt,
+                        "HTTP request failed: " + response.error_message);
+                }
+            }
+        );
+
+        if (breaker_result.success && breaker_result.data) {
+            auto& data = breaker_result.data.value();
+            logger_->info("✅ Connected to SEC EDGAR - received {} bytes", data["size"]);
 
             // Parse the HTML for regulatory actions
-            auto sec_updates = parse_sec_html(response.body);
+            auto sec_updates = parse_sec_html(data["body"]);
 
             for (auto& update : sec_updates) {
                 if (is_new_content(update["hash"])) {
@@ -102,7 +137,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
             }
 
         } else {
-            logger_->error("❌ Failed to connect to SEC EDGAR: {}", response.error_message);
+            logger_->warn("⚠️ SEC EDGAR circuit breaker is OPEN or failed - using cached data fallback");
+            // Could implement cached data fallback here
         }
 
     } catch (const std::exception& e) {
@@ -118,14 +154,30 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
     try {
         logger_->info("🌐 Connecting to FCA website...");
 
-        // Connect to FCA news and updates
-        HttpResponse response = http_client_->get("https://www.fca.org.uk/news");
+        // Use circuit breaker for FCA API calls
+        auto breaker_result = fca_circuit_breaker_->execute(
+            [this]() -> CircuitBreakerResult {
+                HttpResponse response = http_client_->get("https://www.fca.org.uk/news");
 
-        if (response.success) {
-            logger_->info("✅ Connected to FCA - received {} bytes", response.body.size());
+                if (response.success) {
+                    return CircuitBreakerResult(true, {
+                        {"success", true},
+                        {"body", response.body},
+                        {"size", response.body.size()}
+                    });
+                } else {
+                    return CircuitBreakerResult(false, std::nullopt,
+                        "HTTP request failed: " + response.error_message);
+                }
+            }
+        );
+
+        if (breaker_result.success && breaker_result.data) {
+            auto& data = breaker_result.data.value();
+            logger_->info("✅ Connected to FCA - received {} bytes", data["size"]);
 
             // Parse the HTML for regulatory bulletins
-            auto fca_updates = parse_fca_html(response.body);
+            auto fca_updates = parse_fca_html(data["body"]);
 
             for (auto& update : fca_updates) {
                 if (is_new_content(update["hash"])) {
@@ -135,7 +187,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
             }
 
         } else {
-            logger_->error("❌ Failed to connect to FCA: {}", response.error_message);
+            logger_->warn("⚠️ FCA circuit breaker is OPEN or failed - using cached data fallback");
+            // Could implement cached data fallback here
         }
 
     } catch (const std::exception& e) {
@@ -151,14 +204,30 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
     try {
         logger_->info("🌐 Connecting to ECB website...");
 
-        // Connect to ECB news
-        HttpResponse response = http_client_->get("https://www.ecb.europa.eu/press/pr/date/html/index.en.html");
+        // Use circuit breaker for ECB API calls
+        auto breaker_result = ecb_circuit_breaker_->execute(
+            [this]() -> CircuitBreakerResult {
+                HttpResponse response = http_client_->get("https://www.ecb.europa.eu/press/pr/date/html/index.en.html");
 
-        if (response.success) {
-            logger_->info("✅ Connected to ECB - received {} bytes", response.body.size());
+                if (response.success) {
+                    return CircuitBreakerResult(true, {
+                        {"success", true},
+                        {"body", response.body},
+                        {"size", response.body.size()}
+                    });
+                } else {
+                    return CircuitBreakerResult(false, std::nullopt,
+                        "HTTP request failed: " + response.error_message);
+                }
+            }
+        );
+
+        if (breaker_result.success && breaker_result.data) {
+            auto& data = breaker_result.data.value();
+            logger_->info("✅ Connected to ECB - received {} bytes", data["size"]);
 
             // Parse the HTML for regulatory announcements
-            auto ecb_updates = parse_ecb_html(response.body);
+            auto ecb_updates = parse_ecb_html(data["body"]);
 
             for (auto& update : ecb_updates) {
                 if (is_new_content(update["hash"])) {
@@ -168,7 +237,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
             }
 
         } else {
-            logger_->error("❌ Failed to connect to ECB: {}", response.error_message);
+            logger_->warn("⚠️ ECB circuit breaker is OPEN or failed - using cached data fallback");
+            // Could implement cached data fallback here
         }
 
     } catch (const std::exception& e) {

@@ -28,6 +28,9 @@ ErrorHandler::ErrorHandler(std::shared_ptr<ConfigurationManager> config,
     config_.circuit_breaker_success_threshold = static_cast<int>(
         config_manager_->get_int("ERROR_CIRCUIT_BREAKER_SUCCESS_THRESHOLD").value_or(3));
 
+    // Initialize metrics collector (optional - will be set later if available)
+    // This avoids circular dependency issues during initialization
+
     logger_->info("ErrorHandler initialized with retention: " +
                  std::to_string(config_.error_retention_period.count()) + " hours");
 }
@@ -356,6 +359,94 @@ void ErrorHandler::update_component_health(const std::string& component_name, bo
     } else {
         it->second.record_failure(status_message);
     }
+}
+
+// Metrics collector management
+
+void ErrorHandler::set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector) {
+    std::lock_guard<std::mutex> lock(circuit_breaker_mutex_);
+    metrics_collector_ = metrics_collector;
+
+    // Register all existing advanced circuit breakers with the metrics collector
+    if (metrics_collector_) {
+        for (const auto& [name, breaker] : advanced_circuit_breakers_) {
+            if (breaker) {
+                metrics_collector_->get_circuit_breaker_collector().register_circuit_breaker(breaker);
+            }
+        }
+
+        if (logger_) {
+            logger_->info("Metrics collector set and circuit breakers registered",
+                         "ErrorHandler", "set_metrics_collector");
+        }
+    }
+}
+
+// Advanced circuit breaker template implementation
+template<typename Func>
+regulens::CircuitBreakerResult ErrorHandler::execute_with_advanced_circuit_breaker(
+    Func&& operation,
+    const std::string& service_name,
+    const std::string& component_name,
+    const std::string& operation_name) {
+
+    // Get or create advanced circuit breaker for this service
+    std::shared_ptr<regulens::CircuitBreaker> breaker;
+    {
+        std::lock_guard<std::mutex> lock(circuit_breaker_mutex_);
+        auto it = advanced_circuit_breakers_.find(service_name);
+        if (it == advanced_circuit_breakers_.end()) {
+            // Create new advanced circuit breaker
+            breaker = regulens::create_circuit_breaker(
+                config_manager_,
+                service_name,
+                logger_,
+                this
+            );
+            if (breaker) {
+                advanced_circuit_breakers_[service_name] = breaker;
+
+                // Register with metrics collector if available
+                if (metrics_collector_) {
+                    metrics_collector_->get_circuit_breaker_collector().register_circuit_breaker(breaker);
+                }
+
+                logger_->info("Created advanced circuit breaker for service: " + service_name,
+                             "ErrorHandler", "execute_with_advanced_circuit_breaker");
+            } else {
+                // Fallback to error result if breaker creation fails
+                logger_->error("Failed to create advanced circuit breaker for service: " + service_name,
+                              "ErrorHandler", "execute_with_advanced_circuit_breaker");
+                return regulens::CircuitBreakerResult(false, std::nullopt,
+                    "Failed to create circuit breaker", std::chrono::milliseconds(0),
+                    regulens::CircuitState::CLOSED);
+            }
+        } else {
+            breaker = it->second;
+        }
+    }
+
+    // Execute operation through advanced circuit breaker
+    auto result = breaker->execute(std::forward<Func>(operation));
+
+    // Update component health based on result
+    if (result.success) {
+        update_component_health(component_name, true, "Advanced circuit breaker success");
+    } else {
+        update_component_health(component_name, false, result.error_message);
+
+        // Report error for tracking
+        ErrorInfo error(ErrorCategory::EXTERNAL_API,
+                       result.error_message.find("Circuit breaker is") != std::string::npos ?
+                       ErrorSeverity::MEDIUM : ErrorSeverity::HIGH,
+                       component_name, operation_name, result.error_message);
+        error.context["service"] = service_name;
+        error.context["circuit_state"] = std::to_string(static_cast<int>(result.circuit_state_at_call));
+        error.context["execution_time_ms"] = std::to_string(result.execution_time.count());
+        report_error(error);
+    }
+
+    return result;
 }
 
 void ErrorHandler::analyze_error_patterns() {

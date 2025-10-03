@@ -286,6 +286,7 @@ private:
     int request_timeout_seconds_;
     int max_retries_;
     std::chrono::milliseconds rate_limit_window_;
+    bool use_advanced_circuit_breaker_;  // Use advanced circuit breaker instead of basic
 
     // Usage tracking
     std::atomic<size_t> total_requests_;

@@ -13,6 +13,8 @@
 #include <nlohmann/json.hpp>
 
 #include "models/error_handling.hpp"
+#include "resilience/circuit_breaker.hpp"
+#include "metrics/prometheus_metrics.hpp"
 #include "logging/structured_logger.hpp"
 #include "config/configuration_manager.hpp"
 
@@ -82,6 +84,27 @@ public:
     template<typename T>
     std::optional<T> execute_with_circuit_breaker(
         std::function<T()> operation,
+        const std::string& service_name,
+        const std::string& component_name,
+        const std::string& operation_name);
+
+    /**
+     * @brief Set the metrics collector for circuit breaker monitoring
+     * @param metrics_collector Shared pointer to metrics collector
+     */
+    void set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector);
+
+    /**
+     * @brief Execute an operation with advanced circuit breaker protection
+     * @param operation Function to execute (should return CircuitBreakerResult)
+     * @param service_name Name of the external service
+     * @param component_name Component performing the operation
+     * @param operation_name Operation name
+     * @return CircuitBreakerResult with detailed execution information
+     */
+    template<typename Func>
+    regulens::CircuitBreakerResult execute_with_advanced_circuit_breaker(
+        Func&& operation,
         const std::string& service_name,
         const std::string& component_name,
         const std::string& operation_name);
@@ -178,6 +201,8 @@ private:
     std::deque<ErrorInfo> error_history_;
     std::unordered_map<std::string, ComponentHealth> component_health_;
     std::unordered_map<std::string, CircuitBreaker> circuit_breakers_;
+    std::unordered_map<std::string, std::shared_ptr<regulens::CircuitBreaker>> advanced_circuit_breakers_;
+    std::shared_ptr<PrometheusMetricsCollector> metrics_collector_;
     std::mutex circuit_breaker_mutex_;
     std::unordered_map<std::string, FallbackConfig> fallback_configs_;
 

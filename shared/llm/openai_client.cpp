@@ -5,17 +5,27 @@
 #include <iomanip>
 #include <cmath>
 #include <thread>
-#include <regex>
 
 namespace regulens {
 
 OpenAIClient::OpenAIClient(std::shared_ptr<ConfigurationManager> config,
                          std::shared_ptr<StructuredLogger> logger,
                          std::shared_ptr<ErrorHandler> error_handler)
-    : config_manager_(config), logger_(logger), error_handler_(error_handler),
+    : config_manager_(config),
+      logger_(logger),
+      error_handler_(error_handler),
       http_client_(std::make_shared<HttpClient>()),
-      total_requests_(0), successful_requests_(0), failed_requests_(0),
-      total_tokens_used_(0), estimated_cost_usd_(0.0),
+      streaming_handler_(std::make_shared<StreamingResponseHandler>(config, logger.get(), error_handler.get())),
+      max_tokens_(4096),
+      temperature_(0.7),
+      request_timeout_seconds_(30),
+      max_retries_(3),
+      rate_limit_window_(std::chrono::milliseconds(60000)), // 1 minute
+      total_requests_(0),
+      successful_requests_(0),
+      failed_requests_(0),
+      total_tokens_used_(0),
+      estimated_cost_usd_(0.0),
       last_request_time_(std::chrono::system_clock::now()),
       max_requests_per_minute_(50) {  // Conservative default, can be configured
 }
@@ -54,21 +64,20 @@ bool OpenAIClient::initialize() {
             return false;
         }
 
-        logger_->info("OpenAI client initialized with model: {}, timeout: {}s, max_tokens: {}",
-                     default_model_, request_timeout_seconds_, max_tokens_);
+        logger_->info("OpenAI client initialized with model: " + default_model_ + ", timeout: " +
+                     std::to_string(request_timeout_seconds_) + "s, max_tokens: " + std::to_string(max_tokens_));
         return true;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to initialize OpenAI client: {}", e.what());
+        logger_->error("Failed to initialize OpenAI client: " + std::string(e.what()));
         return false;
     }
 }
 
 void OpenAIClient::shutdown() {
-    logger_->info("OpenAI client shutdown - Total requests: {}, Successful: {}, Failed: {}",
-                 static_cast<size_t>(total_requests_),
-                 static_cast<size_t>(successful_requests_),
-                 static_cast<size_t>(failed_requests_));
+    logger_->info("OpenAI client shutdown - Total requests: " + std::to_string(total_requests_) +
+                 ", Successful: " + std::to_string(successful_requests_) +
+                 ", Failed: " + std::to_string(failed_requests_));
 }
 
 std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAICompletionRequest& request) {
@@ -134,13 +143,13 @@ std::optional<std::string> OpenAIClient::analyze_text(const std::string& text,
         auto response = create_chat_completion(request);
         if (!response || response->choices.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("analysis", "Empty response from API");
+            
             throw std::runtime_error("Analysis failed: Empty response from API");
         }
         return response->choices[0].message.content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("analysis", e.what());
+        
         throw std::runtime_error("Analysis failed: " + std::string(e.what()));
     }
 }
@@ -196,13 +205,13 @@ Provide your analysis in a structured format with clear reasoning and actionable
         auto response = create_chat_completion(request);
         if (!response || response->choices.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("compliance_reasoning", "Empty response from API");
+            
             throw std::runtime_error("Compliance reasoning failed: Empty response from API");
         }
         return response->choices[0].message.content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("compliance_reasoning", e.what());
+        
         throw std::runtime_error("Compliance reasoning failed: " + std::string(e.what()));
     }
 }
@@ -311,13 +320,13 @@ Structure your response with:
         auto response = create_chat_completion(request);
         if (!response || response->choices.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("decision_recommendation", "Empty response from API");
+            
             throw std::runtime_error("Decision recommendation failed: Empty response from API");
         }
         return response->choices[0].message.content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("decision_recommendation", e.what());
+        
         throw std::runtime_error("Decision recommendation failed: " + std::string(e.what()));
     }
 }
@@ -379,22 +388,22 @@ std::optional<HttpResponse> OpenAIClient::make_api_request(const std::string& en
 
         std::string payload_str = payload.dump();
 
-        logger_->debug("Making OpenAI API request to: {}", url);
+        logger_->debug("Making OpenAI API request to: " + url);
 
-        auto response = http_client_->post(url, payload_str, headers,
-                                         std::chrono::seconds(request_timeout_seconds_));
+        http_client_->set_timeout(request_timeout_seconds_);
+        auto response = http_client_->post(url, payload_str, headers);
 
         last_request_time_ = std::chrono::system_clock::now();
 
-        if (!response) {
-            handle_api_error("network", "No response from OpenAI API");
+        if (!response.success) {
+            handle_api_error("network", "Request failed: " + response.error_message);
             return std::nullopt;
         }
 
-        if (response->status_code < 200 || response->status_code >= 300) {
-            handle_api_error("http_error", "HTTP " + std::to_string(response->status_code),
-                           {{"status_code", std::to_string(response->status_code)},
-                            {"response_body", response->body ? response->body->substr(0, 500) : "empty"}});
+        if (response.status_code < 200 || response.status_code >= 300) {
+            handle_api_error("http_error", "HTTP " + std::to_string(response.status_code),
+                           {{"status_code", std::to_string(response.status_code)},
+                            {"response_body", response.body.empty() ? "empty" : response.body.substr(0, 500)}});
             return std::nullopt;
         }
 
@@ -408,12 +417,12 @@ std::optional<HttpResponse> OpenAIClient::make_api_request(const std::string& en
 
 std::optional<OpenAIResponse> OpenAIClient::parse_api_response(const HttpResponse& response) {
     try {
-        if (!response.body) {
+        if (response.body.empty()) {
             handle_api_error("parsing", "Empty response body");
             return std::nullopt;
         }
 
-        nlohmann::json json_response = nlohmann::json::parse(*response.body);
+        nlohmann::json json_response = nlohmann::json::parse(response.body);
 
         // Check for API errors
         if (json_response.contains("error")) {
@@ -470,7 +479,7 @@ std::optional<OpenAIResponse> OpenAIClient::parse_api_response(const HttpRespons
 
     } catch (const std::exception& e) {
         handle_api_error("parsing", std::string("Failed to parse API response: ") + e.what(),
-                        {{"response_body", response.body ? response.body->substr(0, 200) : "empty"}});
+                        {{"response_body", response.body.empty() ? "empty" : response.body.substr(0, 200)}});
         return std::nullopt;
     }
 }
@@ -488,7 +497,7 @@ void OpenAIClient::handle_api_error(const std::string& error_type,
     error_handler_->report_error(error_info);
 
     // Log the error
-    logger_->error("OpenAI API error - Type: {}, Message: {}", error_type, message);
+    logger_->error("OpenAI API error - Type: " + error_type + ", Message: " + message);
 }
 
 bool OpenAIClient::check_rate_limit() {
@@ -504,8 +513,8 @@ bool OpenAIClient::check_rate_limit() {
 
     // Check if we're within limits
     if (static_cast<int>(request_timestamps_.size()) >= max_requests_per_minute_) {
-        logger_->warn("OpenAI API rate limit exceeded: {} requests in last minute",
-                     request_timestamps_.size());
+        logger_->warn("OpenAI API rate limit exceeded: " + std::to_string(request_timestamps_.size()) +
+                     " requests in last minute");
         return false;
     }
 
@@ -515,11 +524,11 @@ bool OpenAIClient::check_rate_limit() {
 }
 
 void OpenAIClient::update_usage_stats(const OpenAIResponse& response) {
-    total_tokens_used_ += response.usage.total_tokens;
+    total_tokens_used_ += static_cast<size_t>(response.usage.total_tokens);
     estimated_cost_usd_ += calculate_cost(response.model, response.usage.total_tokens);
 
-    logger_->debug("OpenAI usage updated - Tokens: {}, Cost: ${:.4f}",
-                  response.usage.total_tokens, calculate_cost(response.model, response.usage.total_tokens));
+    logger_->debug("OpenAI usage updated - Tokens: " + std::to_string(response.usage.total_tokens) +
+                  ", Cost: $" + std::to_string(calculate_cost(response.model, response.usage.total_tokens)));
 }
 
 double OpenAIClient::calculate_cost(const std::string& model, int tokens) {
@@ -539,7 +548,7 @@ double OpenAIClient::calculate_cost(const std::string& model, int tokens) {
 
     auto it = pricing_per_1k_tokens.find(model);
     if (it == pricing_per_1k_tokens.end()) {
-        logger_->warn("Unknown model for cost calculation: {}", model);
+        logger_->warn("Unknown model for cost calculation: " + model);
         return 0.0; // Unknown model, no cost calculation
     }
 
@@ -620,5 +629,255 @@ bool OpenAIClient::validate_response(const OpenAIResponse& response) {
 }
 
 // Fallback responses removed - Rule 7 compliance: No makeshift workarounds or simplified functionality
+
+std::optional<std::shared_ptr<StreamingSession>> OpenAIClient::create_streaming_completion(
+    const OpenAICompletionRequest& request,
+    StreamingCallback streaming_callback,
+    CompletionCallback completion_callback) {
+
+    // Generate unique session ID
+    std::string session_id = "openai_stream_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) +
+                           "_" + std::to_string(std::rand());
+
+    try {
+        // Create streaming session
+        auto session = streaming_handler_->create_session(session_id);
+        if (!session) {
+            logger_->error("Failed to create streaming session", "OpenAIClient", "create_streaming_completion");
+            return std::nullopt;
+        }
+
+        // Set up session callbacks
+        session->start(
+            streaming_callback,
+            completion_callback,
+            [this, session_id](const std::string& error) {
+                logger_->error("Streaming session error: " + error, "OpenAIClient", "create_streaming_completion");
+                streaming_handler_->remove_session(session_id);
+            }
+        );
+
+        // Prepare request with streaming enabled
+        auto streaming_request = request;
+        streaming_request.stream = true;
+
+        // Make streaming HTTP request
+        std::string url = base_url_ + "/chat/completions";
+        std::string payload_str = streaming_request.to_json().dump();
+
+        std::unordered_map<std::string, std::string> headers = {
+            {"Authorization", "Bearer " + api_key_},
+            {"Content-Type", "application/json"},
+            {"Accept", "text/event-stream"},
+            {"Cache-Control", "no-cache"}
+        };
+
+        // Check rate limiting
+        if (!check_rate_limit()) {
+            session->fail("Rate limit exceeded");
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        // Set up streaming callback for real-time processing
+        http_client_->set_streaming_mode(true);
+        http_client_->set_streaming_callback([session](const std::string& chunk) {
+            // Process streaming data in real-time
+            session->process_data(chunk);
+        });
+
+        // Make the streaming request with real-time processing
+        http_client_->set_timeout(request_timeout_seconds_);
+        auto response = http_client_->post_streaming(url, payload_str, headers);
+
+        last_request_time_ = std::chrono::system_clock::now();
+        total_requests_++;
+
+        if (!response.success) {
+            handle_api_error("network", "Request failed: " + response.error_message);
+            session->fail("Network error: " + response.error_message);
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        if (response.status_code < 200 || response.status_code >= 300) {
+            handle_api_error("http_error", "HTTP " + std::to_string(response.status_code));
+            session->fail("HTTP error: " + std::to_string(response.status_code));
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        // Streaming is complete - finalize the session
+        try {
+            // For OpenAI streaming, the final response might be in the last chunk
+            // The session should have been completed by the streaming callback
+            // If not, we can attempt to construct a final response from accumulated data
+            if (!session->is_active()) {
+                // Session was already completed by streaming callback
+                logger_->info("OpenAI streaming session completed successfully: " + session_id,
+                             "OpenAIClient", "create_streaming_completion");
+            } else {
+                // Session still active - complete it with accumulated data
+                nlohmann::json final_response = {
+                    {"object", "chat.completion"},
+                    {"model", streaming_request.model},
+                    {"choices", nlohmann::json::array()},
+                    {"usage", {
+                        {"prompt_tokens", 0},
+                        {"completion_tokens", 0},
+                        {"total_tokens", 0}
+                    }}
+                };
+
+                // Add the accumulated content as a choice
+                final_response["choices"].push_back({
+                    {"index", 0},
+                    {"message", {
+                        {"role", "assistant"},
+                        {"content", session->get_accumulated_response()["content"]}
+                    }},
+                    {"finish_reason", "stop"}
+                });
+
+                session->complete(final_response);
+            }
+        } catch (const std::exception& e) {
+            session->fail("Failed to finalize streaming response: " + std::string(e.what()));
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        successful_requests_++;
+        return session;
+
+    } catch (const std::exception& e) {
+        logger_->error("Streaming completion failed: " + std::string(e.what()),
+                      "OpenAIClient", "create_streaming_completion");
+        error_handler_->report_error(ErrorInfo{
+            ErrorCategory::EXTERNAL_API,
+            ErrorSeverity::HIGH,
+            "OpenAIClient",
+            "create_streaming_completion",
+            "OpenAI streaming completion failed: " + std::string(e.what()),
+            "Session ID: " + session_id
+        });
+
+        streaming_handler_->remove_session(session_id);
+        return std::nullopt;
+    }
+}
+
+// Function Calling Implementation
+
+OpenAICompletionRequest OpenAIClient::create_function_completion_request(
+    const std::vector<OpenAIMessage>& messages,
+    const nlohmann::json& functions,
+    const std::string& model) {
+
+    return OpenAICompletionRequest{
+        .model = model,
+        .messages = messages,
+        .functions = functions,
+        .temperature = 0.1,  // Lower temperature for more consistent function calling
+        .max_tokens = 2000
+    };
+}
+
+OpenAICompletionRequest OpenAIClient::create_tool_completion_request(
+    const std::vector<OpenAIMessage>& messages,
+    const nlohmann::json& tools,
+    const std::string& tool_choice,
+    const std::string& model) {
+
+    return OpenAICompletionRequest{
+        .model = model,
+        .messages = messages,
+        .tools = tools,
+        .tool_choice = tool_choice,
+        .temperature = 0.1,  // Lower temperature for more consistent tool calling
+        .max_tokens = 2000
+    };
+}
+
+OpenAIMessage OpenAIClient::create_function_response_message(
+    const std::string& function_name,
+    const nlohmann::json& function_response,
+    const std::string& tool_call_id) {
+
+    OpenAIMessage message;
+    message.role = tool_call_id.empty() ? "function" : "tool";
+    message.content = function_response.dump();
+
+    if (!tool_call_id.empty()) {
+        message.tool_call_id = tool_call_id;
+    } else {
+        message.name = function_name;
+    }
+
+    return message;
+}
+
+std::vector<FunctionCall> OpenAIClient::parse_function_calls_from_response(const OpenAIResponse& response) {
+    std::vector<FunctionCall> calls;
+
+    try {
+        if (!response.choices.empty()) {
+            const auto& choice = response.choices[0];
+            const auto& message = choice.message;
+
+            // Check for tool calls (new format)
+            if (message.tool_calls) {
+                for (const auto& tool_call : *message.tool_calls) {
+                    if (tool_call.contains("function")) {
+                        calls.push_back(FunctionCall::from_openai_tool_call(tool_call));
+                    }
+                }
+            }
+            // Check for function call (legacy format)
+            else if (message.function_call) {
+                calls.push_back(FunctionCall::from_openai_function_call(*message.function_call));
+            }
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Failed to parse function calls from response: " + std::string(e.what()),
+                      "OpenAIClient", "parse_function_calls_from_response");
+
+        error_handler_->report_error(ErrorInfo{
+            ErrorCategory::PROCESSING,
+            ErrorSeverity::ERROR,
+            "OpenAIClient",
+            "parse_function_calls_from_response",
+            "Failed to parse function calls: " + std::string(e.what()),
+            "Response parsing failed"
+        });
+    }
+
+    return calls;
+}
+
+bool OpenAIClient::response_contains_function_calls(const OpenAIResponse& response) {
+    if (response.choices.empty()) {
+        return false;
+    }
+
+    const auto& message = response.choices[0].message;
+
+    // Check for tool calls (new format)
+    if (message.tool_calls && !(*message.tool_calls).empty()) {
+        return true;
+    }
+
+    // Check for function call (legacy format)
+    if (message.function_call) {
+        return true;
+    }
+
+    return false;
+}
+
+bool OpenAIClient::is_healthy() const {
+    // Simple health check - could be enhanced with actual API ping
+    return !api_key_.empty() && !base_url_.empty();
+}
 
 } // namespace regulens

@@ -177,12 +177,16 @@ private:
     std::mutex error_mutex_;
     std::deque<ErrorInfo> error_history_;
     std::unordered_map<std::string, ComponentHealth> component_health_;
-    std::unordered_map<std::string, CircuitBreakerStateInfo> circuit_breakers_;
+    std::unordered_map<std::string, CircuitBreaker> circuit_breakers_;
     std::mutex circuit_breaker_mutex_;
     std::unordered_map<std::string, FallbackConfig> fallback_configs_;
 
     std::mutex stats_mutex_;
     std::atomic<size_t> total_errors_processed_;
+
+    // Enhanced error correlation and context tracking
+    std::mutex error_context_mutex_;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> error_contexts_;
     std::atomic<size_t> total_recovery_attempts_;
     std::atomic<size_t> total_successful_recoveries_;
 
@@ -213,6 +217,18 @@ private:
     void analyze_error_patterns();
     void check_error_rate_limits();
     void send_error_alerts(const ErrorInfo& error);
+
+    // Enhanced error tracking and correlation
+    std::string generate_error_correlation_id();
+    void add_error_context(const std::string& correlation_id, const std::string& key, const std::string& value);
+    std::unordered_map<std::string, std::string> get_error_context(const std::string& correlation_id);
+    void clear_error_context(const std::string& correlation_id);
+
+    // Comprehensive health monitoring
+    nlohmann::json get_system_health_report();
+    bool check_external_service_health(const std::string& service_name, const std::string& endpoint);
+    nlohmann::json get_component_health_status();
+    void perform_external_health_checks();
 
     // Utility functions
     bool is_component_critical(const std::string& component_name);
@@ -286,9 +302,9 @@ std::optional<T> ErrorHandler::execute_with_recovery(
             // Check if we should retry
             if (attempt < retry_config.max_attempts && should_retry_error(error, retry_config)) {
                 auto delay = calculate_retry_delay(attempt, retry_config);
-                logger_->info("Retrying operation {} for component {} in {}ms (attempt {}/{})",
-                            operation_name, component_name, delay.count(),
-                            attempt + 1, retry_config.max_attempts + 1);
+                logger_->info("Retrying operation " + operation_name + " for component " + component_name +
+                            " in " + std::to_string(delay.count()) + "ms (attempt " +
+                            std::to_string(attempt + 1) + "/" + std::to_string(retry_config.max_attempts + 1) + ")", "", "", {});
 
                 std::this_thread::sleep_for(delay);
                 continue;
@@ -341,8 +357,8 @@ std::optional<T> ErrorHandler::execute_with_circuit_breaker(
     auto& breaker = get_or_create_circuit_breaker(service_name);
 
     if (!breaker.can_attempt()) {
-        logger_->warn("Circuit breaker OPEN for service {}, blocking request to {}.{}",
-                    service_name, component_name, operation_name);
+        logger_->warn("Circuit breaker OPEN for service " + service_name + ", blocking request to " +
+                    component_name + "." + operation_name, "", "", {});
 
         // Try fallback instead
         return execute_fallback<T>(component_name, operation);
@@ -373,7 +389,7 @@ std::optional<T> ErrorHandler::execute_with_circuit_breaker(
 
 template<typename T>
 std::optional<T> ErrorHandler::execute_fallback(const std::string& component_name,
-                                              std::function<T()> original_operation) {
+                                              std::function<T()> /*original_operation*/) {
     auto fallback_config_opt = get_fallback_config(component_name);
     if (!fallback_config_opt || !fallback_config_opt->enable_fallback) {
         return std::nullopt;

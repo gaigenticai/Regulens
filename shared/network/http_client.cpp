@@ -10,7 +10,7 @@ namespace regulens {
 HttpClient::HttpClient()
     : curl_handle_(nullptr), initialized_(false),
       timeout_seconds_(30), user_agent_("Regulens-Agent/1.0"),
-      ssl_verify_(true) {
+      ssl_verify_(true), streaming_mode_(false) {
     initialize_curl();
 }
 
@@ -21,7 +21,8 @@ HttpClient::~HttpClient() {
 HttpClient::HttpClient(HttpClient&& other) noexcept
     : curl_handle_(other.curl_handle_), initialized_(other.initialized_),
       timeout_seconds_(other.timeout_seconds_), user_agent_(std::move(other.user_agent_)),
-      ssl_verify_(other.ssl_verify_), proxy_(std::move(other.proxy_)) {
+      ssl_verify_(other.ssl_verify_), proxy_(std::move(other.proxy_)),
+      streaming_mode_(other.streaming_mode_), streaming_callback_(std::move(other.streaming_callback_)) {
     other.curl_handle_ = nullptr;
     other.initialized_ = false;
 }
@@ -35,6 +36,8 @@ HttpClient& HttpClient::operator=(HttpClient&& other) noexcept {
         user_agent_ = std::move(other.user_agent_);
         ssl_verify_ = other.ssl_verify_;
         proxy_ = std::move(other.proxy_);
+        streaming_mode_ = other.streaming_mode_;
+        streaming_callback_ = std::move(other.streaming_callback_);
         other.curl_handle_ = nullptr;
         other.initialized_ = false;
     }
@@ -234,6 +237,9 @@ HttpResponse HttpClient::post(const std::string& url,
     return response;
 }
 
+// Forward declaration for streaming callback
+static size_t streaming_write_callback(void* contents, size_t size, size_t nmemb, void* userp);
+
 void HttpClient::set_timeout(long seconds) {
     timeout_seconds_ = seconds;
     if (initialized_) {
@@ -381,14 +387,147 @@ size_t EmailClient::email_read_callback(void* ptr, size_t size, size_t nmemb, vo
 }
 
 void EmailClient::configure_smtp(const std::string& smtp_server,
-                               int smtp_port,
-                               const std::string& username,
-                               const std::string& password) {
+                              int smtp_port,
+                              const std::string& username,
+                              const std::string& password) {
     smtp_server_ = smtp_server;
     smtp_port_ = smtp_port;
     smtp_username_ = username;
     smtp_password_ = password;
 }
+
+// Streaming support methods for HttpClient
+
+void HttpClient::set_streaming_mode(bool enable) {
+    streaming_mode_ = enable;
+}
+
+void HttpClient::set_streaming_callback(std::function<void(const std::string&)> callback) {
+    streaming_callback_ = std::move(callback);
+}
+
+HttpResponse HttpClient::post_streaming(const std::string& url,
+                                       const std::string& data,
+                                       const std::unordered_map<std::string, std::string>& headers) {
+    HttpResponse response;
+    response.success = false;
+
+    if (!initialized_) {
+        response.error_message = "HTTP client not initialized";
+        return response;
+    }
+
+    // Set URL
+    curl_easy_setopt(curl_handle_, CURLOPT_URL, url.c_str());
+
+    // Set POST data
+    curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDS, data.c_str());
+    curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDSIZE, data.size());
+
+    // Set method to POST
+    curl_easy_setopt(curl_handle_, CURLOPT_POST, 1L);
+
+    // Enable streaming mode for real-time processing
+    curl_easy_setopt(curl_handle_, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+
+    // Configure for chunked transfer encoding
+    curl_easy_setopt(curl_handle_, CURLOPT_HTTP_TRANSFER_DECODING, 1L);
+    curl_easy_setopt(curl_handle_, CURLOPT_HTTP_CONTENT_DECODING, 1L);
+
+    // Set streaming write callback if callback is provided
+    if (streaming_callback_) {
+        curl_easy_setopt(curl_handle_, CURLOPT_WRITEFUNCTION, (curl_write_callback)streaming_write_callback);
+        curl_easy_setopt(curl_handle_, CURLOPT_WRITEDATA, this);
+    } else {
+        // Use default write callback
+        curl_easy_setopt(curl_handle_, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl_handle_, CURLOPT_WRITEDATA, &response);
+    }
+
+    // Set header callback
+    curl_easy_setopt(curl_handle_, CURLOPT_HEADERFUNCTION, header_callback);
+    curl_easy_setopt(curl_handle_, CURLOPT_HEADERDATA, &response);
+
+    // Set SSL verification
+    curl_easy_setopt(curl_handle_, CURLOPT_SSL_VERIFYPEER, ssl_verify_ ? 1L : 0L);
+    curl_easy_setopt(curl_handle_, CURLOPT_SSL_VERIFYHOST, ssl_verify_ ? 2L : 0L);
+
+    // Set timeout
+    curl_easy_setopt(curl_handle_, CURLOPT_TIMEOUT, timeout_seconds_);
+
+    // Set user agent
+    curl_easy_setopt(curl_handle_, CURLOPT_USERAGENT, user_agent_.c_str());
+
+    // Prepare headers
+    struct curl_slist* header_list = nullptr;
+    for (const auto& header : headers) {
+        std::string header_str = header.first + ": " + header.second;
+        header_list = curl_slist_append(header_list, header_str.c_str());
+    }
+
+    // Add Accept header for event-stream
+    header_list = curl_slist_append(header_list, "Accept: text/event-stream");
+    header_list = curl_slist_append(header_list, "Cache-Control: no-cache");
+
+    if (header_list) {
+        curl_easy_setopt(curl_handle_, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    // Set proxy if configured
+    if (!proxy_.empty()) {
+        curl_easy_setopt(curl_handle_, CURLOPT_PROXY, proxy_.c_str());
+    }
+
+    // Perform streaming request
+    CURLcode res = curl_easy_perform(curl_handle_);
+
+    // Get status code
+    long response_code;
+    curl_easy_getinfo(curl_handle_, CURLINFO_RESPONSE_CODE, &response_code);
+    response.status_code = static_cast<int>(response_code);
+
+    // Clean up headers
+    if (header_list) {
+        curl_slist_free_all(header_list);
+    }
+
+    if (res != CURLE_OK) {
+        response.error_message = curl_easy_strerror(res);
+        response.success = false;
+        spdlog::error("HTTP streaming POST failed for {}: {}", url, response.error_message);
+    } else {
+        response.success = (response.status_code >= 200 && response.status_code < 300);
+        if (response.success) {
+            spdlog::info("HTTP streaming POST succeeded for {}: status {}", url, response.status_code);
+        } else {
+            spdlog::warn("HTTP streaming POST completed with status {} for {}", response.status_code, url);
+        }
+    }
+
+    return response;
+}
+
+// Static streaming write callback for processing streaming data in real-time
+size_t streaming_write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+    HttpClient* client = static_cast<HttpClient*>(userp);
+    size_t total_size = size * nmemb;
+
+    if (client) {
+        auto callback = client->get_streaming_callback();
+        if (callback) {
+            std::string chunk(static_cast<char*>(contents), total_size);
+            try {
+                callback(chunk);
+            } catch (const std::exception& e) {
+                spdlog::error("Streaming callback error: {}", e.what());
+            }
+        }
+    }
+
+    // Always return the total size to indicate successful processing
+    return total_size;
+}
+
 
 } // namespace regulens
 

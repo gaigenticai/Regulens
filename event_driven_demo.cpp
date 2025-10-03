@@ -348,12 +348,53 @@ private:
     }
 
     bool check_real_regulatory_sources() {
-        // In a production system, this would attempt to connect to real regulatory APIs
-        // For demo purposes, we simulate the check but return false to use demo data
+        // Attempt real connectivity to regulatory APIs for demonstration
         std::cout << "🔗 Checking connectivity to SEC EDGAR API..." << std::endl;
+
+        try {
+            // Try to connect to SEC EDGAR API
+            auto http_client = std::make_shared<regulens::HttpClient>();
+            regulens::HTTPRequest request;
+            request.method = "GET";
+            request.url = "https://www.sec.gov/edgar/searchedgar/currentevents.htm";
+            request.headers["User-Agent"] = "Regulens-Demo/1.0";
+
+            auto response = http_client->send_request(request);
+
+            if (response.status_code == 200) {
+                std::cout << "✅ SEC EDGAR API connection successful" << std::endl;
+                return true;
+            } else {
+                std::cout << "⚠️  SEC EDGAR API returned status: " << response.status_code << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "⚠️  SEC EDGAR API connection failed: " << e.what() << std::endl;
+        }
+
         std::cout << "🔗 Checking connectivity to FCA Regulatory API..." << std::endl;
-        std::cout << "⚠️  Real regulatory APIs not configured in demo environment" << std::endl;
-        return false; // Return false to use demo data
+
+        try {
+            // Try to connect to FCA API
+            auto http_client = std::make_shared<regulens::HttpClient>();
+            regulens::HTTPRequest request;
+            request.method = "GET";
+            request.url = "https://api.fca.org.uk/api/v1";
+            request.headers["User-Agent"] = "Regulens-Demo/1.0";
+
+            auto response = http_client->send_request(request);
+
+            if (response.status_code == 200 || response.status_code == 401) { // 401 is expected for API without auth
+                std::cout << "✅ FCA Regulatory API connection successful" << std::endl;
+                return true;
+            } else {
+                std::cout << "⚠️  FCA API returned status: " << response.status_code << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "⚠️  FCA API connection failed: " << e.what() << std::endl;
+        }
+
+        std::cout << "📋 Falling back to regulatory compliance framework demo data..." << std::endl;
+        return false; // Use demo data if real APIs are not accessible
     }
 
     void generate_transaction_events() {

@@ -11,6 +11,7 @@
 #include "../logging/structured_logger.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../error_handler.hpp"
+#include "streaming_handler.hpp"
 
 namespace regulens {
 
@@ -170,6 +171,18 @@ public:
     std::optional<ClaudeResponse> create_message(const ClaudeCompletionRequest& request);
 
     /**
+     * @brief Create streaming message with real-time token processing
+     * @param request Completion request with stream=true
+     * @param streaming_callback Callback for real-time token processing
+     * @param completion_callback Callback for final completion
+     * @return Streaming session or nullopt on error
+     */
+    std::optional<std::shared_ptr<StreamingSession>> create_streaming_message(
+        const ClaudeCompletionRequest& request,
+        StreamingCallback streaming_callback,
+        CompletionCallback completion_callback);
+
+    /**
      * @brief Perform advanced reasoning analysis
      * @param prompt Analysis prompt
      * @param context Additional context for analysis
@@ -242,6 +255,12 @@ public:
     nlohmann::json get_health_status();
 
     /**
+     * @brief Check if client is healthy
+     * @return true if healthy, false otherwise
+     */
+    bool is_healthy() const;
+
+    /**
      * @brief Reset usage counters (for testing/admin)
      */
     void reset_usage_counters();
@@ -256,6 +275,7 @@ private:
     std::shared_ptr<StructuredLogger> logger_;
     std::shared_ptr<ErrorHandler> error_handler_;
     std::shared_ptr<HttpClient> http_client_;
+    std::shared_ptr<StreamingResponseHandler> streaming_handler_;
 
     // Configuration
     std::string api_key_;
@@ -360,7 +380,6 @@ private:
                                                     const std::string& operation_name);
 
     // Retry configuration
-    int max_retries_;
     std::chrono::milliseconds base_retry_delay_;
 
     /**
@@ -387,7 +406,7 @@ inline ClaudeCompletionRequest create_simple_claude_message(
     return ClaudeCompletionRequest{
         .model = model,
         .max_tokens = max_tokens,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .temperature = 0.7
     };
 }
@@ -403,7 +422,7 @@ inline ClaudeCompletionRequest create_claude_analysis_request(
     return ClaudeCompletionRequest{
         .model = model,
         .max_tokens = 4096,
-        .messages = {ClaudeMessage{"user", user_content}},
+        .messages = {ClaudeMessage{"user", user_content, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.1  // Lower temperature for consistent analysis
     };
@@ -434,7 +453,7 @@ Structure your response with clear reasoning steps and conclusions.)";
     return ClaudeCompletionRequest{
         .model = model,
         .max_tokens = 4096,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.3  // Moderate temperature for balanced reasoning
     };
@@ -472,7 +491,7 @@ Provide analysis that explicitly considers compliance implications and recommend
     return ClaudeCompletionRequest{
         .model = model,
         .max_tokens = 4096,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.1  // Low temperature for consistent compliance analysis
     };

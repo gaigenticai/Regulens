@@ -8,7 +8,7 @@ namespace regulens {
  * @brief Database configuration struct
  */
 struct DatabaseConfig {
-    std::string host = "localhost";
+    std::string host; // Must be explicitly configured - no localhost default
     int port = 5432;
     std::string database = "regulens";
     std::string user = "regulens";

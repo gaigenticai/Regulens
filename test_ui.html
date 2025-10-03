@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regulens Agentic AI Compliance System - UI Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 1.8rem;
+        }
+
+        .header p {
+            margin: 0.5rem 0 0 0;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        }
+
+        .card h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            font-size: 1.3rem;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .status-active {
+            background: #27ae60;
+        }
+
+        .status-warning {
+            background: #f39c12;
+        }
+
+        .status-error {
+            background: #e74c3c;
+        }
+
+        .metric {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 0.5rem 0;
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+        }
+
+        .tab:hover {
+            color: #3498db;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .button {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: transform 0.2s ease;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #bdc3c7;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .table th,
+        .table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .badge-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .badge-warning {
+            background: #f39c12;
+            color: white;
+        }
+
+        .badge-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .modal-header {
+            margin-bottom: 1rem;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+        }
+
+        .close {
+            float: right;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .tabs {
+                flex-direction: column;
+            }
+
+            .tab {
+                border-bottom: none;
+                border-left: 2px solid transparent;
+            }
+
+            .tab.active {
+                border-left-color: #3498db;
+                border-bottom-color: transparent;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Regulens Agentic AI Compliance System</h1>
+        <p>Enterprise Compliance Intelligence Platform - Production Ready</p>
+    </div>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
+            <button class="tab" onclick="showTab('monitoring')">Regulatory Monitoring</button>
+            <button class="tab" onclick="showTab('decisions')">Agent Decisions</button>
+            <button class="tab" onclick="showTab('audit')">Audit Trail</button>
+            <button class="tab" onclick="showTab('settings')">Settings</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3><span class="status-indicator status-active"></span>System Status</h3>
+                    <div class="metric">99.9%</div>
+                    <div class="metric-label">Uptime</div>
+                    <p>All systems operational and monitoring active.</p>
+                </div>
+
+                <div class="card">
+                    <h3><span class="status-indicator status-active"></span>Active Agents</h3>
+                    <div class="metric">4</div>
+                    <div class="metric-label">Running Agents</div>
+                    <p>Decision Engine, Risk Assessor, Audit Intelligence, Transaction Guardian</p>
+                </div>
+
+                <div class="card">
+                    <h3><span class="status-indicator status-warning"></span>Regulatory Changes</h3>
+                    <div class="metric">23</div>
+                    <div class="metric-label">Changes Detected</div>
+                    <p>7 from SEC EDGAR, 12 from FCA, 4 from ECB</p>
+                </div>
+
+                <div class="card">
+                    <h3><span class="status-indicator status-active"></span>Compliance Events</h3>
+                    <div class="metric">156</div>
+                    <div class="metric-label">Events Processed</div>
+                    <p>98% automated resolution rate</p>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 2rem;">
+                <h3>Recent Activity</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Event</th>
+                            <th>Source</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>14:32:15</td>
+                            <td>New SEC filing detected</td>
+                            <td>SEC EDGAR</td>
+                            <td><span class="badge badge-success">Processed</span></td>
+                        </tr>
+                        <tr>
+                            <td>14:28:43</td>
+                            <td>Risk assessment completed</td>
+                            <td>Decision Engine</td>
+                            <td><span class="badge badge-success">Approved</span></td>
+                        </tr>
+                        <tr>
+                            <td>14:25:12</td>
+                            <td>FCA regulatory update</td>
+                            <td>FCA Feed</td>
+                            <td><span class="badge badge-warning">Review</span></td>
+                        </tr>
+                        <tr>
+                            <td>14:20:08</td>
+                            <td>Transaction compliance check</td>
+                            <td>Transaction Guardian</td>
+                            <td><span class="badge badge-success">Passed</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Regulatory Monitoring Tab -->
+        <div id="monitoring" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3>Regulatory Sources</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        <li style="margin-bottom: 0.5rem;"><span class="status-indicator status-active"></span> SEC EDGAR API</li>
+                        <li style="margin-bottom: 0.5rem;"><span class="status-indicator status-active"></span> FCA Regulatory Feed</li>
+                        <li style="margin-bottom: 0.5rem;"><span class="status-indicator status-active"></span> ECB Announcements</li>
+                        <li style="margin-bottom: 0.5rem;"><span class="status-indicator status-warning"></span> Custom Regulatory Feeds</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h3>Change Detection</h3>
+                    <div class="metric">23</div>
+                    <div class="metric-label">Changes This Week</div>
+                    <button class="button" style="margin-top: 1rem;">Configure Sources</button>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 2rem;">
+                <h3>Recent Regulatory Changes</h3>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <div class="alert alert-warning" style="margin-bottom: 1rem;">
+                        <strong>SEC Update:</strong> New reporting requirements for AI systems - Review required
+                        <br><small>Detected: 2024-10-02 14:30:00 | Source: SEC EDGAR</small>
+                    </div>
+                    <div class="alert alert-success" style="margin-bottom: 1rem;">
+                        <strong>FCA Notice:</strong> Updated AML guidelines for digital assets
+                        <br><small>Detected: 2024-10-02 12:15:00 | Source: FCA Feed</small>
+                    </div>
+                    <div class="alert alert-warning" style="margin-bottom: 1rem;">
+                        <strong>ECB Policy:</strong> New capital requirements for tech firms
+                        <br><small>Detected: 2024-10-02 10:45:00 | Source: ECB Announcements</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Decisions Tab -->
+        <div id="decisions" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3>Decision Engine</h3>
+                    <div class="metric">98.5%</div>
+                    <div class="metric-label">Accuracy Rate</div>
+                    <p>Processing 150+ decisions per hour</p>
+                </div>
+
+                <div class="card">
+                    <h3>Risk Assessor</h3>
+                    <div class="metric">156</div>
+                    <div class="metric-label">Assessments Today</div>
+                    <p>Low risk: 89%, Medium: 8%, High: 3%</p>
+                </div>
+
+                <div class="card">
+                    <h3>Audit Intelligence</h3>
+                    <div class="metric">42</div>
+                    <div class="metric-label">Audit Reports</div>
+                    <p>3 critical findings, 12 recommendations</p>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 2rem;">
+                <h3>Recent Decisions</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Type</th>
+                            <th>Agent</th>
+                            <th>Confidence</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>DEC-2024-00123</td>
+                            <td>Risk Assessment</td>
+                            <td>Risk Assessor</td>
+                            <td>95%</td>
+                            <td><span class="badge badge-success">Approved</span></td>
+                        </tr>
+                        <tr>
+                            <td>DEC-2024-00122</td>
+                            <td>Compliance Check</td>
+                            <td>Decision Engine</td>
+                            <td>87%</td>
+                            <td><span class="badge badge-success">Approved</span></td>
+                        </tr>
+                        <tr>
+                            <td>DEC-2024-00121</td>
+                            <td>Audit Alert</td>
+                            <td>Audit Intelligence</td>
+                            <td>92%</td>
+                            <td><span class="badge badge-warning">Review</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Audit Trail Tab -->
+        <div id="audit" class="tab-content">
+            <div class="card">
+                <h3>Audit Trail</h3>
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label>Search Audit Logs</label>
+                    <input type="text" placeholder="Search by event, user, or date..." id="audit-search">
+                </div>
+                <button class="button">Search</button>
+                <button class="button" style="margin-left: 0.5rem; background: #95a5a6;">Export Report</button>
+            </div>
+
+            <div class="card" style="margin-top: 2rem;">
+                <h3>Audit Events</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>User/Agent</th>
+                            <th>Action</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>2024-10-02 14:35:12</td>
+                            <td>Decision Engine</td>
+                            <td>Risk Assessment</td>
+                            <td>Transaction ID: TXN-789456, Risk: Low</td>
+                        </tr>
+                        <tr>
+                            <td>2024-10-02 14:32:08</td>
+                            <td>admin@regulens.ai</td>
+                            <td>Configuration Change</td>
+                            <td>Updated risk thresholds</td>
+                        </tr>
+                        <tr>
+                            <td>2024-10-02 14:28:45</td>
+                            <td>Audit Intelligence</td>
+                            <td>Alert Generated</td>
+                            <td>Unusual pattern detected in compliance events</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3>Database Configuration</h3>
+                    <form>
+                        <div class="form-group">
+                            <label>Host</label>
+                            <input type="text" value="regulens-db.internal.company.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" value="5432">
+                        </div>
+                        <div class="form-group">
+                            <label>Database Name</label>
+                            <input type="text" value="regulens_compliance">
+                        </div>
+                        <button class="button" type="submit">Save Changes</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Agent Configuration</h3>
+                    <form>
+                        <div class="form-group">
+                            <label>Max Concurrent Agents</label>
+                            <input type="number" value="10">
+                        </div>
+                        <div class="form-group">
+                            <label>Risk Threshold</label>
+                            <select>
+                                <option>Low</option>
+                                <option selected>Medium</option>
+                                <option>High</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Enable Autonomous Mode</label>
+                            <input type="checkbox" checked>
+                        </div>
+                        <button class="button" type="submit">Update Settings</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 2rem;">
+                <h3>System Health</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                    <div>
+                        <div class="metric">99.9%</div>
+                        <div class="metric-label">System Uptime</div>
+                    </div>
+                    <div>
+                        <div class="metric">2.3GB</div>
+                        <div class="metric-label">Memory Usage</div>
+                    </div>
+                    <div>
+                        <div class="metric">45%</div>
+                        <div class="metric-label">CPU Usage</div>
+                    </div>
+                    <div>
+                        <div class="metric">156MB/s</div>
+                        <div class="metric-label">Network I/O</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for testing -->
+    <div id="test-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <h3>Test Modal</h3>
+            </div>
+            <p>This is a test modal for UI testing purposes.</p>
+            <button class="button" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // Hide all tab contents
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+
+            // Remove active class from all tabs
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+
+        function openModal() {
+            document.getElementById('test-modal').classList.add('show');
+        }
+
+        function closeModal() {
+            document.getElementById('test-modal').classList.remove('show');
+        }
+
+        // Auto-refresh demo data every 30 seconds
+        setInterval(() => {
+            // Simulate real-time updates
+            const metrics = document.querySelectorAll('.metric');
+            metrics.forEach(metric => {
+                if (metric.textContent.includes('%')) {
+                    const current = parseFloat(metric.textContent);
+                    const change = (Math.random() - 0.5) * 0.1;
+                    const newValue = Math.max(95, Math.min(100, current + change));
+                    metric.textContent = newValue.toFixed(1) + '%';
+                }
+            });
+        }, 30000);
+
+        // Add click handlers for testing
+        document.addEventListener('DOMContentLoaded', function() {
+            // Make cards clickable for testing
+            const cards = document.querySelectorAll('.card');
+            cards.forEach((card, index) => {
+                card.addEventListener('click', () => {
+                    console.log(`Card ${index + 1} clicked: ${card.querySelector('h3').textContent}`);
+                });
+            });
+
+            // Test form interactions
+            const inputs = document.querySelectorAll('input, select, textarea');
+            inputs.forEach(input => {
+                input.addEventListener('focus', () => {
+                    console.log(`Input focused: ${input.name || input.id || input.placeholder}`);
+                });
+            });
+
+            // Test button interactions
+            const buttons = document.querySelectorAll('.button');
+            buttons.forEach(button => {
+                button.addEventListener('click', () => {
+                    console.log(`Button clicked: ${button.textContent}`);
+                });
+            });
+        });
+    </script>
+</body>
+</html>
+

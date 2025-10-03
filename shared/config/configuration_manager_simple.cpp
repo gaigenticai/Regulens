@@ -13,7 +13,7 @@ ConfigurationManager& ConfigurationManager::get_instance() {
 
 ConfigurationManager::ConfigurationManager() {
     // Set some defaults
-    config_values_["database.host"] = "localhost";
+    // Database host - must be configured via environment variables, no localhost default
     config_values_["database.port"] = "5432";
     config_values_["logging.level"] = "info";
     config_values_["api.endpoint"] = "https://api.regulens.ai";

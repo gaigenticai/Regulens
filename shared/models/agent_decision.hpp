@@ -57,6 +57,18 @@ inline std::string decision_type_to_string(DecisionType type) {
     }
 }
 
+inline DecisionType string_to_decision_type(const std::string& str) {
+    if (str == "APPROVE") return DecisionType::APPROVE;
+    if (str == "DENY") return DecisionType::DENY;
+    if (str == "ESCALATE") return DecisionType::ESCALATE;
+    if (str == "MONITOR") return DecisionType::MONITOR;
+    if (str == "INVESTIGATE") return DecisionType::INVESTIGATE;
+    if (str == "REPORT") return DecisionType::REPORT;
+    if (str == "ALERT") return DecisionType::ALERT;
+    if (str == "NO_ACTION") return DecisionType::NO_ACTION;
+    return DecisionType::NO_ACTION; // Default fallback
+}
+
 inline std::string confidence_to_string(ConfidenceLevel level) {
     switch (level) {
         case ConfidenceLevel::LOW: return "LOW";

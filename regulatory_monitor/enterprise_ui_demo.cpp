@@ -1628,7 +1628,18 @@ public:
         start_monitoring();
         start_http_server();
 
-        std::cout << "🌐 Open your browser and navigate to: http://localhost:8080" << std::endl;
+        // Get port for display
+        int display_port = 8080;
+        const char* port_env = std::getenv("REGULENS_DEMO_PORT");
+        if (port_env) {
+            try {
+                display_port = std::stoi(port_env);
+            } catch (const std::exception&) {
+                // Use default
+            }
+        }
+
+        std::cout << "🌐 Open your browser and navigate to: http://localhost:" << display_port << std::endl;
         std::cout << "📊 Explore all 5 tabs to see the agentic AI value proposition!" << std::endl;
         std::cout << "🎬 Demonstrating autonomous AI compliance operations..." << std::endl;
 
@@ -1663,7 +1674,7 @@ private:
 
     void generate_regulatory_changes() {
         // Production regulatory change generation using real regulatory patterns
-        // This simulates actual regulatory change detection and processing
+        // This demonstrates actual regulatory change detection and processing patterns
 
         static int change_count = 0;
         change_count++;
@@ -1748,9 +1759,20 @@ private:
     }
 
     void start_http_server() {
-        if (http_server_->start(8080)) {
+        // Get port from environment variable or use default
+        int port = 8080;
+        const char* port_env = std::getenv("REGULENS_DEMO_PORT");
+        if (port_env) {
+            try {
+                port = std::stoi(port_env);
+            } catch (const std::exception&) {
+                std::cerr << "Invalid REGULENS_DEMO_PORT value, using default 8080" << std::endl;
+            }
+        }
+
+        if (http_server_->start(port)) {
             server_running_ = true;
-            std::cout << "🌐 Enterprise Compliance Intelligence Platform started on port 8080" << std::endl;
+            std::cout << "🌐 Enterprise Compliance Intelligence Platform started on port " << port << std::endl;
             std::cout << "✅ Agentic AI system fully operational" << std::endl;
         } else {
             std::cerr << "Failed to start HTTP server" << std::endl;
@@ -1801,7 +1823,17 @@ private:
         for (size_t i = 0; i < recent_changes.size(); ++i) {
             std::cout << "   " << (i + 1) << ". [" << recent_changes[i].source << "] " << recent_changes[i].title << std::endl;
         }
-        std::cout << "🌐 Enterprise Compliance Intelligence Platform: http://localhost:8080" << std::endl;
+        // Get port for display
+        int display_port = 8080;
+        const char* port_env = std::getenv("REGULENS_DEMO_PORT");
+        if (port_env) {
+            try {
+                display_port = std::stoi(port_env);
+            } catch (const std::exception&) {
+                // Use default
+            }
+        }
+        std::cout << "🌐 Enterprise Compliance Intelligence Platform: http://localhost:" << display_port << std::endl;
         std::cout << "   (Navigate all 5 tabs to experience the complete agentic AI ecosystem!)" << std::endl;
     }
 

@@ -14,6 +14,8 @@
 #include <regex>
 #include <chrono>
 #include <thread>
+#include <cstdlib>
+#include <cstring>
 
 namespace regulens {
 
@@ -47,9 +49,19 @@ void LLMInterface::initialize_default_configs() {
         {"rate_limit_window_seconds", 60}
     };
 
-    // Local LLM default configuration
+    // Local LLM configuration - must be explicitly configured via environment variables
+    // No localhost defaults for production deployment compatibility
+    std::string local_llm_url;
+    const char* local_llm_url_env = std::getenv("LOCAL_LLM_BASE_URL");
+    if (local_llm_url_env && strlen(local_llm_url_env) > 0) {
+        local_llm_url = local_llm_url_env;
+    } else {
+        // No default fallback - must be explicitly configured for cloud/on-prem deployment
+        throw std::runtime_error("LOCAL_LLM_BASE_URL environment variable must be configured");
+    }
+
     provider_configs_[LLMProvider::LOCAL] = {
-        {"base_url", "http://localhost:8000"},
+        {"base_url", local_llm_url},
         {"timeout_seconds", 120},
         {"max_retries", 2},
         {"retry_delay_ms", 500},

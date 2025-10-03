@@ -84,6 +84,35 @@ public:
      */
     void set_proxy(const std::string& proxy);
 
+    /**
+     * @brief Enable streaming response handling
+     * @param enable True to enable streaming
+     */
+    void set_streaming_mode(bool enable);
+
+    /**
+     * @brief Set streaming data callback
+     * @param callback Function to call with streaming data chunks
+     */
+    void set_streaming_callback(std::function<void(const std::string&)> callback);
+
+    /**
+     * @brief Get streaming callback (for internal use)
+     * @return Streaming callback function
+     */
+    const std::function<void(const std::string&)>& get_streaming_callback() const { return streaming_callback_; }
+
+    /**
+     * @brief Make streaming POST request with real-time data processing
+     * @param url Target URL
+     * @param data POST data
+     * @param headers Optional custom headers
+     * @return HttpResponse with final result
+     */
+    HttpResponse post_streaming(const std::string& url,
+                               const std::string& data,
+                               const std::unordered_map<std::string, std::string>& headers = {});
+
 private:
     /**
      * @brief Initialize CURL handle
@@ -111,6 +140,10 @@ private:
     std::string user_agent_;
     bool ssl_verify_;
     std::string proxy_;
+
+    // Streaming support
+    bool streaming_mode_;
+    std::function<void(const std::string&)> streaming_callback_;
 };
 
 /**

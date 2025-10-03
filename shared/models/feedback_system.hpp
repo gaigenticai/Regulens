@@ -126,7 +126,7 @@ struct LearningModel {
     LearningModel(std::string id, std::string type, std::string agent, LearningStrategy strat)
         : model_id(std::move(id)), model_type(std::move(type)), target_agent(std::move(agent)),
           strategy(strat), accuracy_score(0.5), improvement_rate(0.0),
-          created_at(std::chrono::system_clock::now()), last_trained(std::chrono::system_clock::now()) {}
+          last_trained(std::chrono::system_clock::now()), created_at(std::chrono::system_clock::now()) {}
 
     nlohmann::json to_json() const {
         nlohmann::json params_json;
@@ -240,6 +240,7 @@ struct FeedbackConfig {
     double feedback_confidence_threshold = 0.7;  // Minimum confidence for application
     bool enable_real_time_learning = true;    // Enable real-time feedback incorporation
     size_t batch_learning_interval = 50;      // Process feedback in batches
+    bool enable_persistence = true;           // Whether to persist feedback to database
     std::unordered_set<std::string> monitored_entities;  // Entities to monitor
 
     nlohmann::json to_json() const {
@@ -250,6 +251,7 @@ struct FeedbackConfig {
             {"feedback_confidence_threshold", feedback_confidence_threshold},
             {"enable_real_time_learning", enable_real_time_learning},
             {"batch_learning_interval", batch_learning_interval},
+            {"enable_persistence", enable_persistence},
             {"monitored_entities", std::vector<std::string>(monitored_entities.begin(), monitored_entities.end())}
         };
     }

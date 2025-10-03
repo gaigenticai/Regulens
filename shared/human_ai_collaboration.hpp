@@ -236,6 +236,7 @@ private:
                                  const std::string& agent_id = "");
     void cleanup_expired_sessions();
     void cleanup_expired_requests();
+    void cleanup_worker();
 
     // Persistence methods (when enabled)
     bool persist_session(const CollaborationSession& session);

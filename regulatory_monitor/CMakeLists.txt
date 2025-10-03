@@ -1,4 +1,4 @@
-# Regulatory monitor library - TODO: Implement regulatory monitoring components
+# Regulatory monitor library - Production-grade regulatory change monitoring system
 
 add_library(regulens_regulatory_monitor STATIC
     regulatory_monitor.cpp

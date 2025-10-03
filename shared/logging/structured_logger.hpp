@@ -140,10 +140,23 @@ public:
      * @brief Log error level message
      */
     void error(const std::string& message,
-              const std::string& component = "",
-              const std::string& function = "",
-              const std::unordered_map<std::string, std::string>& context = {}) {
+             const std::string& component = "",
+             const std::string& function = "",
+             const std::unordered_map<std::string, std::string>& context = {}) {
         log(LogLevel::ERROR, message, component, function, context);
+    }
+
+    /**
+     * @brief Log error with correlation ID for tracking related errors
+     */
+    void error_with_correlation(const std::string& message,
+                               const std::string& correlation_id,
+                               const std::string& component = "",
+                               const std::string& function = "",
+                               const std::unordered_map<std::string, std::string>& context = {}) {
+        auto enhanced_context = context;
+        enhanced_context["correlation_id"] = correlation_id;
+        log(LogLevel::ERROR, message, component, function, enhanced_context);
     }
 
     /**

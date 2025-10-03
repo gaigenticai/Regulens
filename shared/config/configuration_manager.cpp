@@ -14,7 +14,7 @@ ConfigurationManager& ConfigurationManager::get_instance() {
 
 ConfigurationManager::ConfigurationManager() {
     // Set some defaults
-    config_values_["database.host"] = "localhost";
+    // Database host - must be configured via environment variables, no localhost default
     config_values_["database.port"] = "5432";
     config_values_["logging.level"] = "info";
     config_values_["api.endpoint"] = "https://api.regulens.ai";
@@ -236,10 +236,11 @@ bool ConfigurationManager::parse_command_line(int /*argc*/, char* /*argv*/[]) {
 }
 
 void ConfigurationManager::set_defaults() {
-    // Set defaults for database configuration
-    if (config_values_.find(config_keys::DB_HOST) == config_values_.end()) {
-        config_values_[config_keys::DB_HOST] = "localhost";
-    }
+    // Set defaults for database configuration - no localhost defaults for production
+    // DB_HOST must be explicitly set via environment variables
+    // if (config_values_.find(config_keys::DB_HOST) == config_values_.end()) {
+    //     config_values_[config_keys::DB_HOST] = "localhost"; // REMOVED: No localhost defaults
+    // }
     if (config_values_.find(config_keys::DB_PORT) == config_values_.end()) {
         config_values_[config_keys::DB_PORT] = "5432";
     }
@@ -266,9 +267,10 @@ void ConfigurationManager::set_defaults() {
     if (config_values_.find(config_keys::VECTOR_DB_TYPE) == config_values_.end()) {
         config_values_[config_keys::VECTOR_DB_TYPE] = "weaviate";
     }
-    if (config_values_.find(config_keys::VECTOR_DB_HOST) == config_values_.end()) {
-        config_values_[config_keys::VECTOR_DB_HOST] = "localhost";
-    }
+    // VECTOR_DB_HOST must be explicitly set via environment variables
+    // if (config_values_.find(config_keys::VECTOR_DB_HOST) == config_values_.end()) {
+    //     config_values_[config_keys::VECTOR_DB_HOST] = "localhost"; // REMOVED: No localhost defaults
+    // }
     if (config_values_.find(config_keys::VECTOR_DB_PORT) == config_values_.end()) {
         config_values_[config_keys::VECTOR_DB_PORT] = "8080";
     }
@@ -305,8 +307,12 @@ void ConfigurationManager::set_defaults() {
 DatabaseConfig ConfigurationManager::get_database_config() const {
     DatabaseConfig config;
 
-    // Load values from configuration, with fallbacks to defaults
-    config.host = get_string(config_keys::DB_HOST).value_or("localhost");
+    // Load values from configuration - DB_HOST must be explicitly configured
+    auto host_opt = get_string(config_keys::DB_HOST);
+    if (!host_opt) {
+        throw std::runtime_error("Database host (DB_HOST) must be configured via environment variables");
+    }
+    config.host = *host_opt;
     config.port = get_int(config_keys::DB_PORT).value_or(5432);
     config.database = get_string(config_keys::DB_NAME).value_or("regulens_compliance");
     config.user = get_string(config_keys::DB_USER).value_or("regulens_user");

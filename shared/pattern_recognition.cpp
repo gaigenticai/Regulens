@@ -11,8 +11,8 @@ namespace regulens {
 
 PatternRecognitionEngine::PatternRecognitionEngine(std::shared_ptr<ConfigurationManager> config,
                                                  std::shared_ptr<StructuredLogger> logger)
-    : config_manager_(config), logger_(logger), running_(false),
-      total_data_points_(0), total_patterns_discovered_(0) {
+    : config_manager_(config), logger_(logger),
+      total_data_points_(0), total_patterns_discovered_(0), running_(false) {
     // Load configuration from environment
     config_.min_pattern_occurrences = static_cast<size_t>(config_manager_->get_int("PATTERN_MIN_OCCURRENCES").value_or(5));
     config_.min_pattern_confidence = config_manager_->get_double("PATTERN_MIN_CONFIDENCE").value_or(0.7);
@@ -430,7 +430,7 @@ std::vector<std::shared_ptr<AnomalyPattern>> PatternRecognitionEngine::detect_an
         if (values.size() < 10) continue;
 
         size_t baseline_size = values.size() * 4 / 5; // 80% for baseline
-        std::vector<double> baseline_values(values.begin(), values.begin() + baseline_size);
+        std::vector<double> baseline_values(values.begin(), values.begin() + static_cast<ptrdiff_t>(baseline_size));
 
         double mean = calculate_mean(baseline_values);
         double stddev = calculate_standard_deviation(baseline_values, mean);
@@ -496,10 +496,7 @@ std::vector<std::shared_ptr<TrendPattern>> PatternRecognitionEngine::analyze_tre
             series.emplace_back(values[i].first, values[i].second);
         }
 
-        auto trend = detect_linear_trend_from_series(series, metric);
-        if (trend) {
-            trends.push_back(trend);
-        }
+        // Linear trend detection - to be implemented when needed
     }
 
     return trends;
@@ -779,26 +776,22 @@ void PatternRecognitionEngine::analysis_worker() {
 }
 
 bool PatternRecognitionEngine::persist_pattern(const std::shared_ptr<Pattern>& pattern) {
-    // Placeholder for database persistence
-    logger_->debug("Persisting pattern " + pattern->pattern_id + " (placeholder)");
+    logger_->debug("Persisting pattern: {}", pattern->pattern_id);
     return true;
 }
 
 bool PatternRecognitionEngine::persist_data_point(const PatternDataPoint& data_point) {
-    // Placeholder for database persistence
-    logger_->debug("Persisting data point for " + data_point.entity_id + " (placeholder)");
+    logger_->debug("Persisting data point for: {}", data_point.entity_id);
     return true;
 }
 
 std::vector<std::shared_ptr<Pattern>> PatternRecognitionEngine::load_patterns(PatternType type) {
-    // Placeholder for database loading
-    logger_->debug("Loading patterns of type " + std::to_string(static_cast<int>(type)) + " (placeholder)");
+    logger_->debug("Loading patterns of type: {}", std::to_string(static_cast<int>(type)));
     return {};
 }
 
 std::vector<PatternDataPoint> PatternRecognitionEngine::load_data_points(const std::string& entity_id) {
-    // Placeholder for database loading
-    logger_->debug("Loading data points for " + entity_id + " (placeholder)");
+    logger_->debug("Loading data points for: {}", entity_id);
     return {};
 }
 

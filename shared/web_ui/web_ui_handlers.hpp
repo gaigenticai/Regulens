@@ -33,6 +33,9 @@
 #include "../llm/anthropic_client.hpp"
 #include "../risk_assessment.hpp"
 #include "../decision_tree_optimizer.hpp"
+#include "../../core/agent/agent_communication.hpp"
+#include "../../core/agent/message_translator.hpp"
+#include "../../core/agent/consensus_engine.hpp"
 
 namespace regulens {
 
@@ -129,6 +132,22 @@ public:
     HTTPResponse handle_claude_regulatory(const HTTPRequest& request);
     HTTPResponse handle_claude_stats(const HTTPRequest& request);
 
+    // Function calling handlers
+    HTTPResponse handle_function_calling_dashboard(const HTTPRequest& request);
+    HTTPResponse handle_function_execute(const HTTPRequest& request);
+    HTTPResponse handle_function_list(const HTTPRequest& request);
+    HTTPResponse handle_function_audit(const HTTPRequest& request);
+    HTTPResponse handle_function_metrics(const HTTPRequest& request);
+    HTTPResponse handle_function_openai_integration(const HTTPRequest& request);
+
+    // Embeddings handlers
+    HTTPResponse handle_embeddings_dashboard(const HTTPRequest& request);
+    HTTPResponse handle_embeddings_generate(const HTTPRequest& request);
+    HTTPResponse handle_embeddings_search(const HTTPRequest& request);
+    HTTPResponse handle_embeddings_index(const HTTPRequest& request);
+    HTTPResponse handle_embeddings_models(const HTTPRequest& request);
+    HTTPResponse handle_embeddings_stats(const HTTPRequest& request);
+
     // Decision Tree Optimizer handlers
     HTTPResponse handle_decision_dashboard(const HTTPRequest& request);
     HTTPResponse handle_decision_mcda_analysis(const HTTPRequest& request);
@@ -146,10 +165,24 @@ public:
     HTTPResponse handle_risk_analytics(const HTTPRequest& request);
     HTTPResponse handle_risk_export(const HTTPRequest& request);
 
+    // Multi-Agent Communication handlers
+    HTTPResponse handle_multi_agent_dashboard(const HTTPRequest& request);
+    HTTPResponse handle_agent_message_send(const HTTPRequest& request);
+    HTTPResponse handle_agent_message_receive(const HTTPRequest& request);
+    HTTPResponse handle_agent_message_broadcast(const HTTPRequest& request);
+    HTTPResponse handle_consensus_start(const HTTPRequest& request);
+    HTTPResponse handle_consensus_contribute(const HTTPRequest& request);
+    HTTPResponse handle_consensus_result(const HTTPRequest& request);
+    HTTPResponse handle_message_translate(const HTTPRequest& request);
+    HTTPResponse handle_agent_conversation(const HTTPRequest& request);
+    HTTPResponse handle_conflict_resolution(const HTTPRequest& request);
+    HTTPResponse handle_communication_stats(const HTTPRequest& request);
+
     // Metrics and monitoring handlers
     HTTPResponse handle_metrics_dashboard(const HTTPRequest& request);
     HTTPResponse handle_metrics_data(const HTTPRequest& request);
     HTTPResponse handle_health_check(const HTTPRequest& request);
+    HTTPResponse handle_detailed_health_report(const HTTPRequest& request);
 
     // Data ingestion handlers
     HTTPResponse handle_ingestion_status(const HTTPRequest& request);
@@ -189,11 +222,34 @@ private:
     // Anthropic Claude integration
     std::shared_ptr<AnthropicClient> anthropic_client_;
 
+    // Function Calling integration
+    std::shared_ptr<FunctionRegistry> function_registry_;
+    std::shared_ptr<FunctionDispatcher> function_dispatcher_;
+
+    // Embeddings integration
+    std::shared_ptr<EmbeddingsClient> embeddings_client_;
+    std::shared_ptr<DocumentProcessor> document_processor_;
+    std::shared_ptr<SemanticSearchEngine> semantic_search_engine_;
+
     // Risk Assessment
     std::shared_ptr<RiskAssessmentEngine> risk_assessment_;
 
     // Decision Tree Optimization
     std::shared_ptr<DecisionTreeOptimizer> decision_optimizer_;
+
+    // Multi-Agent Communication System
+    std::shared_ptr<AgentRegistry> agent_registry_;
+    std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
+    std::shared_ptr<IntelligentMessageTranslator> message_translator_;
+    std::shared_ptr<ConsensusEngine> consensus_engine_;
+    std::shared_ptr<CommunicationMediator> communication_mediator_;
+
+    // Memory System components
+    std::shared_ptr<ConversationMemory> conversation_memory_;
+    std::shared_ptr<LearningEngine> learning_engine_;
+    std::shared_ptr<CaseBasedReasoning> case_based_reasoning_;
+    std::shared_ptr<MemoryManager> memory_manager_;
+    std::shared_ptr<SemanticSearchEngine> semantic_search_engine_;
 
     // Database connection for testing
     std::shared_ptr<PostgreSQLConnection> db_connection_;
@@ -213,8 +269,32 @@ private:
     std::string generate_error_dashboard_html() const;
     std::string generate_llm_dashboard_html() const;
     std::string generate_claude_dashboard_html() const;
+    std::string generate_function_calling_html() const;
+    std::string generate_embeddings_html() const;
     std::string generate_decision_dashboard_html() const;
     std::string generate_risk_dashboard_html() const;
+       std::string generate_multi_agent_html() const;
+
+       // Memory System UI handlers
+       HTTPResponse handle_memory_dashboard(const HTTPRequest& request);
+       HTTPResponse handle_memory_conversation_store(const HTTPRequest& request);
+       HTTPResponse handle_memory_conversation_retrieve(const HTTPRequest& request);
+       HTTPResponse handle_memory_conversation_search(const HTTPRequest& request);
+       HTTPResponse handle_memory_conversation_delete(const HTTPRequest& request);
+       HTTPResponse handle_memory_case_store(const HTTPRequest& request);
+       HTTPResponse handle_memory_case_retrieve(const HTTPRequest& request);
+       HTTPResponse handle_memory_case_search(const HTTPRequest& request);
+       HTTPResponse handle_memory_case_delete(const HTTPRequest& request);
+       HTTPResponse handle_memory_feedback_store(const HTTPRequest& request);
+       HTTPResponse handle_memory_feedback_retrieve(const HTTPRequest& request);
+       HTTPResponse handle_memory_feedback_search(const HTTPRequest& request);
+       HTTPResponse handle_memory_learning_models(const HTTPRequest& request);
+       HTTPResponse handle_memory_consolidation_status(const HTTPRequest& request);
+       HTTPResponse handle_memory_consolidation_run(const HTTPRequest& request);
+       HTTPResponse handle_memory_access_patterns(const HTTPRequest& request);
+       HTTPResponse handle_memory_statistics(const HTTPRequest& request);
+
+       std::string generate_memory_html() const;
     std::string generate_ingestion_html() const;
     std::string generate_api_docs_html() const;
 
@@ -222,6 +302,20 @@ private:
     std::string generate_config_json() const;
     std::string generate_metrics_json() const;
     std::string generate_health_json() const;
+
+    // Audit data collection
+    nlohmann::json collect_audit_data() const;
+    nlohmann::json collect_recent_function_calls() const;
+
+    // Performance metrics and AI insights
+    nlohmann::json collect_performance_metrics() const;
+    double calculate_error_rate() const;
+    double calculate_timeout_rate() const;
+    nlohmann::json generate_ai_insights(const nlohmann::json& metrics) const;
+    nlohmann::json generate_performance_recommendations(const nlohmann::json& metrics) const;
+    nlohmann::json detect_performance_anomalies(const nlohmann::json& metrics) const;
+    double calculate_system_health_score(const nlohmann::json& metrics) const;
+    std::string analyze_performance_trend(const nlohmann::json& metrics) const;
 
     // Utility methods
     HTTPResponse create_json_response(const std::string& json_data);

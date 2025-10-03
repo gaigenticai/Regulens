@@ -134,6 +134,8 @@ struct CircuitBreaker {
     int success_threshold;        // Successes needed to close circuit
     std::chrono::seconds timeout; // How long to wait before trying again
 
+    CircuitBreaker() = default;
+
     CircuitBreaker(std::string id, std::string service, int fail_thresh = 5,
                   int success_thresh = 3, std::chrono::seconds timeo = std::chrono::seconds(60))
         : breaker_id(std::move(id)), service_name(std::move(service)),
@@ -230,6 +232,8 @@ struct FallbackConfig {
     std::string fallback_strategy;       // "basic", "cached", "simplified", "external"
     std::chrono::seconds cache_ttl;      // How long to cache fallback results
     std::unordered_map<std::string, std::string> fallback_parameters;
+
+    FallbackConfig() = default;
 
     FallbackConfig(std::string name)
         : component_name(std::move(name)), enable_fallback(true),

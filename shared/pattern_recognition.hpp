@@ -146,7 +146,7 @@ private:
                                  const std::vector<PatternDataPoint>& historical_data);
 
     std::vector<std::string> find_frequent_sequences(
-        const std::vector<PatternDataPoint>& data_points, size_t min_support);
+        const std::vector<std::string>& events, size_t min_occurrences);
 
     // Utility functions
     std::string generate_pattern_id(PatternType type, const std::string& entity_id);
@@ -176,7 +176,7 @@ private:
  * @brief Create data point from agent decision
  */
 inline PatternDataPoint create_data_point_from_decision(const AgentDecision& decision,
-                                                      const std::string& event_id) {
+                                                      const std::string& /*event_id*/) {
     PatternDataPoint dp(decision.get_agent_id(), decision.get_timestamp());
 
     // Add decision-related features

@@ -11,6 +11,8 @@
 #include "../logging/structured_logger.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../error_handler.hpp"
+#include "streaming_handler.hpp"
+#include "function_calling.hpp"
 
 namespace regulens {
 
@@ -18,18 +20,50 @@ namespace regulens {
  * @brief OpenAI API response structures
  */
 struct OpenAIMessage {
-    std::string role;    // "system", "user", "assistant"
+    std::string role;    // "system", "user", "assistant", "function", "tool"
     std::string content;
     std::optional<std::string> name;  // Optional name for the message author
+    std::optional<nlohmann::json> function_call;  // For function calling
+    std::optional<nlohmann::json> tool_calls;     // For tool calling
+    std::optional<std::string> tool_call_id;      // For tool responses
+
+    // Default constructor
+    OpenAIMessage() = default;
+
+    // Constructor for basic messages
+    OpenAIMessage(std::string r, std::string c,
+                  std::optional<std::string> n = std::nullopt,
+                  std::optional<nlohmann::json> fc = std::nullopt,
+                  std::optional<nlohmann::json> tc = std::nullopt,
+                  std::optional<std::string> tci = std::nullopt)
+        : role(std::move(r)), content(std::move(c)), name(std::move(n)),
+          function_call(std::move(fc)), tool_calls(std::move(tc)), tool_call_id(std::move(tci)) {}
 
     nlohmann::json to_json() const {
         nlohmann::json msg = {
-            {"role", role},
-            {"content", content}
+            {"role", role}
         };
+
+        if (!content.empty()) {
+            msg["content"] = content;
+        }
+
         if (name) {
             msg["name"] = *name;
         }
+
+        if (function_call) {
+            msg["function_call"] = *function_call;
+        }
+
+        if (tool_calls) {
+            msg["tool_calls"] = *tool_calls;
+        }
+
+        if (tool_call_id) {
+            msg["tool_call_id"] = *tool_call_id;
+        }
+
         return msg;
     }
 };
@@ -117,6 +151,11 @@ struct OpenAICompletionRequest {
     std::optional<std::string> stop;        // Stop sequence(s)
     std::optional<std::vector<std::string>> stop_sequences; // Multiple stop sequences
 
+    // Function calling support
+    std::optional<nlohmann::json> functions;  // Array of function definitions (legacy)
+    std::optional<nlohmann::json> tools;      // Array of tool definitions (new format)
+    std::optional<std::string> tool_choice;   // "none", "auto", or specific function name
+
     nlohmann::json to_json() const {
         nlohmann::json request = {
             {"model", model},
@@ -146,6 +185,11 @@ struct OpenAICompletionRequest {
         if (stop_sequences) {
             request["stop"] = *stop_sequences;
         }
+
+        // Function calling parameters
+        if (functions) request["functions"] = *functions;
+        if (tools) request["tools"] = *tools;
+        if (tool_choice) request["tool_choice"] = *tool_choice;
 
         return request;
     }
@@ -186,6 +230,18 @@ public:
      * @return Response from OpenAI API or error result
      */
     std::optional<OpenAIResponse> create_chat_completion(const OpenAICompletionRequest& request);
+
+    /**
+     * @brief Create streaming chat completion with real-time token processing
+     * @param request Completion request with stream=true
+     * @param streaming_callback Callback for real-time token processing
+     * @param completion_callback Callback for final completion
+     * @return Streaming session or nullopt on error
+     */
+    std::optional<std::shared_ptr<StreamingSession>> create_streaming_completion(
+        const OpenAICompletionRequest& request,
+        StreamingCallback streaming_callback,
+        CompletionCallback completion_callback);
 
     /**
      * @brief Analyze text with advanced reasoning
@@ -245,6 +301,12 @@ public:
     nlohmann::json get_health_status();
 
     /**
+     * @brief Check if client is healthy
+     * @return true if healthy, false otherwise
+     */
+    bool is_healthy() const;
+
+    /**
      * @brief Reset usage counters (for testing/admin)
      */
     void reset_usage_counters();
@@ -259,6 +321,7 @@ private:
     std::shared_ptr<StructuredLogger> logger_;
     std::shared_ptr<ErrorHandler> error_handler_;
     std::shared_ptr<HttpClient> http_client_;
+    std::shared_ptr<StreamingResponseHandler> streaming_handler_;
 
     // Configuration
     std::string api_key_;
@@ -346,6 +409,58 @@ private:
      */
     bool validate_response(const OpenAIResponse& response);
 
+    /**
+     * @brief Create completion request with function calling support
+     * @param messages Conversation messages
+     * @param functions Function definitions for calling
+     * @param model Model to use (optional)
+     * @return Completion request with function support
+     */
+    OpenAICompletionRequest create_function_completion_request(
+        const std::vector<OpenAIMessage>& messages,
+        const nlohmann::json& functions,
+        const std::string& model = "gpt-4-turbo-preview");
+
+    /**
+     * @brief Create completion request with tool calling support (new format)
+     * @param messages Conversation messages
+     * @param tools Tool definitions for calling
+     * @param tool_choice Tool choice strategy ("auto", "none", or function name)
+     * @param model Model to use (optional)
+     * @return Completion request with tool support
+     */
+    OpenAICompletionRequest create_tool_completion_request(
+        const std::vector<OpenAIMessage>& messages,
+        const nlohmann::json& tools,
+        const std::string& tool_choice = "auto",
+        const std::string& model = "gpt-4-turbo-preview");
+
+    /**
+     * @brief Create function call message from function response
+     * @param function_name Name of the function called
+     * @param function_response Function execution result
+     * @param tool_call_id Tool call ID for tool format
+     * @return Message with function/tool response
+     */
+    OpenAIMessage create_function_response_message(
+        const std::string& function_name,
+        const nlohmann::json& function_response,
+        const std::string& tool_call_id = "");
+
+    /**
+     * @brief Parse function calls from API response
+     * @param response API response
+     * @return Vector of parsed function calls
+     */
+    std::vector<FunctionCall> parse_function_calls_from_response(const OpenAIResponse& response);
+
+    /**
+     * @brief Check if response contains function calls
+     * @param response API response
+     * @return true if function calls present
+     */
+    bool response_contains_function_calls(const OpenAIResponse& response);
+
     // Fallback responses removed - Rule 7 compliance: No makeshift workarounds
 };
 
@@ -378,8 +493,8 @@ inline OpenAICompletionRequest create_chat_completion(
     return OpenAICompletionRequest{
         .model = model,
         .messages = {
-            OpenAIMessage{"system", system_prompt},
-            OpenAIMessage{"user", user_message}
+            OpenAIMessage{"system", system_prompt, std::nullopt},
+            OpenAIMessage{"user", user_message, std::nullopt}
         },
         .temperature = 0.7,
         .max_tokens = 2000

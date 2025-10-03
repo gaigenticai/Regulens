@@ -57,6 +57,8 @@ struct AgentActivityEvent {
     std::optional<AgentDecision> decision;  // For decision-related activities
     std::optional<nlohmann::json> metrics;   // For metrics-related activities
 
+    AgentActivityEvent() = default;
+
     AgentActivityEvent(std::string agent, AgentActivityType type,
                       ActivitySeverity sev, std::string ttl, std::string desc = "")
         : agent_id(std::move(agent)), activity_type(type), severity(sev),

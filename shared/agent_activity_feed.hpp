@@ -14,6 +14,7 @@
 #include "models/agent_activity.hpp"
 #include "logging/structured_logger.hpp"
 #include "config/configuration_manager.hpp"
+#include "database/postgresql_connection.hpp"
 
 namespace regulens {
 
@@ -123,6 +124,9 @@ private:
     std::atomic<bool> running_;
     std::mutex cleanup_mutex_;
     std::condition_variable cleanup_cv_;
+
+    // Database persistence (when enabled)
+    std::unique_ptr<PostgreSQLConnection> db_connection_;
 
     // Helper methods
     void update_agent_stats(const AgentActivityEvent& event);

@@ -179,6 +179,7 @@ struct CollaborationConfig {
     size_t max_messages_per_session = 1000;   // Maximum messages per session
     std::chrono::hours session_timeout = std::chrono::hours(24);  // Session timeout
     std::chrono::hours request_timeout = std::chrono::hours(1);   // Request timeout
+    std::chrono::minutes cleanup_interval = std::chrono::minutes(30); // Cleanup interval
     bool enable_persistence = true;           // Whether to persist data
     size_t max_active_requests = 100;         // Maximum pending requests
     bool require_user_authentication = true;  // Whether to require user auth
@@ -189,6 +190,7 @@ struct CollaborationConfig {
             {"max_messages_per_session", max_messages_per_session},
             {"session_timeout_hours", session_timeout.count()},
             {"request_timeout_hours", request_timeout.count()},
+            {"cleanup_interval_minutes", cleanup_interval.count()},
             {"enable_persistence", enable_persistence},
             {"max_active_requests", max_active_requests},
             {"require_user_authentication", require_user_authentication}
@@ -261,6 +263,8 @@ struct CollaborationSession {
     std::chrono::system_clock::time_point created_at;
     std::chrono::system_clock::time_point last_activity;
     std::chrono::system_clock::time_point completed_at;
+
+    CollaborationSession() = default;
 
     CollaborationSession(std::string hid, std::string aid, std::string ttl = "")
         : session_id(generate_session_id(hid, aid)),
@@ -359,6 +363,8 @@ struct HumanUser {
     std::chrono::system_clock::time_point last_login;
     bool is_active;
 
+    HumanUser() = default;
+
     HumanUser(std::string uid, std::string uname, std::string dname, HumanRole r)
         : user_id(std::move(uid)), username(std::move(uname)),
           display_name(std::move(dname)), role(r),
@@ -406,6 +412,8 @@ struct AgentAssistanceRequest {
     std::unordered_map<std::string, std::string> context;
     std::chrono::system_clock::time_point requested_at;
     std::chrono::system_clock::time_point expires_at;
+
+    AgentAssistanceRequest() = default;
 
     AgentAssistanceRequest(std::string aid, std::string rtype, std::string desc)
         : request_id(generate_request_id(aid)),

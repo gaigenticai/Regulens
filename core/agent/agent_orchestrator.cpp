@@ -3,7 +3,13 @@
 #include "../shared/knowledge_base.hpp"
 #include "../shared/metrics/metrics_collector.hpp"
 #include "../shared/logging/structured_logger.hpp"
+#include "../shared/llm/openai_client.hpp"
+#include "../shared/llm/anthropic_client.hpp"
+#include "../shared/error_handler.hpp"
 #include "compliance_agent.hpp"
+#include "agent_communication.hpp"
+#include "message_translator.hpp"
+#include "consensus_engine.hpp"
 
 namespace regulens {
 
@@ -28,10 +34,11 @@ std::unique_ptr<AgentOrchestrator> AgentOrchestrator::create_test_instance() {
 }
 
 AgentOrchestrator::AgentOrchestrator()
-    : shutdown_requested_(false),
+    : logger_(&StructuredLogger::get_instance()),
+      shutdown_requested_(false),
       tasks_processed_(0),
       tasks_failed_(0),
-      last_health_check_(std::chrono::system_clock::now()) {}
+      last_health_check_() {}
 
 AgentOrchestrator::~AgentOrchestrator() {
     shutdown();
@@ -43,7 +50,6 @@ bool AgentOrchestrator::initialize(std::shared_ptr<ConfigurationManager> config)
     }
 
     config_ = config;
-    logger_ = std::make_shared<StructuredLogger>(StructuredLogger::get_instance());
 
     // Initialize core components
     if (!initialize_components()) {
@@ -67,10 +73,12 @@ bool AgentOrchestrator::initialize(std::shared_ptr<ConfigurationManager> config)
 
 bool AgentOrchestrator::initialize_components() {
     metrics_collector_ = std::make_shared<MetricsCollector>();
-    event_processor_ = std::make_shared<EventProcessor>(logger_);
-    knowledge_base_ = std::make_shared<KnowledgeBase>(config_, logger_);
+    event_processor_ = std::make_shared<EventProcessor>(
+        std::shared_ptr<StructuredLogger>(logger_, [](StructuredLogger*){}));
+    knowledge_base_ = std::make_shared<KnowledgeBase>(config_,
+        std::shared_ptr<StructuredLogger>(logger_, [](StructuredLogger*){}));
 
-    // Initialize components
+    // Initialize core components
     if (!event_processor_->initialize()) {
         logger_->error("Failed to initialize event processor");
         return false;
@@ -86,7 +94,150 @@ bool AgentOrchestrator::initialize_components() {
         return false;
     }
 
+    // Initialize multi-agent communication system
+    if (!initialize_communication_system()) {
+        logger_->error("Failed to initialize multi-agent communication system");
+        return false;
+    }
+
     return true;
+}
+
+bool AgentOrchestrator::initialize_communication_system() {
+    try {
+        // Create error handler
+        auto error_handler = std::make_shared<ErrorHandler>(config_, logger_);
+
+        // Create LLM clients for message translation
+        auto openai_client = std::make_shared<OpenAIClient>(config_, logger_, error_handler.get());
+        auto anthropic_client = std::make_shared<AnthropicClient>(config_, logger_, error_handler.get());
+
+        // Initialize communication components
+        agent_registry_ = create_agent_registry(config_, logger_, error_handler.get());
+
+        inter_agent_communicator_ = create_inter_agent_communicator(
+            config_, agent_registry_, logger_, error_handler.get());
+
+        message_translator_ = create_message_translator(
+            config_, openai_client, anthropic_client, logger_, error_handler.get());
+
+        consensus_engine_ = create_consensus_engine(
+            config_, inter_agent_communicator_, message_translator_, logger_, error_handler.get());
+
+        communication_mediator_ = create_communication_mediator(
+            inter_agent_communicator_, message_translator_, logger_, error_handler.get());
+
+        logger_->info("Multi-agent communication system initialized successfully");
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to initialize communication system: " + std::string(e.what()));
+        return false;
+    }
+}
+
+// ===== MULTI-AGENT COMMUNICATION METHOD IMPLEMENTATIONS =====
+
+bool AgentOrchestrator::send_agent_message(const std::string& from_agent, const std::string& to_agent,
+                                         MessageType message_type, const nlohmann::json& content) {
+    if (!inter_agent_communicator_) {
+        logger_->error("Inter-agent communicator not initialized");
+        return false;
+    }
+
+    AgentMessage message(from_agent, "orchestrator_agent", to_agent, "target_agent", message_type, content);
+    return inter_agent_communicator_->send_message(message);
+}
+
+bool AgentOrchestrator::broadcast_to_agents(const std::string& from_agent, MessageType message_type,
+                                          const nlohmann::json& content) {
+    if (!inter_agent_communicator_) {
+        logger_->error("Inter-agent communicator not initialized");
+        return false;
+    }
+
+    return inter_agent_communicator_->send_broadcast(from_agent, "orchestrator_agent", message_type, content);
+}
+
+std::vector<AgentMessage> AgentOrchestrator::receive_agent_messages(const std::string& agent_id,
+                                                                  size_t max_messages) {
+    if (!inter_agent_communicator_) {
+        logger_->error("Inter-agent communicator not initialized");
+        return {};
+    }
+
+    return inter_agent_communicator_->receive_messages(agent_id, max_messages);
+}
+
+std::optional<std::string> AgentOrchestrator::start_collaborative_decision(
+    const std::string& scenario,
+    const std::vector<std::string>& participant_agents,
+    ConsensusAlgorithm algorithm) {
+
+    if (!consensus_engine_) {
+        logger_->error("Consensus engine not initialized");
+        return std::nullopt;
+    }
+
+    return consensus_engine_->start_consensus_session(scenario, participant_agents, algorithm);
+}
+
+bool AgentOrchestrator::contribute_to_decision(const std::string& session_id, const std::string& agent_id,
+                                             const nlohmann::json& decision, double confidence) {
+    if (!consensus_engine_) {
+        logger_->error("Consensus engine not initialized");
+        return false;
+    }
+
+    return consensus_engine_->submit_decision(session_id, agent_id, decision, confidence);
+}
+
+std::optional<ConsensusResult> AgentOrchestrator::get_collaborative_decision_result(const std::string& session_id) {
+    if (!consensus_engine_) {
+        logger_->error("Consensus engine not initialized");
+        return std::nullopt;
+    }
+
+    return consensus_engine_->get_consensus_result(session_id);
+}
+
+nlohmann::json AgentOrchestrator::facilitate_agent_conversation(const std::string& agent1, const std::string& agent2,
+                                                             const std::string& topic, int max_rounds) {
+    if (!communication_mediator_) {
+        return {{"error", "Communication mediator not initialized"}};
+    }
+
+    return communication_mediator_->facilitate_conversation(agent1, agent2, topic, max_rounds);
+}
+
+nlohmann::json AgentOrchestrator::resolve_agent_conflicts(const std::vector<AgentMessage>& conflicting_messages) {
+    if (!communication_mediator_) {
+        return {{"error", "Communication mediator not initialized"}};
+    }
+
+    return communication_mediator_->resolve_conflicts(conflicting_messages);
+}
+
+nlohmann::json AgentOrchestrator::get_communication_statistics() const {
+    nlohmann::json stats = {
+        {"communication_enabled", inter_agent_communicator_ != nullptr},
+        {"translation_enabled", message_translator_ != nullptr},
+        {"consensus_enabled", consensus_engine_ != nullptr}
+    };
+
+    if (inter_agent_communicator_) {
+        stats["communication_stats"] = inter_agent_communicator_->get_communication_stats();
+    }
+
+    if (consensus_engine_) {
+        stats["consensus_stats"] = consensus_engine_->get_statistics();
+    }
+
+    if (message_translator_) {
+        stats["translation_stats"] = message_translator_->get_translation_stats();
+    }
+
+    return stats;
 }
 
 bool AgentOrchestrator::initialize_agents() {
@@ -292,8 +443,8 @@ bool AgentOrchestrator::set_agent_enabled(const std::string& agent_type, bool en
         it->second.agent_instance->set_enabled(enabled);
     }
 
-    logger_->info("Agent {} ({}) {}", it->second.agent_name, agent_type,
-                 enabled ? "enabled" : "disabled");
+    logger_->info("Agent " + it->second.agent_name + " (" + agent_type + ") " +
+                 (enabled ? "enabled" : "disabled"), "AgentOrchestrator", "set_agent_enabled");
     return true;
 }
 
@@ -442,8 +593,9 @@ void AgentOrchestrator::finalize_task_execution(const AgentTask& task, const Tas
     if (result.success) {
         tasks_processed_++;
         metrics_collector_->increment_counter("orchestrator.tasks_completed");
-        logger_->info("Task {} completed successfully in {}ms",
-                     task.task_id, result.execution_time.count());
+        logger_->info("Task " + task.task_id + " completed successfully in " +
+                     std::to_string(result.execution_time.count()) + "ms",
+                     "AgentOrchestrator", "finalize_task_execution");
     } else {
         tasks_failed_++;
         metrics_collector_->increment_counter("orchestrator.tasks_failed");
@@ -476,7 +628,7 @@ std::shared_ptr<ComplianceAgent> AgentOrchestrator::find_agent_for_task(const Ag
     // Find any agent that can handle this event type
     for (const auto& [type, registration] : registered_agents_) {
         if (registration.agent_instance &&
-            registration.enabled &&
+            registration.active &&
             registration.agent_instance->can_handle_event(task.event.get_type())) {
             return registration.agent_instance;
         }
@@ -486,6 +638,9 @@ std::shared_ptr<ComplianceAgent> AgentOrchestrator::find_agent_for_task(const Ag
 }
 
 void AgentOrchestrator::update_agent_metrics(const std::string& agent_type, const TaskResult& result) {
+    // Suppress unused parameter warning
+    (void)result;
+
     std::lock_guard<std::mutex> lock(agents_mutex_);
 
     auto it = registered_agents_.find(agent_type);

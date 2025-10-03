@@ -152,6 +152,9 @@ void RegulatoryMonitorUI::setup_routes() {
     server_->add_route("GET", "/api/health", [this](const HTTPRequest& req) {
         return handlers_->handle_health_check(req);
     });
+    server_->add_route("GET", "/api/health/detailed", [this](const HTTPRequest& req) {
+        return handlers_->handle_detailed_health_report(req);
+    });
     server_->add_route("GET", "/metrics", [this](const HTTPRequest& req) {
         return handlers_->handle_metrics_dashboard(req);
     });
@@ -451,6 +454,46 @@ void RegulatoryMonitorUI::setup_routes() {
         return handlers_->handle_claude_stats(req);
     });
 
+    // Function calling routes
+    server_->add_route("GET", "/functions", [this](const HTTPRequest& req) {
+        return handlers_->handle_function_calling_dashboard(req);
+    });
+    server_->add_route("POST", "/api/functions/execute", [this](const HTTPRequest& req) {
+        return handlers_->handle_function_execute(req);
+    });
+    server_->add_route("GET", "/api/functions/list", [this](const HTTPRequest& req) {
+        return handlers_->handle_function_list(req);
+    });
+    server_->add_route("GET", "/api/functions/audit", [this](const HTTPRequest& req) {
+        return handlers_->handle_function_audit(req);
+    });
+    server_->add_route("GET", "/api/functions/metrics", [this](const HTTPRequest& req) {
+        return handlers_->handle_function_metrics(req);
+    });
+    server_->add_route("POST", "/api/functions/openai-integration", [this](const HTTPRequest& req) {
+        return handlers_->handle_function_openai_integration(req);
+    });
+
+    // Embeddings routes
+    server_->add_route("GET", "/embeddings", [this](const HTTPRequest& req) {
+        return handlers_->handle_embeddings_dashboard(req);
+    });
+    server_->add_route("POST", "/api/embeddings/generate", [this](const HTTPRequest& req) {
+        return handlers_->handle_embeddings_generate(req);
+    });
+    server_->add_route("POST", "/api/embeddings/search", [this](const HTTPRequest& req) {
+        return handlers_->handle_embeddings_search(req);
+    });
+    server_->add_route("POST", "/api/embeddings/index", [this](const HTTPRequest& req) {
+        return handlers_->handle_embeddings_index(req);
+    });
+    server_->add_route("GET", "/api/embeddings/models", [this](const HTTPRequest& req) {
+        return handlers_->handle_embeddings_models(req);
+    });
+    server_->add_route("GET", "/api/embeddings/stats", [this](const HTTPRequest& req) {
+        return handlers_->handle_embeddings_stats(req);
+    });
+
     // Decision Tree Optimizer routes
     server_->add_route("GET", "/decision", [this](const HTTPRequest& req) {
         return handlers_->handle_decision_dashboard(req);
@@ -469,6 +512,94 @@ void RegulatoryMonitorUI::setup_routes() {
     });
     server_->add_route("POST", "/api/decision/visualization", [this](const HTTPRequest& req) {
         return handlers_->handle_decision_visualization(req);
+    });
+
+    // Multi-Agent Communication routes
+    server_->add_route("GET", "/multi-agent", [this](const HTTPRequest& req) {
+        return handlers_->handle_multi_agent_dashboard(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/message/send", [this](const HTTPRequest& req) {
+        return handlers_->handle_agent_message_send(req);
+    });
+    server_->add_route("GET", "/api/multi-agent/message/receive", [this](const HTTPRequest& req) {
+        return handlers_->handle_agent_message_receive(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/message/broadcast", [this](const HTTPRequest& req) {
+        return handlers_->handle_agent_message_broadcast(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/consensus/start", [this](const HTTPRequest& req) {
+        return handlers_->handle_consensus_start(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/consensus/contribute", [this](const HTTPRequest& req) {
+        return handlers_->handle_consensus_contribute(req);
+    });
+    server_->add_route("GET", "/api/multi-agent/consensus/result", [this](const HTTPRequest& req) {
+        return handlers_->handle_consensus_result(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/translate", [this](const HTTPRequest& req) {
+        return handlers_->handle_message_translate(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/conversation", [this](const HTTPRequest& req) {
+        return handlers_->handle_agent_conversation(req);
+    });
+    server_->add_route("POST", "/api/multi-agent/conflicts/resolve", [this](const HTTPRequest& req) {
+        return handlers_->handle_conflict_resolution(req);
+    });
+    server_->add_route("GET", "/api/multi-agent/stats", [this](const HTTPRequest& req) {
+        return handlers_->handle_communication_stats(req);
+    });
+
+    // Memory System routes
+    server_->add_route("GET", "/memory", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_dashboard(req);
+    });
+    server_->add_route("POST", "/api/memory/conversations/store", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_conversation_store(req);
+    });
+    server_->add_route("GET", "/api/memory/conversations/retrieve", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_conversation_retrieve(req);
+    });
+    server_->add_route("GET", "/api/memory/conversations/search", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_conversation_search(req);
+    });
+    server_->add_route("DELETE", "/api/memory/conversations/delete", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_conversation_delete(req);
+    });
+    server_->add_route("POST", "/api/memory/cases/store", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_case_store(req);
+    });
+    server_->add_route("GET", "/api/memory/cases/retrieve", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_case_retrieve(req);
+    });
+    server_->add_route("GET", "/api/memory/cases/search", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_case_search(req);
+    });
+    server_->add_route("DELETE", "/api/memory/cases/delete", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_case_delete(req);
+    });
+    server_->add_route("POST", "/api/memory/feedback/store", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_feedback_store(req);
+    });
+    server_->add_route("GET", "/api/memory/feedback/retrieve", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_feedback_retrieve(req);
+    });
+    server_->add_route("GET", "/api/memory/feedback/search", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_feedback_search(req);
+    });
+    server_->add_route("GET", "/api/memory/models", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_learning_models(req);
+    });
+    server_->add_route("GET", "/api/memory/consolidation/status", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_consolidation_status(req);
+    });
+    server_->add_route("POST", "/api/memory/consolidation/run", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_consolidation_run(req);
+    });
+    server_->add_route("GET", "/api/memory/patterns", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_access_patterns(req);
+    });
+    server_->add_route("GET", "/api/memory/statistics", [this](const HTTPRequest& req) {
+        return handlers_->handle_memory_statistics(req);
     });
 }
 

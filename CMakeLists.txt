@@ -289,6 +289,49 @@ target_link_libraries(advanced_agent_demo
         Threads::Threads
 )
 
+# Function Calling Integration demonstration executable
+add_executable(function_calling_demo
+    function_calling_demo.cpp
+)
+
+target_link_libraries(function_calling_demo
+    PRIVATE
+    regulens_shared
+    Threads::Threads
+)
+
+# Embeddings Integration demonstration executable
+add_executable(embeddings_demo
+    embeddings_demo.cpp
+)
+
+target_link_libraries(embeddings_demo
+    PRIVATE
+    regulens_shared
+    Threads::Threads
+)
+
+# Multi-Agent Communication Demo executable
+add_executable(multi_agent_demo
+    multi_agent_demo.cpp
+)
+
+target_link_libraries(multi_agent_demo
+    PRIVATE
+    regulens_shared
+    Threads::Threads
+)
+
+add_executable(memory_system_demo
+    memory_system_demo.cpp
+)
+
+target_link_libraries(memory_system_demo
+    PRIVATE
+    regulens_shared
+    Threads::Threads
+)
+
 # Level 3 Capabilities Test executable
 add_executable(level3_capabilities_test
     level3_capabilities_test.cpp

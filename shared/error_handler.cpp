@@ -5,13 +5,14 @@
 #include <sstream>
 #include <iomanip>
 #include <random>
+#include "../network/http_client.hpp"
 
 namespace regulens {
 
 ErrorHandler::ErrorHandler(std::shared_ptr<ConfigurationManager> config,
                          std::shared_ptr<StructuredLogger> logger)
-    : config_manager_(config), logger_(logger), running_(false),
-      total_errors_processed_(0), total_recovery_attempts_(0), total_successful_recoveries_(0) {
+    : config_manager_(config), logger_(logger),
+      total_errors_processed_(0), total_recovery_attempts_(0), total_successful_recoveries_(0), running_(false) {
     // Load configuration from environment
     config_.enable_error_logging = config_manager_->get_bool("ERROR_ENABLE_LOGGING").value_or(true);
     config_.enable_error_alerts = config_manager_->get_bool("ERROR_ENABLE_ALERTS").value_or(true);
@@ -76,6 +77,15 @@ void ErrorHandler::shutdown() {
 std::string ErrorHandler::report_error(const ErrorInfo& error) {
     std::lock_guard<std::mutex> lock(error_mutex_);
 
+    // Generate correlation ID for this error
+    std::string correlation_id = generate_error_correlation_id();
+
+    // Add error context for tracking
+    add_error_context(correlation_id, "component", error.component);
+    add_error_context(correlation_id, "operation", error.operation);
+    add_error_context(correlation_id, "severity", std::to_string(static_cast<int>(error.severity)));
+    add_error_context(correlation_id, "timestamp", std::to_string(std::chrono::system_clock::to_time_t(error.timestamp)));
+
     // Add to error history
     error_history_.push_back(error);
 
@@ -86,7 +96,7 @@ std::string ErrorHandler::report_error(const ErrorInfo& error) {
 
     total_errors_processed_++;
 
-    // Log the error
+    // Log the error with correlation ID
     if (config_.enable_error_logging) {
         std::string severity_str;
         switch (error.severity) {
@@ -96,8 +106,13 @@ std::string ErrorHandler::report_error(const ErrorInfo& error) {
             case ErrorSeverity::CRITICAL: severity_str = "CRITICAL"; break;
         }
 
-        logger_->error("Error reported - Component: {}, Operation: {}, Severity: {}, Message: {}",
-                      error.component, "", "", {{"operation", error.operation}, {"severity", severity_str}, {"message", error.message}});
+        logger_->error_with_correlation("Error reported - Component: " + error.component + ", Operation: " + error.operation +
+                                       ", Severity: " + severity_str + ", Message: " + error.message,
+                                       correlation_id, "ErrorHandler", "report_error",
+                                       {{"error_id", error.error_id},
+                                        {"component", error.component},
+                                        {"operation", error.operation},
+                                        {"severity", severity_str}});
     }
 
     // Check for alerts
@@ -114,7 +129,7 @@ std::string ErrorHandler::report_error(const ErrorInfo& error) {
         analyze_error_patterns();
     }
 
-    return error.error_id;
+    return correlation_id;
 }
 
 HealthStatus ErrorHandler::get_component_health(const std::string& component_name) {
@@ -160,7 +175,7 @@ bool ErrorHandler::reset_circuit_breaker(const std::string& service_name) {
         it->second.state = CircuitState::CLOSED;
         it->second.failure_count = 0;
         it->second.success_count = 0;
-        logger_->info("Manually reset circuit breaker for service: {}", service_name);
+        logger_->info("Manually reset circuit breaker for service: " + service_name);
         return true;
     }
 
@@ -181,7 +196,7 @@ std::optional<FallbackConfig> ErrorHandler::get_fallback_config(const std::strin
 bool ErrorHandler::set_fallback_config(const FallbackConfig& config) {
     std::lock_guard<std::mutex> lock(error_mutex_);
     fallback_configs_[config.component_name] = config;
-    logger_->info("Updated fallback config for component: {}", config.component_name);
+    logger_->info("Updated fallback config for component: " + config.component_name);
     return true;
 }
 
@@ -362,15 +377,17 @@ void ErrorHandler::analyze_error_patterns() {
     // Check for components with high error rates
     for (const auto& [component, count] : component_errors) {
         if (count > 10) { // More than 10 errors in last hour
-            logger_->warn("High error rate detected for component {}: {} errors in last hour",
-                         component, "", "", {{"error_count", std::to_string(count)}});
+            logger_->warn("High error rate detected for component " + component + ": " +
+                         std::to_string(count) + " errors in last hour", "", "",
+                         std::unordered_map<std::string, std::string>{{"error_count", std::to_string(count)}});
         }
     }
 
     // Log pattern analysis summary
-    logger_->info("Error pattern analysis: {} components, {} total errors in last hour",
-                 "", "", "", {{"component_count", std::to_string(component_errors.size())},
-                              {"total_errors", std::to_string(recent_errors.size())}});
+    logger_->info("Error pattern analysis: " + std::to_string(component_errors.size()) + " components, " +
+                 std::to_string(recent_errors.size()) + " total errors in last hour", "", "",
+                 std::unordered_map<std::string, std::string>{{"component_count", std::to_string(component_errors.size())},
+                                                               {"total_errors", std::to_string(recent_errors.size())}});
 }
 
 void ErrorHandler::check_error_rate_limits() {
@@ -390,9 +407,10 @@ void ErrorHandler::check_error_rate_limits() {
     }
 
     if (recent_errors > static_cast<size_t>(config_.max_errors_per_minute)) {
-        logger_->warn("Error rate limit exceeded: {} errors in last minute (limit: {})",
-                     "", "", "", {{"error_count", std::to_string(recent_errors)},
-                                  {"limit", std::to_string(config_.max_errors_per_minute)}});
+        logger_->warn("Error rate limit exceeded: " + std::to_string(recent_errors) +
+                     " errors in last minute (limit: " + std::to_string(config_.max_errors_per_minute) + ")", "", "",
+                     std::unordered_map<std::string, std::string>{{"error_count", std::to_string(recent_errors)},
+                                                                   {"limit", std::to_string(config_.max_errors_per_minute)}});
     }
 }
 
@@ -471,7 +489,8 @@ void ErrorHandler::initialize_default_circuit_breakers() {
         circuit_breakers_[service] = breaker;
     }
 
-    logger_->info("Initialized {} default circuit breakers", "", "", {{"count", std::to_string(services.size())}});
+    logger_->info("Initialized " + std::to_string(services.size()) + " default circuit breakers", "", "",
+                  std::unordered_map<std::string, std::string>{{"count", std::to_string(services.size())}});
 }
 
 void ErrorHandler::initialize_default_fallback_configs() {
@@ -490,7 +509,8 @@ void ErrorHandler::initialize_default_fallback_configs() {
         fallback_configs_[component] = config;
     }
 
-    logger_->info("Initialized {} default fallback configurations", "", "", {{"count", std::to_string(component_strategies.size())}});
+    logger_->info("Initialized " + std::to_string(component_strategies.size()) + " default fallback configurations", "", "",
+                  std::unordered_map<std::string, std::string>{{"count", std::to_string(component_strategies.size())}});
 }
 
 bool ErrorHandler::is_circuit_open(const std::string& component_name) {
@@ -499,26 +519,23 @@ bool ErrorHandler::is_circuit_open(const std::string& component_name) {
     auto it = circuit_breakers_.find(component_name);
     if (it == circuit_breakers_.end()) {
         // Initialize circuit breaker for new component
-        CircuitBreakerState state;
-        state.failure_count = 0;
-        state.last_failure_time = std::chrono::system_clock::time_point::min();
-        state.state = CircuitBreakerState::CLOSED;
-        circuit_breakers_[component_name] = state;
+        CircuitBreaker breaker("cb_" + component_name, component_name);
+        circuit_breakers_[component_name] = breaker;
         return false;
     }
 
     auto& state = it->second;
 
     // Check if circuit should transition from OPEN to HALF_OPEN
-    if (state.state == CircuitBreakerState::OPEN) {
+    if (state.state == CircuitState::OPEN) {
         auto now = std::chrono::system_clock::now();
         auto time_since_failure = std::chrono::duration_cast<std::chrono::seconds>(
             now - state.last_failure_time).count();
 
         if (time_since_failure >= config_.circuit_breaker_timeout_seconds) {
-            state.state = CircuitBreakerState::HALF_OPEN;
+            state.state = CircuitState::HALF_OPEN;
             state.failure_count = 0;
-            logger_->info("Circuit breaker for {} transitioned to HALF_OPEN", component_name);
+            logger_->info("Circuit breaker for " + component_name + " transitioned to HALF_OPEN");
             return false; // Allow one request through
         }
         return true; // Still open
@@ -534,11 +551,11 @@ void ErrorHandler::record_success(const std::string& component_name) {
     if (it != circuit_breakers_.end()) {
         auto& state = it->second;
 
-        if (state.state == CircuitBreakerState::HALF_OPEN) {
+        if (state.state == CircuitState::HALF_OPEN) {
             // Success in half-open state - close the circuit
-            state.state = CircuitBreakerState::CLOSED;
+            state.state = CircuitState::CLOSED;
             state.failure_count = 0;
-            logger_->info("Circuit breaker for {} closed after successful operation", component_name);
+            logger_->info("Circuit breaker for " + component_name + " closed after successful operation");
         }
         // In CLOSED state, success is normal - no action needed
     }
@@ -550,11 +567,11 @@ void ErrorHandler::record_failure(const std::string& component_name) {
     auto it = circuit_breakers_.find(component_name);
     if (it == circuit_breakers_.end()) {
         // Initialize if not exists
-        CircuitBreakerState state;
-        state.failure_count = 1;
-        state.last_failure_time = std::chrono::system_clock::now();
-        state.state = CircuitBreakerState::CLOSED;
-        circuit_breakers_[component_name] = state;
+        CircuitBreaker breaker("cb_" + component_name, component_name);
+        breaker.failure_count = 1;
+        breaker.last_failure_time = std::chrono::system_clock::now();
+        breaker.state = CircuitState::CLOSED;
+        circuit_breakers_[component_name] = breaker;
         return;
     }
 
@@ -563,23 +580,155 @@ void ErrorHandler::record_failure(const std::string& component_name) {
     state.last_failure_time = std::chrono::system_clock::now();
 
     // Check if circuit should open
-    if (state.state == CircuitBreakerState::CLOSED &&
+    if (state.state == CircuitState::CLOSED &&
         state.failure_count >= config_.circuit_breaker_failure_threshold) {
-        state.state = CircuitBreakerState::OPEN;
-        logger_->warn("Circuit breaker for {} opened after {} failures", component_name, state.failure_count);
-    } else if (state.state == CircuitBreakerState::HALF_OPEN) {
+        state.state = CircuitState::OPEN;
+        logger_->warn("Circuit breaker for " + component_name + " opened after " +
+                     std::to_string(state.failure_count) + " failures");
+    } else if (state.state == CircuitState::HALF_OPEN) {
         // Failure in half-open state - go back to open
-        state.state = CircuitBreakerState::OPEN;
-        logger_->warn("Circuit breaker for {} returned to OPEN after failure in HALF_OPEN state", component_name);
+        state.state = CircuitState::OPEN;
+        logger_->warn("Circuit breaker for " + component_name + " returned to OPEN after failure in HALF_OPEN state");
     }
 }
 
-void ErrorHandler::update_error_statistics(const ErrorInfo& error, bool recovered) {
+void ErrorHandler::update_error_statistics(const ErrorInfo& /*error*/, bool recovered) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
 
     total_recovery_attempts_++;
     if (recovered) {
         total_successful_recoveries_++;
+    }
+}
+
+// Enhanced error tracking and correlation implementation
+
+std::string ErrorHandler::generate_error_correlation_id() {
+    std::lock_guard<std::mutex> lock(error_context_mutex_);
+    std::string correlation_id = "err_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) +
+                                "_" + std::to_string(std::rand());
+    return correlation_id;
+}
+
+void ErrorHandler::add_error_context(const std::string& correlation_id, const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> lock(error_context_mutex_);
+    error_contexts_[correlation_id][key] = value;
+}
+
+std::unordered_map<std::string, std::string> ErrorHandler::get_error_context(const std::string& correlation_id) {
+    std::lock_guard<std::mutex> lock(error_context_mutex_);
+    auto it = error_contexts_.find(correlation_id);
+    if (it != error_contexts_.end()) {
+        return it->second;
+    }
+    return {};
+}
+
+void ErrorHandler::clear_error_context(const std::string& correlation_id) {
+    std::lock_guard<std::mutex> lock(error_context_mutex_);
+    error_contexts_.erase(correlation_id);
+}
+
+// Comprehensive health monitoring implementation
+
+nlohmann::json ErrorHandler::get_system_health_report() {
+    nlohmann::json report;
+
+    report["timestamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    report["status"] = "healthy"; // Default to healthy
+
+    // Component health status
+    report["components"] = get_component_health_status();
+
+    // System metrics
+    report["metrics"] = {
+        {"total_errors_processed", static_cast<size_t>(total_errors_processed_)},
+        {"total_recovery_attempts", static_cast<size_t>(total_recovery_attempts_)},
+        {"total_successful_recoveries", static_cast<size_t>(total_successful_recoveries_)},
+        {"active_error_contexts", error_contexts_.size()},
+        {"error_history_size", error_history_.size()}
+    };
+
+    // External service health
+    perform_external_health_checks();
+    report["external_services"] = nlohmann::json::object();
+
+    // Overall system status
+    bool system_healthy = true;
+    for (const auto& [component, health] : report["components"].items()) {
+        if (health["status"] != "healthy") {
+            system_healthy = false;
+            break;
+        }
+    }
+    report["status"] = system_healthy ? "healthy" : "degraded";
+
+    return report;
+}
+
+bool ErrorHandler::check_external_service_health(const std::string& service_name, const std::string& endpoint) {
+    try {
+        // Use HTTP client to check external service health
+        HttpClient http_client;
+        auto response = http_client.get(endpoint);
+
+        if (response.success && response.status_code >= 200 && response.status_code < 300) {
+            logger_->debug("External service health check passed: " + service_name + " at " + endpoint);
+            return true;
+        } else {
+            logger_->warn("External service health check failed: " + service_name + " at " + endpoint +
+                         " (status: " + std::to_string(response.status_code) + ")");
+            return false;
+        }
+    } catch (const std::exception& e) {
+        logger_->error("External service health check error for " + service_name + ": " + e.what());
+        return false;
+    }
+}
+
+nlohmann::json ErrorHandler::get_component_health_status() {
+    std::lock_guard<std::mutex> lock(error_mutex_);
+    nlohmann::json components = nlohmann::json::object();
+
+    // Check each component's health
+    std::vector<std::string> component_names = {"database", "regulatory_monitor", "knowledge_base",
+                                               "llm_services", "pattern_recognition", "risk_assessment"};
+
+    for (const auto& component : component_names) {
+        auto health = get_component_health(component);
+        components[component] = {
+            {"status", health == HealthStatus::HEALTHY ? "healthy" :
+                      health == HealthStatus::DEGRADED ? "degraded" : "unhealthy"},
+            {"last_check", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
+            {"message", "Component health status"}
+        };
+    }
+
+    return components;
+}
+
+void ErrorHandler::perform_external_health_checks() {
+    // Check critical external services - endpoints must be configured via environment variables
+    std::vector<std::pair<std::string, std::string>> services_to_check;
+
+    // Load service endpoints from configuration
+    auto vector_db_endpoint = config_->get_string("VECTOR_DATABASE_HEALTH_ENDPOINT");
+    if (vector_db_endpoint) {
+        services_to_check.emplace_back("vector_database", *vector_db_endpoint);
+    }
+
+    auto ml_service_endpoint = config_->get_string("ML_SERVICE_HEALTH_ENDPOINT");
+    if (ml_service_endpoint) {
+        services_to_check.emplace_back("ml_service", *ml_service_endpoint);
+    }
+
+    auto message_queue_endpoint = config_->get_string("MESSAGE_QUEUE_HEALTH_ENDPOINT");
+    if (message_queue_endpoint) {
+        services_to_check.emplace_back("message_queue", *message_queue_endpoint);
+    }
+
+    for (const auto& [service, endpoint] : services_to_check) {
+        check_external_service_health(service, endpoint);
     }
 }
 

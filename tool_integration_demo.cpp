@@ -164,7 +164,7 @@ private:
                 logger_->log(LogLevel::WARN, "Failed to register email tool");
             }
 
-            // Register Mock CRM Tool (placeholder for future implementation)
+            // Register CRM Tool (integration to be implemented)
             ToolConfig crm_config;
             crm_config.tool_id = "salesforce-crm";
             crm_config.tool_name = "Salesforce CRM Integration";

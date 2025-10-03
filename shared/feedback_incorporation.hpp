@@ -14,6 +14,7 @@
 #include "models/feedback_system.hpp"
 #include "logging/structured_logger.hpp"
 #include "config/configuration_manager.hpp"
+#include "database/postgresql_connection.hpp"
 #include "pattern_recognition.hpp"
 
 namespace regulens {
@@ -143,6 +144,9 @@ private:
     std::mutex learning_cv_mutex_;
     std::condition_variable learning_cv_;
 
+    // Database persistence (when enabled)
+    std::unique_ptr<PostgreSQLConnection> db_connection_;
+
     // Learning algorithms
     bool update_decision_model(std::shared_ptr<LearningModel>& model, const std::vector<FeedbackData>& feedback);
     bool update_behavior_model(std::shared_ptr<LearningModel>& model, const std::vector<FeedbackData>& feedback);
@@ -204,22 +208,22 @@ inline FeedbackData create_feedback_from_human(const HumanFeedback& human_fb,
 
     // Convert feedback type to score
     switch (human_fb.feedback_type) {
-        case FeedbackType::AGREEMENT:
+        case HumanFeedbackType::AGREEMENT:
             fb.feedback_score = 1.0;
             break;
-        case FeedbackType::DISAGREEMENT:
+        case HumanFeedbackType::DISAGREEMENT:
             fb.feedback_score = -1.0;
             break;
-        case FeedbackType::PARTIAL_AGREEMENT:
+        case HumanFeedbackType::PARTIAL_AGREEMENT:
             fb.feedback_score = 0.5;
             break;
-        case FeedbackType::UNCERTAIN:
+        case HumanFeedbackType::UNCERTAIN:
             fb.feedback_score = 0.0;
             break;
-        case FeedbackType::REQUEST_CLARIFICATION:
+        case HumanFeedbackType::REQUEST_CLARIFICATION:
             fb.feedback_score = -0.3;
             break;
-        case FeedbackType::SUGGEST_ALTERNATIVE:
+        case HumanFeedbackType::SUGGEST_ALTERNATIVE:
             fb.feedback_score = -0.7;
             break;
         default:

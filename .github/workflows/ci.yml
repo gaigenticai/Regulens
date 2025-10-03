@@ -1,0 +1,189 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up C++ environment
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libpqxx-dev \
+          libssl-dev \
+          libcurl4-openssl-dev \
+          nlohmann-json3-dev \
+          googletest \
+          pkg-config
+
+    - name: Create build directory
+      run: mkdir -p build
+
+    - name: Configure CMake
+      working-directory: build
+      run: |
+        cmake .. \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_TESTS=ON \
+          -DENABLE_COVERAGE=ON
+
+    - name: Build project
+      working-directory: build
+      run: |
+        make -j$(nproc) regulens_shared
+        make -j$(nproc) regulens_tests
+
+    - name: Run unit tests
+      working-directory: build
+      run: |
+        ./tests/regulens_tests --gtest_output=xml:test_results.xml
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: build/test_results.xml
+
+    - name: Generate coverage report
+      if: success()
+      working-directory: build
+      run: |
+        if command -v gcovr &> /dev/null; then
+          gcovr -r .. --exclude='.*test.*' --exclude='.*main.*' -o coverage.xml --xml
+        else
+          echo "gcovr not available, skipping coverage"
+        fi
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v4
+      if: success()
+      with:
+        file: build/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  static-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run clang-format check
+      run: |
+        if command -v clang-format &> /dev/null; then
+          find . -name "*.cpp" -o -name "*.hpp" | xargs clang-format --dry-run --Werror --style=file
+        else
+          echo "clang-format not available, skipping format check"
+        fi
+
+    - name: Run cppcheck static analysis
+      run: |
+        if command -v cppcheck &> /dev/null; then
+          cppcheck --enable=all --std=c++17 --language=c++ \
+                   --suppress=missingIncludeSystem \
+                   --suppress=unusedFunction \
+                   --inline-suppr \
+                   --xml --xml-version=2 \
+                   shared/ agents/ regulatory_monitor/ data_ingestion/ 2> cppcheck_results.xml || true
+        else
+          echo "cppcheck not available, skipping static analysis"
+        fi
+
+    - name: Upload static analysis results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: static-analysis
+        path: |
+          cppcheck_results.xml
+
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: regulens:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-and-test, static-analysis, security-scan]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+
+    environment:
+      name: staging
+      url: https://staging.regulens.ai
+
+    steps:
+    - name: Deploy to staging
+      run: |
+        echo "Deploying to staging environment..."
+        # Add actual deployment commands here
+        echo "Staging deployment completed"
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [build-and-test, static-analysis, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    environment:
+      name: production
+      url: https://regulens.ai
+
+    steps:
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        # Add actual deployment commands here
+        echo "Production deployment completed"

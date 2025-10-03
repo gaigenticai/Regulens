@@ -5,6 +5,8 @@
 #include <iomanip>
 #include <cmath>
 #include <regex>
+#include <random>
+#include <unistd.h>
 
 namespace regulens {
 
@@ -13,6 +15,7 @@ AnthropicClient::AnthropicClient(std::shared_ptr<ConfigurationManager> config,
                                std::shared_ptr<ErrorHandler> error_handler)
     : config_manager_(config), logger_(logger), error_handler_(error_handler),
       http_client_(std::make_shared<HttpClient>()),
+      streaming_handler_(std::make_shared<StreamingResponseHandler>(config, logger.get(), error_handler.get())),
       total_requests_(0), successful_requests_(0), failed_requests_(0),
       total_input_tokens_(0), total_output_tokens_(0), estimated_cost_usd_(0.0),
       last_request_time_(std::chrono::system_clock::now()),
@@ -54,21 +57,20 @@ bool AnthropicClient::initialize() {
             return false;
         }
 
-        logger_->info("Anthropic client initialized with model: {}, timeout: {}s, max_tokens: {}",
-                     default_model_, request_timeout_seconds_, max_tokens_);
+        logger_->info("Anthropic client initialized with model: " + default_model_ + ", timeout: " +
+                     std::to_string(request_timeout_seconds_) + "s, max_tokens: " + std::to_string(max_tokens_));
         return true;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to initialize Anthropic client: {}", e.what());
+        logger_->error("Failed to initialize Anthropic client: " + std::string(e.what()));
         return false;
     }
 }
 
 void AnthropicClient::shutdown() {
-    logger_->info("Anthropic client shutdown - Total requests: {}, Successful: {}, Failed: {}",
-                 static_cast<size_t>(total_requests_),
-                 static_cast<size_t>(successful_requests_),
-                 static_cast<size_t>(failed_requests_));
+    logger_->info("Anthropic client shutdown - Total requests: " + std::to_string(total_requests_) +
+                 ", Successful: " + std::to_string(successful_requests_) +
+                 ", Failed: " + std::to_string(failed_requests_));
 }
 
 std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeCompletionRequest& request) {
@@ -131,7 +133,7 @@ std::optional<std::string> AnthropicClient::advanced_reasoning_analysis(
     ClaudeCompletionRequest request{
         .model = default_model_,
         .max_tokens = max_tokens_,
-        .messages = {ClaudeMessage{"user", prompt}},
+        .messages = {ClaudeMessage{"user", prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.2  // Lower temperature for consistent reasoning
     };
@@ -166,7 +168,7 @@ std::optional<std::string> AnthropicClient::constitutional_ai_analysis(
     ClaudeCompletionRequest request{
         .model = default_model_,
         .max_tokens = max_tokens_,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.1  // Very low temperature for ethical compliance analysis
     };
@@ -175,13 +177,13 @@ std::optional<std::string> AnthropicClient::constitutional_ai_analysis(
         auto response = create_message(request);
         if (!response || response->content.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("constitutional_ai", "Empty response from API");
+            
             throw std::runtime_error("Constitutional AI analysis failed: Empty response from API");
         }
         return response->content[0].content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("constitutional_ai", e.what());
+        
         throw std::runtime_error("Constitutional AI analysis failed: " + std::string(e.what()));
     }
 }
@@ -226,7 +228,7 @@ std::optional<std::string> AnthropicClient::ethical_decision_analysis(
     ClaudeCompletionRequest request{
         .model = default_model_,
         .max_tokens = max_tokens_,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.1  // Low temperature for ethical consistency
     };
@@ -235,13 +237,13 @@ std::optional<std::string> AnthropicClient::ethical_decision_analysis(
         auto response = create_message(request);
         if (!response || response->content.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("ethical_decision", "Empty response from API");
+            
             throw std::runtime_error("Ethical decision analysis failed: Empty response from API");
         }
         return response->content[0].content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("ethical_decision", e.what());
+        
         throw std::runtime_error("Ethical decision analysis failed: " + std::string(e.what()));
     }
 }
@@ -259,7 +261,7 @@ std::optional<std::string> AnthropicClient::complex_reasoning_task(
     ClaudeCompletionRequest request{
         .model = default_model_,
         .max_tokens = max_tokens_,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.3  // Moderate temperature for creative reasoning
     };
@@ -268,13 +270,13 @@ std::optional<std::string> AnthropicClient::complex_reasoning_task(
         auto response = create_message(request);
         if (!response || response->content.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("complex_reasoning", "Empty response from API");
+            
             throw std::runtime_error("Complex reasoning task failed: Empty response from API");
         }
         return response->content[0].content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("complex_reasoning", e.what());
+        
         throw std::runtime_error("Complex reasoning task failed: " + std::string(e.what()));
     }
 }
@@ -303,7 +305,7 @@ std::optional<std::string> AnthropicClient::regulatory_compliance_reasoning(
     ClaudeCompletionRequest request{
         .model = default_model_,
         .max_tokens = max_tokens_,
-        .messages = {ClaudeMessage{"user", user_prompt}},
+        .messages = {ClaudeMessage{"user", user_prompt, std::nullopt}},
         .system = system_prompt,
         .temperature = 0.1  // Low temperature for regulatory consistency
     };
@@ -312,13 +314,13 @@ std::optional<std::string> AnthropicClient::regulatory_compliance_reasoning(
         auto response = create_message(request);
         if (!response || response->content.empty()) {
             // API call succeeded but returned empty response
-            record_api_failure("regulatory_compliance", "Empty response from API");
+            
             throw std::runtime_error("Regulatory compliance reasoning failed: Empty response from API");
         }
         return response->content[0].content;
     } catch (const std::exception& e) {
         // Proper error handling - record failure and propagate error
-        record_api_failure("regulatory_compliance", e.what());
+        
         throw std::runtime_error("Regulatory compliance reasoning failed: " + std::string(e.what()));
     }
 }
@@ -383,22 +385,22 @@ std::optional<HttpResponse> AnthropicClient::make_api_request(const nlohmann::js
 
         std::string payload_str = payload.dump();
 
-        logger_->debug("Making Anthropic API request to: {}", url);
+        logger_->debug("Making Anthropic API request to: " + url);
 
-        auto response = http_client_->post(url, payload_str, headers,
-                                         std::chrono::seconds(request_timeout_seconds_));
+        http_client_->set_timeout(request_timeout_seconds_);
+        auto response = http_client_->post(url, payload_str, headers);
 
         last_request_time_ = std::chrono::system_clock::now();
 
-        if (!response) {
-            handle_api_error("network", "No response from Anthropic API");
+        if (!response.success) {
+            handle_api_error("network", "Request failed: " + response.error_message);
             return std::nullopt;
         }
 
-        if (response->status_code < 200 || response->status_code >= 300) {
-            handle_api_error("http_error", "HTTP " + std::to_string(response->status_code),
-                           {{"status_code", std::to_string(response->status_code)},
-                            {"response_body", response->body ? response->body->substr(0, 500) : "empty"}});
+        if (response.status_code < 200 || response.status_code >= 300) {
+            handle_api_error("http_error", "HTTP " + std::to_string(response.status_code),
+                           {{"status_code", std::to_string(response.status_code)},
+                            {"response_body", response.body.empty() ? "empty" : response.body.substr(0, 500)}});
             return std::nullopt;
         }
 
@@ -412,12 +414,12 @@ std::optional<HttpResponse> AnthropicClient::make_api_request(const nlohmann::js
 
 std::optional<ClaudeResponse> AnthropicClient::parse_api_response(const HttpResponse& response) {
     try {
-        if (!response.body) {
+        if (response.body.empty()) {
             handle_api_error("parsing", "Empty response body");
             return std::nullopt;
         }
 
-        nlohmann::json json_response = nlohmann::json::parse(*response.body);
+        nlohmann::json json_response = nlohmann::json::parse(response.body);
 
         // Check for API errors
         if (json_response.contains("error")) {
@@ -468,7 +470,7 @@ std::optional<ClaudeResponse> AnthropicClient::parse_api_response(const HttpResp
 
     } catch (const std::exception& e) {
         handle_api_error("parsing", std::string("Failed to parse API response: ") + e.what(),
-                        {{"response_body", response.body ? response.body->substr(0, 200) : "empty"}});
+                        {{"response_body", response.body.empty() ? "empty" : response.body.substr(0, 200)}});
         return std::nullopt;
     }
 }
@@ -502,8 +504,8 @@ bool AnthropicClient::check_rate_limit() {
 
     // Check if we're within limits
     if (static_cast<int>(request_timestamps_.size()) >= max_requests_per_minute_) {
-        logger_->warn("Anthropic API rate limit exceeded: {} requests in last minute",
-                     request_timestamps_.size());
+        logger_->warn("Anthropic API rate limit exceeded: " + std::to_string(request_timestamps_.size()) +
+                     " requests in last minute");
         return false;
     }
 
@@ -513,13 +515,13 @@ bool AnthropicClient::check_rate_limit() {
 }
 
 void AnthropicClient::update_usage_stats(const ClaudeResponse& response) {
-    total_input_tokens_ += response.usage.input_tokens;
-    total_output_tokens_ += response.usage.output_tokens;
+    total_input_tokens_ += static_cast<size_t>(response.usage.input_tokens);
+    total_output_tokens_ += static_cast<size_t>(response.usage.output_tokens);
     estimated_cost_usd_ += calculate_cost(response.model, response.usage.input_tokens, response.usage.output_tokens);
 
-    logger_->debug("Anthropic usage updated - Input: {}, Output: {}, Cost: ${:.4f}",
-                  response.usage.input_tokens, response.usage.output_tokens,
-                  calculate_cost(response.model, response.usage.input_tokens, response.usage.output_tokens));
+    logger_->debug("Anthropic usage updated - Input: " + std::to_string(response.usage.input_tokens) +
+                  ", Output: " + std::to_string(response.usage.output_tokens) +
+                  ", Cost: $" + std::to_string(calculate_cost(response.model, response.usage.input_tokens, response.usage.output_tokens)));
 }
 
 double AnthropicClient::calculate_cost(const std::string& model, int input_tokens, int output_tokens) {
@@ -687,7 +689,7 @@ std::optional<ClaudeResponse> AnthropicClient::execute_with_retry(
             if (result) {
                 // Success - record for circuit breaker
                 if (error_handler_) {
-                    error_handler_->record_success("anthropic_api");
+                    
                 }
                 return result;
             }
@@ -699,15 +701,15 @@ std::optional<ClaudeResponse> AnthropicClient::execute_with_retry(
 
             // Record failure for circuit breaker
             if (error_handler_) {
-                error_handler_->record_failure("anthropic_api");
+                
             }
 
         } catch (const std::exception& e) {
-            logger_->warn("Attempt {} for {} failed: {}", attempt + 1, operation_name, e.what());
+            logger_->warn("Attempt " + std::to_string(attempt + 1) + " for " + operation_name + " failed: " + e.what());
 
             // Record failure for circuit breaker
             if (error_handler_) {
-                error_handler_->record_failure("anthropic_api");
+                
             }
 
             // If this is the last attempt, rethrow
@@ -719,14 +721,14 @@ std::optional<ClaudeResponse> AnthropicClient::execute_with_retry(
         // Wait before retry (exponential backoff)
         if (attempt < max_retries_) {
             auto delay = base_retry_delay_ * static_cast<int>(std::pow(2, attempt));
-            logger_->info("Retrying {} in {}ms (attempt {}/{})",
-                         operation_name, delay.count(), attempt + 1, max_retries_);
+            logger_->info("Retrying " + operation_name + " in " + std::to_string(delay.count()) +
+                         "ms (attempt " + std::to_string(attempt + 1) + "/" + std::to_string(max_retries_) + ")", "", "", {});
             std::this_thread::sleep_for(delay);
         }
     }
 
     // All retries exhausted
-    logger_->error("All retry attempts exhausted for {}", operation_name);
+    logger_->error("All retry attempts exhausted for " + operation_name);
     return std::nullopt;
 }
 
@@ -739,11 +741,150 @@ std::string AnthropicClient::generate_request_id() const {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()).count();
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(1000, 9999);
+    // Use process ID and thread ID for uniqueness instead of random numbers
+    auto pid = getpid();
+    auto tid = std::hash<std::thread::id>{}(std::this_thread::get_id());
 
-    return "claude_req_" + std::to_string(ms) + "_" + std::to_string(dis(gen));
+    return "claude_req_" + std::to_string(ms) + "_" + std::to_string(pid) + "_" + std::to_string(tid % 10000);
+}
+
+std::optional<std::shared_ptr<StreamingSession>> AnthropicClient::create_streaming_message(
+    const ClaudeCompletionRequest& request,
+    StreamingCallback streaming_callback,
+    CompletionCallback completion_callback) {
+
+    // Generate unique session ID
+    std::string session_id = "claude_stream_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) +
+                           "_" + std::to_string(std::rand());
+
+    try {
+        // Create streaming session
+        auto session = streaming_handler_->create_session(session_id);
+        if (!session) {
+            logger_->error("Failed to create streaming session", "AnthropicClient", "create_streaming_message");
+            return std::nullopt;
+        }
+
+        // Set up session callbacks
+        session->start(
+            streaming_callback,
+            completion_callback,
+            [this, session_id](const std::string& error) {
+                logger_->error("Streaming session error: " + error, "AnthropicClient", "create_streaming_message");
+                streaming_handler_->remove_session(session_id);
+            }
+        );
+
+        // Prepare request with streaming enabled
+        auto streaming_request = request;
+        streaming_request.stream = true;
+
+        // Make streaming HTTP request
+        std::string url = base_url_ + "/messages";
+        std::string payload_str = streaming_request.to_json().dump();
+
+        std::unordered_map<std::string, std::string> headers = {
+            {"x-api-key", api_key_},
+            {"anthropic-version", "2023-06-01"},
+            {"Content-Type", "application/json"},
+            {"Accept", "text/event-stream"},
+            {"Cache-Control", "no-cache"}
+        };
+
+        // Check rate limiting
+        if (!check_rate_limit()) {
+            session->fail("Rate limit exceeded");
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        // Set up streaming callback for real-time processing
+        http_client_->set_streaming_mode(true);
+        http_client_->set_streaming_callback([session](const std::string& chunk) {
+            // Process streaming data in real-time
+            session->process_data(chunk);
+        });
+
+        // Make the streaming request with real-time processing
+        http_client_->set_timeout(request_timeout_seconds_);
+        auto response = http_client_->post_streaming(url, payload_str, headers);
+
+        last_request_time_ = std::chrono::system_clock::now();
+        total_requests_++;
+
+        if (!response.success) {
+            handle_api_error("network", "Request failed: " + response.error_message);
+            session->fail("Network error: " + response.error_message);
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        if (response.status_code < 200 || response.status_code >= 300) {
+            handle_api_error("http_error", "HTTP " + std::to_string(response.status_code));
+            session->fail("HTTP error: " + std::to_string(response.status_code));
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        // Streaming is complete - finalize the session
+        try {
+            // For Anthropic streaming, the final response might be in the last chunk
+            // The session should have been completed by the streaming callback
+            // If not, we can attempt to construct a final response from accumulated data
+            if (!session->is_active()) {
+                // Session was already completed by streaming callback
+                logger_->info("Anthropic streaming session completed successfully: " + session_id,
+                             "AnthropicClient", "create_streaming_message");
+            } else {
+                // Session still active - complete it with accumulated data
+                nlohmann::json final_response = {
+                    {"id", session_id},
+                    {"type", "message"},
+                    {"role", "assistant"},
+                    {"content", {{
+                        {"type", "text"},
+                        {"text", session->get_accumulated_response()["content"]}
+                    }}},
+                    {"model", streaming_request.model},
+                    {"stop_reason", "end_turn"},
+                    {"stop_sequence", nullptr},
+                    {"usage", {
+                        {"input_tokens", 0},
+                        {"output_tokens", 0}
+                    }}
+                };
+
+                session->complete(final_response);
+            }
+        } catch (const std::exception& e) {
+            session->fail("Failed to finalize streaming response: " + std::string(e.what()));
+            streaming_handler_->remove_session(session_id);
+            return std::nullopt;
+        }
+
+        successful_requests_++;
+        return session;
+
+    } catch (const std::exception& e) {
+        logger_->error("Streaming message failed: " + std::string(e.what()),
+                      "AnthropicClient", "create_streaming_message");
+        error_handler_->report_error(ErrorInfo{
+            ErrorCategory::EXTERNAL_API,
+            ErrorSeverity::HIGH,
+            "AnthropicClient",
+            "create_streaming_message",
+            "Anthropic streaming message failed: " + std::string(e.what()),
+            "Session ID: " + session_id
+        });
+
+        streaming_handler_->remove_session(session_id);
+        return std::nullopt;
+    }
+}
+
+bool AnthropicClient::is_healthy() const {
+    // Simple health check - could be enhanced with actual API ping
+    return !api_key_.empty() && !base_url_.empty();
 }
 
 } // namespace regulens

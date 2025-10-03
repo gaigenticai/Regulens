@@ -144,9 +144,9 @@ DecisionAnalysisResult DecisionTreeOptimizer::analyze_decision_mcda(
         }
     }
 
-    logger_->info("Completed MCDA analysis for '{}': method={}, alternatives={}, recommended={}",
-                 decision_problem, mcda_method_to_string(method),
-                 alternatives.size(), result.recommended_alternative);
+    logger_->info("Completed MCDA analysis for '" + decision_problem + "': method=" +
+                 mcda_method_to_string(method) + ", alternatives=" + std::to_string(alternatives.size()) +
+                 ", recommended=" + result.recommended_alternative);
 
     return result;
 }
@@ -272,7 +272,7 @@ DecisionAnalysisResult DecisionTreeOptimizer::generate_ai_decision_recommendatio
     std::vector<DecisionAlternative> final_alternatives = alternatives;
     if (final_alternatives.size() < 3 && config_.enable_ai_analysis) {
         auto ai_alternatives = generate_ai_alternatives(decision_problem,
-            std::min(5, static_cast<int>(config_.max_alternatives - final_alternatives.size())));
+            std::min(5, static_cast<int>(config_.max_alternatives) - static_cast<int>(final_alternatives.size())));
         final_alternatives.insert(final_alternatives.end(),
                                 ai_alternatives.begin(), ai_alternatives.end());
     }
@@ -310,7 +310,7 @@ DecisionAnalysisResult DecisionTreeOptimizer::generate_ai_decision_recommendatio
 }
 
 DecisionAlternative DecisionTreeOptimizer::create_decision_alternative(
-    const std::string& description, const std::string& context) {
+    const std::string& description, const std::string& /*context*/) {
 
     DecisionAlternative alt;
     alt.id = "alt_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
@@ -762,7 +762,7 @@ std::vector<DecisionAlternative> DecisionTreeOptimizer::generate_ai_alternatives
 }
 
 std::unordered_map<std::string, double> DecisionTreeOptimizer::score_alternatives_ai(
-    const std::vector<DecisionAlternative>& alternatives, const std::string& decision_context) {
+    const std::vector<DecisionAlternative>& alternatives, const std::string& /*decision_context*/) {
 
     std::unordered_map<std::string, double> scores;
 
@@ -784,8 +784,8 @@ std::optional<nlohmann::json> DecisionTreeOptimizer::perform_ai_decision_analysi
     if (!openai_client_ && !anthropic_client_) return std::nullopt;
 
     try {
-        std::string prompt = "Analyze the following decision problem and provide recommendations:\n\n" +
-                           "Decision Problem: " + decision_problem + "\n\n";
+        std::string prompt = std::string("Analyze the following decision problem and provide recommendations:\n\n") +
+                             "Decision Problem: " + decision_problem + "\n\n";
 
         if (!context.empty()) {
             prompt += "Context: " + context + "\n\n";

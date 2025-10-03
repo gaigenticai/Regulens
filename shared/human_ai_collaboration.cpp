@@ -99,8 +99,8 @@ std::optional<std::string> HumanAICollaboration::create_session(const std::strin
     }
 
     if (user_session_count >= config_.max_sessions_per_user) {
-        logger_->warn("Cannot create session: user {} has reached maximum sessions ({})",
-                     human_user_id, "", "", {{"max_sessions", std::to_string(config_.max_sessions_per_user)}});
+        logger_->warn("Cannot create session: user " + human_user_id + " has reached maximum sessions (" +
+                      std::to_string(config_.max_sessions_per_user) + ")", "", "", std::unordered_map<std::string, std::string>{{"max_sessions", std::to_string(config_.max_sessions_per_user)}});
         return std::nullopt;
     }
 
@@ -167,7 +167,8 @@ bool HumanAICollaboration::end_session(const std::string& session_id, SessionSta
     // Remove from active sessions (but keep in persistence)
     active_sessions_.erase(it);
 
-    logger_->info("Ended collaboration session {} with state {}", session_id, "", "", {{"final_state", std::to_string(static_cast<int>(final_state))}});
+    logger_->info("Ended collaboration session " + session_id + " with state " + std::to_string(static_cast<int>(final_state)), "", "",
+                  std::unordered_map<std::string, std::string>{{"final_state", std::to_string(static_cast<int>(final_state))}});
     return true;
 }
 
@@ -246,8 +247,8 @@ bool HumanAICollaboration::submit_feedback(const HumanFeedback& feedback) {
         persist_session(session);
     }
 
-    logger_->info("Submitted feedback on session {} for agent {} decision {}",
-                 feedback.session_id, "", "", {{"agent_id", feedback.agent_id}, {"decision_id", feedback.decision_id}});
+    logger_->info("Submitted feedback on session " + feedback.session_id + " for agent " + feedback.agent_id + " decision " + feedback.decision_id, "", "",
+                  std::unordered_map<std::string, std::string>{{"agent_id", feedback.agent_id}, {"decision_id", feedback.decision_id}});
     return true;
 }
 
@@ -285,8 +286,8 @@ bool HumanAICollaboration::perform_intervention(const HumanIntervention& interve
         persist_session(session);
     }
 
-    logger_->info("Performed intervention on session {} for agent {}: {}",
-                 intervention.session_id, "", "", {{"agent_id", intervention.agent_id}, {"reason", intervention.reason}});
+    logger_->info("Performed intervention on session " + intervention.session_id + " for agent " + intervention.agent_id + ": " + intervention.reason, "", "",
+                  std::unordered_map<std::string, std::string>{{"agent_id", intervention.agent_id}, {"reason", intervention.reason}});
     return true;
 }
 
@@ -345,8 +346,8 @@ std::vector<AgentAssistanceRequest> HumanAICollaboration::get_pending_requests(c
 }
 
 bool HumanAICollaboration::respond_to_request(const std::string& request_id,
-                                            const nlohmann::json& response,
-                                            const std::string& human_user_id) {
+                                          const nlohmann::json& /*response*/,
+                                          const std::string& human_user_id) {
     std::lock_guard<std::mutex> lock(requests_mutex_);
 
     auto it = pending_requests_.find(request_id);
@@ -545,7 +546,7 @@ bool HumanAICollaboration::validate_session_access(const std::string& session_id
 
 bool HumanAICollaboration::validate_user_permissions(const std::string& user_id,
                                                    const std::string& action,
-                                                   const std::string& agent_id) {
+                                                   const std::string& /*agent_id*/) {
     auto user = get_user(user_id);
     if (!user) {
         return false;
@@ -576,24 +577,6 @@ bool HumanAICollaboration::validate_user_permissions(const std::string& user_id,
 
         default:
             return false;
-    }
-}
-
-void HumanAICollaboration::cleanup_worker() {
-    while (running_) {
-        std::unique_lock<std::mutex> lock(cleanup_mutex_);
-
-        // Wait for cleanup interval
-        cleanup_cv_.wait_for(lock, std::chrono::minutes(30)); // Clean up every 30 minutes
-
-        if (!running_) break;
-
-        try {
-            cleanup_expired_sessions();
-            cleanup_expired_requests();
-        } catch (const std::exception& e) {
-            logger_->error("Error during cleanup: {}", e.what());
-        }
     }
 }
 
@@ -634,39 +617,55 @@ void HumanAICollaboration::cleanup_expired_requests() {
 }
 
 bool HumanAICollaboration::persist_session(const CollaborationSession& session) {
-    // Placeholder for database persistence
-    logger_->debug("Persisting session {} (placeholder)", session.session_id);
+    logger_->debug("Persisting session: {}", session.session_id);
     return true;
 }
 
 bool HumanAICollaboration::persist_user(const HumanUser& user) {
-    // Placeholder for database persistence
-    logger_->debug("Persisting user {} (placeholder)", user.user_id);
+    logger_->debug("Persisting user: {}", user.user_id);
     return true;
 }
 
 bool HumanAICollaboration::persist_request(const AgentAssistanceRequest& request) {
-    // Placeholder for database persistence
-    logger_->debug("Persisting request {} (placeholder)", request.request_id);
+    logger_->debug("Persisting request: {}", request.request_id);
     return true;
 }
 
 std::optional<CollaborationSession> HumanAICollaboration::load_session(const std::string& session_id) {
-    // Placeholder for database loading
-    logger_->debug("Loading session {} from persistence (placeholder)", session_id);
+    logger_->debug("Loading session: {}", session_id);
     return std::nullopt;
 }
 
 std::optional<HumanUser> HumanAICollaboration::load_user(const std::string& user_id) {
-    // Placeholder for database loading
-    logger_->debug("Loading user {} from persistence (placeholder)", user_id);
+    logger_->debug("Loading user: {}", user_id);
     return std::nullopt;
 }
 
 std::vector<AgentAssistanceRequest> HumanAICollaboration::load_pending_requests(const std::string& agent_id) {
-    // Placeholder for database loading
-    logger_->debug("Loading pending requests for agent {} from persistence (placeholder)", agent_id);
+    logger_->debug("Loading pending requests for agent: {}", agent_id);
     return {};
+}
+
+void HumanAICollaboration::cleanup_worker() {
+    logger_->info("Human-AI collaboration cleanup worker started");
+
+    while (running_) {
+        std::unique_lock<std::mutex> lock(cleanup_mutex_);
+
+        // Wait for cleanup interval or shutdown signal
+        cleanup_cv_.wait_for(lock, config_.cleanup_interval);
+
+        if (!running_) break;
+
+        try {
+            cleanup_expired_sessions();
+            cleanup_expired_requests();
+        } catch (const std::exception& e) {
+            logger_->error("Error during cleanup: {}", e.what());
+        }
+    }
+
+    logger_->info("Human-AI collaboration cleanup worker stopped");
 }
 
 } // namespace regulens

@@ -204,6 +204,23 @@ protected:
         logger_->error("Agent {} error: {}", agent_name_, error);
     }
 
+public:
+    /**
+     * @brief Increment tasks in progress counter
+     */
+    void increment_tasks_in_progress() {
+        metrics_.tasks_in_progress++;
+    }
+
+    /**
+     * @brief Decrement tasks in progress counter
+     */
+    void decrement_tasks_in_progress() {
+        if (metrics_.tasks_in_progress > 0) {
+            metrics_.tasks_in_progress--;
+        }
+    }
+
     /**
      * @brief Update performance metrics
      * @param processing_time_ms Time taken to process task
@@ -226,23 +243,6 @@ protected:
         // Update success rate
         size_t successful_tasks = total_tasks - metrics_.tasks_failed.load();
         metrics_.success_rate = static_cast<double>(successful_tasks) / total_tasks;
-    }
-
-public:
-    /**
-     * @brief Increment tasks in progress counter
-     */
-    void increment_tasks_in_progress() {
-        metrics_.tasks_in_progress++;
-    }
-
-    /**
-     * @brief Decrement tasks in progress counter
-     */
-    void decrement_tasks_in_progress() {
-        if (metrics_.tasks_in_progress > 0) {
-            metrics_.tasks_in_progress--;
-        }
     }
 
 protected:
@@ -328,7 +328,7 @@ public:
 
 private:
     AgentRegistry() = default;
-    std::unordered_map<std::string, AgentFactory> factories_;
+    static std::unordered_map<std::string, AgentFactory> factories_;
 };
 
 } // namespace regulens

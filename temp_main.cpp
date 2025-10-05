@@ -34,7 +34,10 @@ int main() {
             return 1;
         }
 
-        std::cout << "🌐 Web UI available at: http://localhost:8080" << std::endl;
+        // Get display host for cloud deployment compatibility
+        const char* display_host_env = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string display_host = display_host_env ? display_host_env : "localhost";
+        std::cout << "🌐 Web UI available at: http://" << display_host << ":8080" << std::endl;
         std::cout << "📊 Open your browser and navigate to the URL above" << std::endl;
         std::cout << "🔄 The system will run until interrupted (Ctrl+C)" << std::endl;
         std::cout << std::endl;

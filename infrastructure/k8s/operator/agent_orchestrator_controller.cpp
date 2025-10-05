@@ -7,6 +7,7 @@
  */
 
 #include "agent_orchestrator_controller.hpp"
+#include <shared/metrics/prometheus_client.hpp>
 #include <algorithm>
 #include <sstream>
 #include <chrono>
@@ -19,7 +20,10 @@ namespace k8s {
 AgentOrchestratorController::AgentOrchestratorController(std::shared_ptr<KubernetesAPIClient> api_client,
                                                        std::shared_ptr<StructuredLogger> logger,
                                                        std::shared_ptr<PrometheusMetricsCollector> metrics)
-    : CustomResourceController(api_client, logger, metrics) {}
+    : CustomResourceController(api_client, logger, metrics) {
+    // Initialize Prometheus client for querying orchestrator metrics
+    prometheus_client_ = create_prometheus_client(logger);
+}
 
 void AgentOrchestratorController::handleResourceEvent(const ResourceEvent& event) {
     try {
@@ -349,12 +353,8 @@ bool AgentOrchestratorController::scaleAgentDeployments(const std::string& orche
             int current_replicas = agent_spec.value("replicas", 2);
             int max_replicas = agent_spec.value("maxReplicas", 10);
 
-            // Simulate load metrics (in production, get from Prometheus/metrics)
-            nlohmann::json load_metrics = {
-                {"cpu_usage", 0.7},
-                {"memory_usage", 0.6},
-                {"queue_depth", 15}
-            };
+            // Get real load metrics from Prometheus
+            nlohmann::json load_metrics = getAgentLoadMetrics(orchestrator_name, agent_spec);
 
             int optimal_replicas = calculateOptimalReplicas(agent_type, current_replicas, load_metrics);
 
@@ -672,6 +672,71 @@ nlohmann::json AgentOrchestratorController::generateAgentServiceSpec(const std::
     };
 
     return service;
+}
+
+nlohmann::json AgentOrchestratorController::getAgentLoadMetrics(const std::string& orchestrator_name,
+                                                               const nlohmann::json& agent_spec) {
+    nlohmann::json load_metrics = {
+        {"cpu_usage", 0.5},
+        {"memory_usage", 0.5},
+        {"queue_depth", 10}
+    };
+
+    try {
+        if (!prometheus_client_) {
+            if (logger_) {
+                logger_->warn("Prometheus client not initialized, using default load metrics",
+                            "AgentOrchestratorController", "getAgentLoadMetrics");
+            }
+            return load_metrics;
+        }
+
+        std::string agent_name = agent_spec.value("name", "");
+        std::string full_deployment_name = orchestrator_name + "-" + agent_name;
+        std::string deployment_label = "deployment=\"" + full_deployment_name + "\"";
+
+        // Query CPU usage (average across all pods)
+        std::string cpu_query = 
+            "avg(rate(container_cpu_usage_seconds_total{" + deployment_label + ",container!=\"\"}[5m]))";
+        auto cpu_result = prometheus_client_->query(cpu_query);
+        if (cpu_result.success) {
+            load_metrics["cpu_usage"] = PrometheusClient::get_scalar_value(cpu_result);
+        }
+
+        // Query memory usage (average across all pods)
+        std::string memory_query = 
+            "avg(container_memory_working_set_bytes{" + deployment_label + ",container!=\"\"} / "
+            "container_spec_memory_limit_bytes{" + deployment_label + ",container!=\"\"})";
+        auto memory_result = prometheus_client_->query(memory_query);
+        if (memory_result.success) {
+            load_metrics["memory_usage"] = PrometheusClient::get_scalar_value(memory_result);
+        }
+
+        // Query queue depth (agent-specific metric)
+        std::string queue_query = "regulens_agent_queue_depth{agent=\"" + agent_name + "\"}";
+        auto queue_result = prometheus_client_->query(queue_query);
+        if (queue_result.success) {
+            load_metrics["queue_depth"] = static_cast<int>(PrometheusClient::get_scalar_value(queue_result));
+        }
+
+        if (logger_) {
+            logger_->debug("Retrieved agent load metrics",
+                         "AgentOrchestratorController", "getAgentLoadMetrics",
+                         {{"agent", agent_name}, 
+                          {"cpu_usage", std::to_string(load_metrics["cpu_usage"].get<double>())},
+                          {"memory_usage", std::to_string(load_metrics["memory_usage"].get<double>())},
+                          {"queue_depth", std::to_string(load_metrics["queue_depth"].get<int>())}});
+        }
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Failed to get agent load metrics, using defaults: " + std::string(e.what()),
+                         "AgentOrchestratorController", "getAgentLoadMetrics",
+                         {{"orchestrator", orchestrator_name}});
+        }
+    }
+
+    return load_metrics;
 }
 
 int AgentOrchestratorController::calculateOptimalReplicas(const std::string& agent_type,

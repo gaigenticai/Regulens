@@ -30,7 +30,14 @@ namespace regulens {
 class CompleteRegulatoryDemo {
 public:
     CompleteRegulatoryDemo()
-        : running_(false), db_initialized_(false) {}
+        : running_(false), db_initialized_(false) {
+        // Get API configuration from environment
+        const char* host_env = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        const char* port_env = std::getenv("WEB_SERVER_API_PORT");
+        std::string host = host_env ? host_env : "localhost";
+        std::string port = port_env ? port_env : "3000";
+        api_base_url_ = "http://" + host + ":" + port;
+    }
 
     ~CompleteRegulatoryDemo() {
         stop_demo();
@@ -99,7 +106,7 @@ public:
         stats_thread_ = std::thread(&CompleteRegulatoryDemo::display_stats_loop, this);
 
         std::cout << "✅ Complete regulatory system active" << std::endl;
-        std::cout << "🌐 REST API available at: http://localhost:3000" << std::endl;
+        std::cout << "🌐 REST API available at: " << api_base_url_ << std::endl;
         std::cout << "💡 Interactive commands available. Type 'help' for options." << std::endl;
         std::cout << "💡 Press Ctrl+C to stop the system." << std::endl;
         std::cout << std::endl;
@@ -353,8 +360,9 @@ private:
         std::cout << "\n🌐 REST API Server Status:" << std::endl;
         std::cout << "=========================" << std::endl;
         std::cout << "Running: " << (api_running ? "✅" : "❌") << std::endl;
-        std::cout << "Port: 3000" << std::endl;
-        std::cout << "Base URL: http://localhost:3000" << std::endl;
+        const char* port_env = std::getenv("WEB_SERVER_API_PORT");
+        std::cout << "Port: " << (port_env ? port_env : "3000") << std::endl;
+        std::cout << "Base URL: " << api_base_url_ << std::endl;
         std::cout << std::endl;
 
         if (api_running) {
@@ -374,7 +382,7 @@ private:
 
         // Test health endpoint
         try {
-            HttpResponse health_resp = http_client_->get("http://localhost:3000/api/health");
+            HttpResponse health_resp = http_client_->get(api_base_url_ + "/api/health");
             if (health_resp.success) {
                 std::cout << "✅ Health check: " << (health_resp.body.find("healthy") != std::string::npos ? "PASS" : "FAIL") << std::endl;
             } else {
@@ -386,7 +394,7 @@ private:
 
         // Test regulatory changes endpoint
         try {
-            HttpResponse changes_resp = http_client_->get("http://localhost:3000/api/regulatory-changes");
+            HttpResponse changes_resp = http_client_->get(api_base_url_ + "/api/regulatory-changes");
             if (changes_resp.success) {
                 std::cout << "✅ Regulatory changes: PASS" << std::endl;
             } else {
@@ -398,7 +406,7 @@ private:
 
         // Test sources endpoint
         try {
-            HttpResponse sources_resp = http_client_->get("http://localhost:3000/api/sources");
+            HttpResponse sources_resp = http_client_->get(api_base_url_ + "/api/sources");
             if (sources_resp.success) {
                 std::cout << "✅ Sources: PASS" << std::endl;
             } else {
@@ -410,7 +418,7 @@ private:
 
         // Test monitoring stats endpoint
         try {
-            HttpResponse stats_resp = http_client_->get("http://localhost:3000/api/monitoring/stats");
+            HttpResponse stats_resp = http_client_->get(api_base_url_ + "/api/monitoring/stats");
             if (stats_resp.success) {
                 std::cout << "✅ Monitoring stats: PASS" << std::endl;
             } else {
@@ -473,6 +481,7 @@ private:
     std::thread stats_thread_;
     std::atomic<bool> running_;
     bool db_initialized_;
+    std::string api_base_url_;
 };
 
 } // namespace regulens

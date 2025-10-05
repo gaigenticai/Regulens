@@ -410,18 +410,63 @@ std::shared_ptr<HealthCheckHandler> create_health_check_handler(
 
 namespace health_checks {
 
-HealthCheckFunction database_health_check() {
-    return []() -> HealthCheckResult {
-        // Placeholder for database connectivity check
-        // In production, would test actual database connection
+HealthCheckFunction database_health_check(std::shared_ptr<PostgreSQLConnection> db_conn) {
+    return [db_conn]() -> HealthCheckResult {
+        // Production database connectivity check
+        if (!db_conn) {
+            return HealthCheckResult{
+                false, "unhealthy",
+                "Database connection not initialized",
+                {{"error", "null_connection"}}
+            };
+        }
+
         try {
-            // Simulate database connection test
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            // Execute a lightweight query to verify connectivity
+            auto start_time = std::chrono::high_resolution_clock::now();
+            auto result = db_conn->execute("SELECT 1 as health_check");
+            auto end_time = std::chrono::high_resolution_clock::now();
+            
+            auto response_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                end_time - start_time).count();
+
+            if (result.empty()) {
+                return HealthCheckResult{
+                    false, "unhealthy",
+                    "Database query returned empty result",
+                    {{"error", "empty_result"}}
+                };
+            }
+
+            // Get connection pool statistics
+            int pool_size = db_conn->get_pool_size();
+            int active_connections = db_conn->get_active_connections();
+            int idle_connections = pool_size - active_connections;
+            
+            // Check if connection pool is exhausted
+            if (idle_connections == 0) {
+                return HealthCheckResult{
+                    true, "degraded",
+                    "Database connection pool exhausted",
+                    {
+                        {"response_time_ms", response_time_ms},
+                        {"connection_pool_size", pool_size},
+                        {"active_connections", active_connections},
+                        {"idle_connections", idle_connections},
+                        {"warning", "pool_exhausted"}
+                    }
+                };
+            }
 
             return HealthCheckResult{
                 true, "healthy",
                 "Database connection successful",
-                {{"connection_pool_size", 10}, {"active_connections", 3}}
+                {
+                    {"response_time_ms", response_time_ms},
+                    {"connection_pool_size", pool_size},
+                    {"active_connections", active_connections},
+                    {"idle_connections", idle_connections}
+                }
             };
         } catch (const std::exception& e) {
             return HealthCheckResult{
@@ -433,18 +478,70 @@ HealthCheckFunction database_health_check() {
     };
 }
 
-HealthCheckFunction redis_health_check() {
-    return []() -> HealthCheckResult {
-        // Placeholder for Redis connectivity check
-        // In production, would test actual Redis connection
+HealthCheckFunction redis_health_check(std::shared_ptr<RedisClient> redis_client) {
+    return [redis_client]() -> HealthCheckResult {
+        // Production Redis connectivity check
+        if (!redis_client) {
+            return HealthCheckResult{
+                false, "unhealthy",
+                "Redis connection not initialized",
+                {{"error", "null_connection"}}
+            };
+        }
+
         try {
-            // Simulate Redis connection test
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            // Execute Redis PING command to verify connectivity
+            auto start_time = std::chrono::high_resolution_clock::now();
+            bool ping_success = redis_client->ping();
+            auto end_time = std::chrono::high_resolution_clock::now();
+            
+            auto response_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                end_time - start_time).count();
+
+            if (!ping_success) {
+                return HealthCheckResult{
+                    false, "unhealthy",
+                    "Redis PING command failed",
+                    {{"error", "ping_failed"}, {"response_time_ms", response_time_ms}}
+                };
+            }
+
+            // Get Redis server info
+            auto redis_info = redis_client->get_info();
+            int connected_clients = redis_info.value("connected_clients", 0);
+            std::string redis_version = redis_info.value("redis_version", "unknown");
+            long long used_memory = redis_info.value("used_memory", 0LL);
+            long long max_memory = redis_info.value("maxmemory", 0LL);
+            
+            double memory_usage_pct = 0.0;
+            if (max_memory > 0) {
+                memory_usage_pct = (static_cast<double>(used_memory) / max_memory) * 100.0;
+            }
+
+            // Check if Redis is running out of memory
+            if (memory_usage_pct > 90.0) {
+                return HealthCheckResult{
+                    true, "degraded",
+                    "Redis memory usage critical",
+                    {
+                        {"response_time_ms", response_time_ms},
+                        {"connected_clients", connected_clients},
+                        {"redis_version", redis_version},
+                        {"memory_usage_percent", memory_usage_pct},
+                        {"warning", "high_memory_usage"}
+                    }
+                };
+            }
 
             return HealthCheckResult{
                 true, "healthy",
                 "Redis connection successful",
-                {{"ping_response_time_ms", 2}}
+                {
+                    {"response_time_ms", response_time_ms},
+                    {"connected_clients", connected_clients},
+                    {"redis_version", redis_version},
+                    {"memory_usage_percent", memory_usage_pct}
+                }
             };
         } catch (const std::exception& e) {
             return HealthCheckResult{
@@ -456,31 +553,67 @@ HealthCheckFunction redis_health_check() {
     };
 }
 
-HealthCheckFunction api_health_check(const std::string& service_name, const std::string& endpoint) {
-    return [service_name, endpoint]() -> HealthCheckResult {
-        // Placeholder for external API health check
-        // In production, would make actual HTTP request to check API health
+HealthCheckFunction api_health_check(const std::string& service_name, const std::string& endpoint,
+                                    std::shared_ptr<HttpClient> http_client,
+                                    int timeout_ms) {
+    return [service_name, endpoint, http_client, timeout_ms]() -> HealthCheckResult {
+        // Production external API health check with real HTTP request
+        if (!http_client) {
+            return HealthCheckResult{
+                false, "unhealthy",
+                "HTTP client not initialized for " + service_name,
+                {{"endpoint", endpoint}, {"error", "null_http_client"}}
+            };
+        }
+
         try {
-            // Simulate API health check
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            auto start_time = std::chrono::high_resolution_clock::now();
+            
+            // Set timeout for health check
+            http_client->set_timeout(timeout_ms);
+            
+            // Make actual HTTP GET request to the health endpoint
+            HttpResponse response = http_client->get(endpoint);
+            
+            auto end_time = std::chrono::high_resolution_clock::now();
+            auto response_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                end_time - start_time).count();
 
-            // Simulate occasional failures for testing
-            static std::atomic<size_t> call_count{0};
-            size_t count = call_count++;
-
-            if (count % 100 == 0) { // Fail 1% of the time
+            // Check HTTP status code
+            if (response.status_code >= 200 && response.status_code < 300) {
+                return HealthCheckResult{
+                    true, "healthy",
+                    service_name + " API is responding",
+                    {
+                        {"endpoint", endpoint},
+                        {"response_time_ms", response_time_ms},
+                        {"status_code", response.status_code},
+                        {"content_length", response.body.length()}
+                    }
+                };
+            } else if (response.status_code >= 500) {
                 return HealthCheckResult{
                     false, "unhealthy",
-                    service_name + " API is unresponsive",
-                    {{"endpoint", endpoint}, {"response_time_ms", 5000}}
+                    service_name + " API returned server error",
+                    {
+                        {"endpoint", endpoint},
+                        {"response_time_ms", response_time_ms},
+                        {"status_code", response.status_code},
+                        {"error", "server_error"}
+                    }
+                };
+            } else {
+                return HealthCheckResult{
+                    true, "degraded",
+                    service_name + " API returned non-success status",
+                    {
+                        {"endpoint", endpoint},
+                        {"response_time_ms", response_time_ms},
+                        {"status_code", response.status_code},
+                        {"warning", "unexpected_status"}
+                    }
                 };
             }
-
-            return HealthCheckResult{
-                true, "healthy",
-                service_name + " API is responding",
-                {{"endpoint", endpoint}, {"response_time_ms", 45}}
-            };
         } catch (const std::exception& e) {
             return HealthCheckResult{
                 false, "unhealthy",
@@ -730,21 +863,67 @@ HealthCheckFunction disk_space_health_check(double min_free_percent) {
     };
 }
 
-HealthCheckFunction dependency_health_check(const std::unordered_map<std::string, std::string>& dependencies) {
-    return [dependencies]() -> HealthCheckResult {
-        // Placeholder for dependency health checks
-        // In production, would check actual service dependencies
+HealthCheckFunction dependency_health_check(const std::unordered_map<std::string, std::string>& dependencies,
+                                           std::shared_ptr<HttpClient> http_client) {
+    return [dependencies, http_client]() -> HealthCheckResult {
+        // Production dependency health checks with real HTTP requests
+        if (!http_client) {
+            return HealthCheckResult{
+                false, "unhealthy",
+                "HTTP client not initialized for dependency checks",
+                {{"error", "null_http_client"}}
+            };
+        }
+
         try {
             nlohmann::json dependency_status = nlohmann::json::object();
+            bool all_healthy = true;
+            std::string unhealthy_services;
 
             for (const auto& [service, endpoint] : dependencies) {
-                // Simulate dependency check
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                try {
+                    auto start_time = std::chrono::high_resolution_clock::now();
+                    
+                    // Set timeout for dependency check (shorter than main health check)
+                    http_client->set_timeout(2000); // 2 second timeout
+                    
+                    HttpResponse response = http_client->get(endpoint);
+                    
+                    auto end_time = std::chrono::high_resolution_clock::now();
+                    auto response_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        end_time - start_time).count();
 
-                dependency_status[service] = {
-                    {"healthy", true},
-                    {"endpoint", endpoint},
-                    {"response_time_ms", 25}
+                    bool is_healthy = (response.status_code >= 200 && response.status_code < 300);
+                    
+                    dependency_status[service] = {
+                        {"healthy", is_healthy},
+                        {"endpoint", endpoint},
+                        {"response_time_ms", response_time_ms},
+                        {"status_code", response.status_code}
+                    };
+
+                    if (!is_healthy) {
+                        all_healthy = false;
+                        if (!unhealthy_services.empty()) unhealthy_services += ", ";
+                        unhealthy_services += service;
+                    }
+                } catch (const std::exception& e) {
+                    dependency_status[service] = {
+                        {"healthy", false},
+                        {"endpoint", endpoint},
+                        {"error", e.what()}
+                    };
+                    all_healthy = false;
+                    if (!unhealthy_services.empty()) unhealthy_services += ", ";
+                    unhealthy_services += service;
+                }
+            }
+
+            if (!all_healthy) {
+                return HealthCheckResult{
+                    false, "degraded",
+                    "Some dependencies are unhealthy: " + unhealthy_services,
+                    {{"dependencies", dependency_status}, {"unhealthy_services", unhealthy_services}}
                 };
             }
 
@@ -763,25 +942,71 @@ HealthCheckFunction dependency_health_check(const std::unordered_map<std::string
     };
 }
 
-HealthCheckFunction queue_depth_health_check(size_t max_queue_depth) {
-    return [max_queue_depth]() -> HealthCheckResult {
-        // Placeholder for queue depth monitoring
-        // In production, would check actual queue depths
-        try {
-            size_t current_depth = 0; // Would be actual queue depth
+HealthCheckFunction queue_depth_health_check(std::shared_ptr<EventBus> event_bus, size_t max_queue_depth) {
+    return [event_bus, max_queue_depth]() -> HealthCheckResult {
+        // Production queue depth monitoring from EventBus
+        if (!event_bus) {
+            return HealthCheckResult{
+                false, "unhealthy",
+                "Event bus not initialized",
+                {{"error", "null_event_bus"}}
+            };
+        }
 
-            if (current_depth > max_queue_depth) {
+        try {
+            // Get actual queue depths from event bus
+            size_t pending_events = event_bus->get_pending_event_count();
+            size_t processing_events = event_bus->get_processing_event_count();
+            size_t failed_events = event_bus->get_failed_event_count();
+            size_t total_depth = pending_events + processing_events;
+            
+            // Get queue capacity and utilization
+            size_t queue_capacity = event_bus->get_queue_capacity();
+            double utilization_pct = (static_cast<double>(total_depth) / queue_capacity) * 100.0;
+
+            if (total_depth > max_queue_depth) {
                 return HealthCheckResult{
                     false, "unhealthy",
-                    "Queue depth too high: " + std::to_string(current_depth) + " (max: " + std::to_string(max_queue_depth) + ")",
-                    {{"current_depth", current_depth}, {"max_depth", max_queue_depth}}
+                    "Queue depth too high: " + std::to_string(total_depth) + " (max: " + std::to_string(max_queue_depth) + ")",
+                    {
+                        {"current_depth", total_depth},
+                        {"max_depth", max_queue_depth},
+                        {"pending_events", pending_events},
+                        {"processing_events", processing_events},
+                        {"failed_events", failed_events},
+                        {"utilization_percent", utilization_pct}
+                    }
+                };
+            }
+
+            // Warn if queue is getting full
+            if (utilization_pct > 80.0) {
+                return HealthCheckResult{
+                    true, "degraded",
+                    "Queue utilization high: " + std::to_string(utilization_pct) + "%",
+                    {
+                        {"current_depth", total_depth},
+                        {"max_depth", max_queue_depth},
+                        {"pending_events", pending_events},
+                        {"processing_events", processing_events},
+                        {"failed_events", failed_events},
+                        {"utilization_percent", utilization_pct},
+                        {"warning", "high_utilization"}
+                    }
                 };
             }
 
             return HealthCheckResult{
                 true, "healthy",
-                "Queue depth within limits: " + std::to_string(current_depth),
-                {{"current_depth", current_depth}, {"max_depth", max_queue_depth}}
+                "Queue depth within limits: " + std::to_string(total_depth),
+                {
+                    {"current_depth", total_depth},
+                    {"max_depth", max_queue_depth},
+                    {"pending_events", pending_events},
+                    {"processing_events", processing_events},
+                    {"failed_events", failed_events},
+                    {"utilization_percent", utilization_pct}
+                }
             };
         } catch (const std::exception& e) {
             return HealthCheckResult{
@@ -793,25 +1018,81 @@ HealthCheckFunction queue_depth_health_check(size_t max_queue_depth) {
     };
 }
 
-HealthCheckFunction thread_pool_health_check(size_t min_available_threads) {
-    return [min_available_threads]() -> HealthCheckResult {
-        // Placeholder for thread pool monitoring
-        // In production, would check actual thread pool status
+HealthCheckFunction thread_pool_health_check(std::shared_ptr<AgentOrchestrator> orchestrator, size_t min_available_threads) {
+    return [orchestrator, min_available_threads]() -> HealthCheckResult {
+        // Production thread pool monitoring from AgentOrchestrator
+        if (!orchestrator) {
+            return HealthCheckResult{
+                false, "unhealthy",
+                "Agent orchestrator not initialized",
+                {{"error", "null_orchestrator"}}
+            };
+        }
+
         try {
-            size_t available_threads = 5; // Would be actual available threads
+            // Get actual thread pool statistics from orchestrator
+            auto pool_stats = orchestrator->get_thread_pool_stats();
+            
+            size_t total_threads = pool_stats.value("total_threads", 0);
+            size_t active_threads = pool_stats.value("active_threads", 0);
+            size_t idle_threads = pool_stats.value("idle_threads", 0);
+            size_t queued_tasks = pool_stats.value("queued_tasks", 0);
+            size_t completed_tasks = pool_stats.value("completed_tasks", 0);
+            
+            // Calculate available threads (idle threads that can accept work)
+            size_t available_threads = idle_threads;
+            double utilization_pct = total_threads > 0 ? 
+                (static_cast<double>(active_threads) / total_threads) * 100.0 : 0.0;
 
             if (available_threads < min_available_threads) {
                 return HealthCheckResult{
                     false, "unhealthy",
                     "Insufficient available threads: " + std::to_string(available_threads) + " (min: " + std::to_string(min_available_threads) + ")",
-                    {{"available_threads", available_threads}, {"min_required", min_available_threads}}
+                    {
+                        {"total_threads", total_threads},
+                        {"active_threads", active_threads},
+                        {"idle_threads", idle_threads},
+                        {"available_threads", available_threads},
+                        {"min_required", min_available_threads},
+                        {"queued_tasks", queued_tasks},
+                        {"utilization_percent", utilization_pct}
+                    }
+                };
+            }
+
+            // Warn if thread pool is under pressure
+            if (utilization_pct > 85.0 || queued_tasks > 100) {
+                return HealthCheckResult{
+                    true, "degraded",
+                    "Thread pool under pressure: " + std::to_string(utilization_pct) + "% utilized, " + 
+                    std::to_string(queued_tasks) + " tasks queued",
+                    {
+                        {"total_threads", total_threads},
+                        {"active_threads", active_threads},
+                        {"idle_threads", idle_threads},
+                        {"available_threads", available_threads},
+                        {"min_required", min_available_threads},
+                        {"queued_tasks", queued_tasks},
+                        {"completed_tasks", completed_tasks},
+                        {"utilization_percent", utilization_pct},
+                        {"warning", "high_utilization"}
+                    }
                 };
             }
 
             return HealthCheckResult{
                 true, "healthy",
                 "Thread pool healthy: " + std::to_string(available_threads) + " threads available",
-                {{"available_threads", available_threads}, {"min_required", min_available_threads}}
+                {
+                    {"total_threads", total_threads},
+                    {"active_threads", active_threads},
+                    {"idle_threads", idle_threads},
+                    {"available_threads", available_threads},
+                    {"min_required", min_available_threads},
+                    {"queued_tasks", queued_tasks},
+                    {"completed_tasks", completed_tasks},
+                    {"utilization_percent", utilization_pct}
+                }
             };
         } catch (const std::exception& e) {
             return HealthCheckResult{

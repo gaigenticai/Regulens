@@ -572,7 +572,11 @@ public:
 
         start_server();
 
-        std::cout << "🌐 Open your browser and navigate to: http://localhost:8080" << std::endl;
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        const char* port_env = std::getenv("WEB_SERVER_PORT");
+        std::string host = display_host ? display_host : "localhost";
+        std::string port = port_env ? port_env : "8080";
+        std::cout << "🌐 Open your browser and navigate to: http://" << host << ":" << port << std::endl;
         std::cout << "📊 Click through all 5 tabs to see the complete interface!" << std::endl;
         std::cout << "🎬 Press Ctrl+C to stop the demo" << std::endl;
 

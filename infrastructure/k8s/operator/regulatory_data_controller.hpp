@@ -16,6 +16,10 @@
 #include <mutex>
 
 namespace regulens {
+
+// Forward declarations
+class PrometheusClient;
+
 namespace k8s {
 
 /**
@@ -45,11 +49,20 @@ public:
      */
     nlohmann::json getMetrics() const override;
 
+    /**
+     * @brief Get resource type managed by this controller
+     * @return "RegulatoryDataSource"
+     */
+    std::string getResourceType() const override { return "RegulatoryDataSource"; }
+
 private:
     // Data source state tracking
     std::unordered_map<std::string, nlohmann::json> active_data_sources_;
     std::unordered_map<std::string, std::unordered_set<std::string>> source_endpoints_;
     mutable std::mutex sources_mutex_;
+
+    // Prometheus client for metrics queries
+    std::shared_ptr<PrometheusClient> prometheus_client_;
 
     // Metrics
     std::atomic<size_t> sources_created_{0};
@@ -165,6 +178,35 @@ private:
      * @return Data processing metrics JSON
      */
     nlohmann::json getDataProcessingMetrics(const std::string& source_name, const std::string& source_type);
+
+    /**
+     * @brief Get pod resource metrics from Kubernetes Metrics API
+     * @param source_name Data source name
+     * @return Pod metrics JSON
+     */
+    nlohmann::json getPodMetrics(const std::string& source_name);
+
+    /**
+     * @brief Get data source specific metrics from monitoring systems
+     * @param source_name Data source name
+     * @param source_type Type of data source
+     * @return Data source metrics JSON
+     */
+    nlohmann::json getDataSourceMetrics(const std::string& source_name, const std::string& source_type);
+
+    /**
+     * @brief Parse CPU usage from Kubernetes metrics format
+     * @param cpu_str CPU usage string (e.g., "100m", "0.1")
+     * @return CPU usage as cores
+     */
+    double parseCpuUsage(const std::string& cpu_str);
+
+    /**
+     * @brief Parse memory usage from Kubernetes metrics format
+     * @param memory_str Memory usage string (e.g., "128Mi", "1Gi")
+     * @return Memory usage in Gi
+     */
+    double parseMemoryUsage(const std::string& memory_str);
 
     /**
      * @brief Generate deployment spec for data ingestion

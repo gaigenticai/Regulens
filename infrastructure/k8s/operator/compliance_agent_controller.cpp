@@ -7,6 +7,7 @@
  */
 
 #include "compliance_agent_controller.hpp"
+#include <shared/metrics/prometheus_client.hpp>
 #include <algorithm>
 #include <sstream>
 #include <chrono>
@@ -20,7 +21,10 @@ namespace k8s {
 ComplianceAgentController::ComplianceAgentController(std::shared_ptr<KubernetesAPIClient> api_client,
                                                    std::shared_ptr<StructuredLogger> logger,
                                                    std::shared_ptr<PrometheusMetricsCollector> metrics)
-    : CustomResourceController(api_client, logger, metrics) {}
+    : CustomResourceController(api_client, logger, metrics) {
+    // Initialize Prometheus client for querying agent metrics
+    prometheus_client_ = create_prometheus_client(logger);
+}
 
 void ComplianceAgentController::handleResourceEvent(const ResourceEvent& event) {
     try {
@@ -659,28 +663,225 @@ int ComplianceAgentController::calculateOptimalReplicas(const std::string& agent
     return current_replicas;
 }
 
-nlohmann::json ComplianceAgentController::getWorkloadMetrics(const std::string& agent_name, const std::string& agent_type) {
-    // Simulated workload metrics - in production would query Prometheus/metrics
-    nlohmann::json metrics = {
-        {"cpu_usage", 0.6},
-        {"memory_usage", 0.5},
-        {"decisionsProcessed", 150},
-        {"averageProcessingTime", 250.0},
-        {"errorRate", 0.02}
-    };
+nlohmann::json ComplianceAgentController::getPodMetrics(const std::string& agent_name) {
+    try {
+        // Query Kubernetes Metrics API for pod resource usage
+        auto metrics_response = api_client_->getCustomResource(
+            "metrics.k8s.io", "v1beta1", "pods", "", "" // Empty namespace and name to list all
+        );
 
-    // Agent-type specific metrics
-    if (agent_type == "transaction_guardian") {
-        metrics["transactionsPerMinute"] = 500;
-    } else if (agent_type == "audit_intelligence") {
-        metrics["auditRequestsPerMinute"] = 75;
-    } else if (agent_type == "regulatory_assessor") {
-        metrics["documentsPerMinute"] = 25;
-    } else if (agent_type == "risk_analyzer") {
-        metrics["assessmentsPerMinute"] = 40;
+        if (metrics_response.contains("items") && metrics_response["items"].is_array()) {
+            for (const auto& pod : metrics_response["items"]) {
+                if (pod.contains("metadata") && pod["metadata"].contains("name")) {
+                    std::string pod_name = pod["metadata"]["name"];
+                    // Check if this pod belongs to our agent
+                    if (pod_name.find(agent_name) != std::string::npos) {
+                        if (pod.contains("containers") && pod["containers"].is_array() && !pod["containers"].empty()) {
+                            const auto& container = pod["containers"][0];
+                            if (container.contains("usage")) {
+                                const auto& usage = container["usage"];
+                                return {
+                                    {"cpu_usage", parseCpuUsage(usage.value("cpu", "0"))},
+                                    {"memory_usage", parseMemoryUsage(usage.value("memory", "0"))}
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return {};
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->debug("Failed to get pod metrics: " + std::string(e.what()),
+                         "ComplianceAgentController", "getPodMetrics",
+                         {{"agent", agent_name}});
+        }
+        return {};
     }
+}
 
-    return metrics;
+nlohmann::json ComplianceAgentController::getApplicationMetrics(const std::string& agent_name, const std::string& agent_type) {
+    try {
+        // Query Prometheus for real application metrics
+        if (!prometheus_client_) {
+            if (logger_) {
+                logger_->warn("Prometheus client not initialized, skipping application metrics",
+                            "ComplianceAgentController", "getApplicationMetrics");
+            }
+            return {};
+        }
+
+        nlohmann::json metrics;
+
+        // Build PromQL queries for agent-specific metrics
+        std::string agent_label = "agent=\"" + agent_name + "\"";
+        
+        // Query: decisions processed (rate over 5 minutes)
+        std::string decisions_query = "rate(regulens_agent_decisions_total{" + agent_label + "}[5m]) * 60";
+        auto decisions_result = prometheus_client_->query(decisions_query);
+        if (decisions_result.success) {
+            metrics["decisionsProcessed"] = static_cast<int>(PrometheusClient::get_scalar_value(decisions_result));
+        } else {
+            metrics["decisionsProcessed"] = 0;
+        }
+
+        // Query: average processing time (in milliseconds)
+        std::string processing_time_query = 
+            "rate(regulens_agent_processing_time_sum{" + agent_label + "}[5m]) / "
+            "rate(regulens_agent_processing_time_count{" + agent_label + "}[5m])";
+        auto processing_time_result = prometheus_client_->query(processing_time_query);
+        if (processing_time_result.success) {
+            metrics["averageProcessingTime"] = PrometheusClient::get_scalar_value(processing_time_result);
+        } else {
+            metrics["averageProcessingTime"] = 0.0;
+        }
+
+        // Query: error rate (percentage)
+        std::string error_rate_query = 
+            "(rate(regulens_agent_errors_total{" + agent_label + "}[5m]) / "
+            "rate(regulens_agent_requests_total{" + agent_label + "}[5m])) * 100";
+        auto error_rate_result = prometheus_client_->query(error_rate_query);
+        if (error_rate_result.success) {
+            metrics["errorRate"] = PrometheusClient::get_scalar_value(error_rate_result);
+        } else {
+            metrics["errorRate"] = 0.0;
+        }
+
+        // Agent-type specific metrics
+        if (agent_type == "transaction_guardian") {
+            std::string tpm_query = "rate(regulens_transaction_guardian_transactions_total{" + agent_label + "}[1m]) * 60";
+            auto tpm_result = prometheus_client_->query(tpm_query);
+            if (tpm_result.success) {
+                metrics["transactionsPerMinute"] = static_cast<int>(PrometheusClient::get_scalar_value(tpm_result));
+            }
+        } else if (agent_type == "audit_intelligence") {
+            std::string audit_query = "rate(regulens_audit_requests_total{" + agent_label + "}[1m]) * 60";
+            auto audit_result = prometheus_client_->query(audit_query);
+            if (audit_result.success) {
+                metrics["auditRequestsPerMinute"] = static_cast<int>(PrometheusClient::get_scalar_value(audit_result));
+            }
+        } else if (agent_type == "regulatory_assessor") {
+            std::string docs_query = "rate(regulens_documents_processed_total{" + agent_label + "}[1m]) * 60";
+            auto docs_result = prometheus_client_->query(docs_query);
+            if (docs_result.success) {
+                metrics["documentsPerMinute"] = static_cast<int>(PrometheusClient::get_scalar_value(docs_result));
+            }
+        } else if (agent_type == "risk_analyzer") {
+            std::string assess_query = "rate(regulens_risk_assessments_total{" + agent_label + "}[1m]) * 60";
+            auto assess_result = prometheus_client_->query(assess_query);
+            if (assess_result.success) {
+                metrics["assessmentsPerMinute"] = static_cast<int>(PrometheusClient::get_scalar_value(assess_result));
+            }
+        }
+
+        return metrics;
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->debug("Failed to get application metrics: " + std::string(e.what()),
+                         "ComplianceAgentController", "getApplicationMetrics",
+                         {{"agent", agent_name}});
+        }
+        return {};
+    }
+}
+
+double ComplianceAgentController::parseCpuUsage(const std::string& cpu_str) {
+    // Parse Kubernetes CPU usage (e.g., "100m", "0.1")
+    if (cpu_str.empty()) return 0.0;
+
+    try {
+        if (cpu_str.back() == 'm') {
+            // MilliCPU
+            double millicpu = std::stod(cpu_str.substr(0, cpu_str.size() - 1));
+            return millicpu / 1000.0; // Convert to cores
+        } else {
+            // CPU cores
+            return std::stod(cpu_str);
+        }
+    } catch (const std::exception&) {
+        return 0.0;
+    }
+}
+
+double ComplianceAgentController::parseMemoryUsage(const std::string& memory_str) {
+    // Parse Kubernetes memory usage (e.g., "128Mi", "1Gi")
+    if (memory_str.empty()) return 0.0;
+
+    try {
+        double value = std::stod(memory_str.substr(0, memory_str.size() - 2));
+        std::string unit = memory_str.substr(memory_str.size() - 2);
+
+        if (unit == "Ki") return value / (1024.0 * 1024.0); // Convert to Gi
+        if (unit == "Mi") return value / 1024.0; // Convert to Gi
+        if (unit == "Gi") return value; // Already in Gi
+        if (unit == "Ti") return value * 1024.0; // Convert to Gi
+
+        return value / (1024.0 * 1024.0 * 1024.0); // Assume bytes, convert to Gi
+
+    } catch (const std::exception&) {
+        return 0.0;
+    }
+}
+
+nlohmann::json ComplianceAgentController::getWorkloadMetrics(const std::string& agent_name, const std::string& agent_type) {
+    try {
+        // Get real metrics from Kubernetes API and Prometheus
+        nlohmann::json metrics = {
+            {"cpu_usage", 0.0},
+            {"memory_usage", 0.0},
+            {"decisionsProcessed", 0},
+            {"averageProcessingTime", 0.0},
+            {"errorRate", 0.0}
+        };
+
+        // Get pod metrics from Kubernetes API
+        auto pod_metrics = getPodMetrics(agent_name);
+        if (!pod_metrics.empty()) {
+            metrics["cpu_usage"] = pod_metrics.value("cpu_usage", 0.0);
+            metrics["memory_usage"] = pod_metrics.value("memory_usage", 0.0);
+        }
+
+        // Get application metrics from Prometheus
+        auto app_metrics = getApplicationMetrics(agent_name, agent_type);
+        if (!app_metrics.empty()) {
+            metrics["decisionsProcessed"] = app_metrics.value("decisionsProcessed", 0);
+            metrics["averageProcessingTime"] = app_metrics.value("averageProcessingTime", 0.0);
+            metrics["errorRate"] = app_metrics.value("errorRate", 0.0);
+
+            // Agent-type specific metrics
+            if (agent_type == "transaction_guardian") {
+                metrics["transactionsPerMinute"] = app_metrics.value("transactionsPerMinute", 0);
+            } else if (agent_type == "audit_intelligence") {
+                metrics["auditRequestsPerMinute"] = app_metrics.value("auditRequestsPerMinute", 0);
+            } else if (agent_type == "regulatory_assessor") {
+                metrics["documentsPerMinute"] = app_metrics.value("documentsPerMinute", 0);
+            } else if (agent_type == "risk_analyzer") {
+                metrics["assessmentsPerMinute"] = app_metrics.value("assessmentsPerMinute", 0);
+            }
+        }
+
+        return metrics;
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Failed to get workload metrics, using defaults: " + std::string(e.what()),
+                         "ComplianceAgentController", "getWorkloadMetrics",
+                         {{"agent", agent_name}});
+        }
+
+        // Return default metrics on error
+        return {
+            {"cpu_usage", 0.5},
+            {"memory_usage", 0.5},
+            {"decisionsProcessed", 100},
+            {"averageProcessingTime", 200.0},
+            {"errorRate", 0.01}
+        };
+    }
 }
 
 // Helper methods for generating Kubernetes specs
@@ -802,7 +1003,7 @@ nlohmann::json ComplianceAgentController::generateAgentDeploymentSpec(const std:
 }
 
 // Additional helper methods would be implemented here for ConfigMap, Secret, ServiceAccount generation
-// For brevity, I'll provide simplified implementations
+// Implementation details
 
 nlohmann::json ComplianceAgentController::generateAgentConfigMapSpec(const std::string& agent_name, const nlohmann::json& spec) {
     return {

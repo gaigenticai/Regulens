@@ -474,8 +474,10 @@ public:
         // Start server thread
         server_thread_ = std::thread(&RegulatoryMonitorHTTPServer::server_loop, this);
 
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string host = display_host ? display_host : "localhost";
         std::cout << "🌐 Regulatory Monitor UI Server started on port " << server_port_ << std::endl;
-        std::cout << "📊 Dashboard URL: http://localhost:" << server_port_ << std::endl;
+        std::cout << "📊 Dashboard URL: http://" << host << ":" << server_port_ << std::endl;
 
         return true;
     }
@@ -504,7 +506,9 @@ public:
     }
 
     std::string get_server_url() const {
-        return "http://localhost:" + std::to_string(server_port_);
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string host = display_host ? display_host : "localhost";
+        return "http://" + host + ":" + std::to_string(server_port_);
     }
 
 private:
@@ -1514,7 +1518,9 @@ int main() {
             return 1;
         }
 
-        std::cout << "🌐 Web UI available at: http://localhost:8080" << std::endl;
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string host = display_host ? display_host : "localhost";
+        std::cout << "🌐 Web UI available at: http://" << host << ":8080" << std::endl;
         std::cout << "📊 Open your browser and navigate to the URL above" << std::endl;
         std::cout << "🔄 The system will run until interrupted (Ctrl+C)" << std::endl;
         std::cout << std::endl;

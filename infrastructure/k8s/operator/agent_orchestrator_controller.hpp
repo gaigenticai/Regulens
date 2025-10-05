@@ -13,6 +13,10 @@
 #include <atomic>
 
 namespace regulens {
+
+// Forward declarations
+class PrometheusClient;
+
 namespace k8s {
 
 /**
@@ -41,10 +45,19 @@ public:
      */
     nlohmann::json getMetrics() const override;
 
+    /**
+     * @brief Get resource type managed by this controller
+     * @return "AgentOrchestrator"
+     */
+    std::string getResourceType() const override { return "AgentOrchestrator"; }
+
 private:
     // Orchestrator state tracking
     std::unordered_map<std::string, nlohmann::json> active_orchestrators_;
     mutable std::mutex orchestrators_mutex_;
+
+    // Prometheus client for metrics queries
+    std::shared_ptr<PrometheusClient> prometheus_client_;
 
     // Metrics
     std::atomic<size_t> orchestrators_created_{0};
@@ -151,6 +164,14 @@ private:
      */
     int calculateOptimalReplicas(const std::string& agent_type, int current_replicas,
                                 const nlohmann::json& load_metrics);
+
+    /**
+     * @brief Get agent load metrics from Prometheus
+     * @param orchestrator_name Orchestrator name
+     * @param agent_spec Agent specification
+     * @return Load metrics JSON (cpu_usage, memory_usage, queue_depth)
+     */
+    nlohmann::json getAgentLoadMetrics(const std::string& orchestrator_name, const nlohmann::json& agent_spec);
 
     /**
      * @brief Update orchestrator status

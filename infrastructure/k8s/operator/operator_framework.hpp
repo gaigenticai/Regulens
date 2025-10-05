@@ -239,6 +239,12 @@ public:
      */
     virtual nlohmann::json getMetrics() const;
 
+    /**
+     * @brief Get the resource type managed by this controller
+     * @return Resource type identifier (e.g., "ComplianceAgent", "RegulatoryDataSource")
+     */
+    virtual std::string getResourceType() const = 0;
+
 protected:
     std::shared_ptr<KubernetesAPIClient> api_client_;
     std::shared_ptr<StructuredLogger> logger_;

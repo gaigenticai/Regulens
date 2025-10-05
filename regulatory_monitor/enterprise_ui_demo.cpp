@@ -1639,7 +1639,9 @@ public:
             }
         }
 
-        std::cout << "🌐 Open your browser and navigate to: http://localhost:" << display_port << std::endl;
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string host = display_host ? display_host : "localhost";
+        std::cout << "🌐 Open your browser and navigate to: http://" << host << ":" << display_port << std::endl;
         std::cout << "📊 Explore all 5 tabs to see the agentic AI value proposition!" << std::endl;
         std::cout << "🎬 Demonstrating autonomous AI compliance operations..." << std::endl;
 
@@ -1833,7 +1835,9 @@ private:
                 // Use default
             }
         }
-        std::cout << "🌐 Enterprise Compliance Intelligence Platform: http://localhost:" << display_port << std::endl;
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string host = display_host ? display_host : "localhost";
+        std::cout << "🌐 Enterprise Compliance Intelligence Platform: http://" << host << ":" << display_port << std::endl;
         std::cout << "   (Navigate all 5 tabs to experience the complete agentic AI ecosystem!)" << std::endl;
     }
 

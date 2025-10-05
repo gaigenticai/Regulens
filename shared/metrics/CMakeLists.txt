@@ -3,10 +3,12 @@
 
 set(METRICS_SOURCES
     prometheus_metrics.cpp
+    prometheus_client.cpp
 )
 
 set(METRICS_HEADERS
     prometheus_metrics.hpp
+    prometheus_client.hpp
 )
 
 # Create metrics library
@@ -26,6 +28,7 @@ target_link_libraries(metrics
         logging
         error_handler
         resilience
+        CURL::libcurl
 )
 
 # Set library properties

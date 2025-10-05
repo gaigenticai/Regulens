@@ -19,6 +19,14 @@
 #include <arpa/inet.h>
 #include <csignal>
 
+// Production HMAC signature support
+#ifdef __APPLE__
+#include <CommonCrypto/CommonHMAC.h>
+#else
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#endif
+
 namespace regulens {
 
 RESTAPIServer::RESTAPIServer(
@@ -832,8 +840,9 @@ std::string RESTAPIServer::generate_jwt_token(const std::string& username) {
     std::string header_b64 = base64_encode(header.dump());
     std::string payload_b64 = base64_encode(payload.dump());
 
-    // Create signature (simplified - in production use proper HMAC)
-    std::string signature_b64 = base64_encode("signature_placeholder");
+    // Create HMAC-SHA256 signature (production implementation)
+    std::string message = header_b64 + "." + payload_b64;
+    std::string signature_b64 = generate_hmac_signature(message);
 
     return header_b64 + "." + payload_b64 + "." + signature_b64;
 }
@@ -842,6 +851,40 @@ bool RESTAPIServer::validate_refresh_token(const std::string& token) {
     // Simplified refresh token validation
     // In production, check against database/store
     return token.length() > 10; // Basic check
+}
+
+std::string RESTAPIServer::generate_hmac_signature(const std::string& message) {
+    // Production HMAC-SHA256 signature generation
+    // Get JWT secret from environment or configuration
+    const char* jwt_secret_env = std::getenv("JWT_SECRET_KEY");
+    std::string jwt_secret = jwt_secret_env ? jwt_secret_env : "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION";
+    
+    if (jwt_secret == "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION" && std::getenv("REGULENS_ENVIRONMENT") == std::string("production")) {
+        throw std::runtime_error("JWT_SECRET_KEY must be configured in production environment");
+    }
+    
+    // Create HMAC-SHA256 using OpenSSL
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len = 0;
+    
+    #ifdef __APPLE__
+    // macOS OpenSSL implementation
+    CCHmac(kCCHmacAlgSHA256, 
+           jwt_secret.c_str(), jwt_secret.length(),
+           message.c_str(), message.length(),
+           digest);
+    digest_len = CC_SHA256_DIGEST_LENGTH;
+    #else
+    // Linux OpenSSL implementation
+    HMAC(EVP_sha256(),
+         jwt_secret.c_str(), jwt_secret.length(),
+         reinterpret_cast<const unsigned char*>(message.c_str()), message.length(),
+         digest, &digest_len);
+    #endif
+    
+    // Base64 encode the signature
+    std::string signature(reinterpret_cast<char*>(digest), digest_len);
+    return base64_encode(signature);
 }
 
 std::string RESTAPIServer::base64_encode(const std::string& input) {

@@ -16,6 +16,10 @@
 #include <mutex>
 
 namespace regulens {
+
+// Forward declarations
+class PrometheusClient;
+
 namespace k8s {
 
 /**
@@ -45,11 +49,20 @@ public:
      */
     nlohmann::json getMetrics() const override;
 
+    /**
+     * @brief Get resource type managed by this controller
+     * @return "ComplianceAgent"
+     */
+    std::string getResourceType() const override { return "ComplianceAgent"; }
+
 private:
     // Agent state tracking
     std::unordered_map<std::string, nlohmann::json> active_agents_;
     std::unordered_map<std::string, std::unordered_set<std::string>> agent_regulatory_sources_;
     mutable std::mutex agents_mutex_;
+
+    // Prometheus client for metrics queries
+    std::shared_ptr<PrometheusClient> prometheus_client_;
 
     // Metrics
     std::atomic<size_t> agents_created_{0};
@@ -164,6 +177,35 @@ private:
      * @return Workload metrics JSON
      */
     nlohmann::json getWorkloadMetrics(const std::string& agent_name, const std::string& agent_type);
+
+    /**
+     * @brief Get pod resource metrics from Kubernetes Metrics API
+     * @param agent_name Agent name
+     * @return Pod metrics JSON
+     */
+    nlohmann::json getPodMetrics(const std::string& agent_name);
+
+    /**
+     * @brief Get application-specific metrics from Prometheus
+     * @param agent_name Agent name
+     * @param agent_type Agent type
+     * @return Application metrics JSON
+     */
+    nlohmann::json getApplicationMetrics(const std::string& agent_name, const std::string& agent_type);
+
+    /**
+     * @brief Parse CPU usage from Kubernetes metrics format
+     * @param cpu_str CPU usage string (e.g., "100m", "0.1")
+     * @return CPU usage as cores
+     */
+    double parseCpuUsage(const std::string& cpu_str);
+
+    /**
+     * @brief Parse memory usage from Kubernetes metrics format
+     * @param memory_str Memory usage string (e.g., "128Mi", "1Gi")
+     * @return Memory usage in Gi
+     */
+    double parseMemoryUsage(const std::string& memory_str);
 
     /**
      * @brief Generate deployment spec for compliance agent

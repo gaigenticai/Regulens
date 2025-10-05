@@ -330,9 +330,11 @@ Choose an option (0-9): )";
         db_config.max_retries = 5;
         db_config.batch_size = 1000;
 
-        // Database-specific configuration
+        // Database-specific configuration - use environment variables for cloud deployment
+        auto& config_manager = ConfigurationManager::get_instance();
+        std::string db_host = config_manager.get_string("TRANSACTION_DB_HOST").value_or("localhost");
         db_config.connection_params = {
-            {"host", "localhost"},
+            {"host", db_host},
             {"port", "5432"},
             {"database", "transaction_db"},
             {"table", "transactions"}
@@ -358,8 +360,10 @@ Choose an option (0-9): )";
         audit_config.max_retries = 3;
         audit_config.batch_size = 500;
 
+        // Use environment variable for cloud deployment compatibility
+        std::string audit_db_host = config_manager.get_string("AUDIT_DB_HOST").value_or("localhost");
         audit_config.connection_params = {
-            {"host", "localhost"},
+            {"host", audit_db_host},
             {"port", "5432"},
             {"database", "audit_db"},
             {"table", "system_audit_logs"}

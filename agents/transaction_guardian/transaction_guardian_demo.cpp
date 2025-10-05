@@ -154,12 +154,19 @@ public:
             simulation_thread_ = std::thread(&TransactionGuardianUIDemo::process_transactions, this);
 
             logger_->log(LogLevel::INFO, "Transaction Guardian UI Demo started");
-            // Get web server host from configuration (default to 0.0.0.0 for cloud deployment)
+            // Get web server host from configuration
             auto& config_manager = ConfigurationManager::get_instance();
-            std::string web_host = config_manager.get_string("WEB_SERVER_HOST").value_or("0.0.0.0");
-
-            // For display purposes, show localhost if running locally, otherwise show the configured host
-            std::string display_host = (web_host == "0.0.0.0") ? "localhost" : web_host;
+            
+            // For display purposes, use WEB_SERVER_DISPLAY_HOST if set, otherwise use WEB_SERVER_HOST
+            const char* display_host_env = std::getenv("WEB_SERVER_DISPLAY_HOST");
+            std::string display_host;
+            if (display_host_env) {
+                display_host = display_host_env;
+            } else {
+                std::string web_host = config_manager.get_string("WEB_SERVER_HOST").value_or("0.0.0.0");
+                display_host = (web_host == "0.0.0.0") ? "localhost" : web_host;
+            }
+            
             logger_->log(LogLevel::INFO, "UI available at: http://" + display_host + ":" + std::to_string(ui_port_));
             logger_->log(LogLevel::INFO, "Press Ctrl+C to stop");
 

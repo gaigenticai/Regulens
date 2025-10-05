@@ -92,6 +92,7 @@ private:
     bool validate_refresh_token(const std::string& token);
     std::string base64_encode(const std::string& input);
     std::string base64_decode(const std::string& input);
+    std::string generate_hmac_signature(const std::string& message);
 
     // Member variables
     std::shared_ptr<ConnectionPool> db_pool_;

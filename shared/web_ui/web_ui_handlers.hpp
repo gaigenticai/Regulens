@@ -18,6 +18,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <deque>
+#include <mutex>
 #include "web_ui_server.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../logging/structured_logger.hpp"
@@ -233,6 +235,20 @@ private:
     std::shared_ptr<FunctionRegistry> function_registry_;
     std::shared_ptr<FunctionDispatcher> function_dispatcher_;
 
+    // Recent function calls tracking
+    struct RecentFunctionCall {
+        std::string function_name;
+        std::chrono::system_clock::time_point timestamp;
+        bool success;
+        double response_time_ms;
+        std::string user_agent;
+        std::string correlation_id;
+    };
+
+    std::deque<RecentFunctionCall> recent_calls_;
+    mutable std::mutex recent_calls_mutex_;
+    static constexpr size_t MAX_RECENT_CALLS = 1000;
+
     // Embeddings integration
     std::shared_ptr<EmbeddingsClient> embeddings_client_;
     std::shared_ptr<DocumentProcessor> document_processor_;
@@ -316,6 +332,11 @@ private:
     // Audit data collection
     nlohmann::json collect_audit_data() const;
     nlohmann::json collect_recent_function_calls() const;
+
+    // Function call tracking
+    void record_function_call(const std::string& function_name, bool success,
+                            double response_time_ms, const std::string& user_agent = "",
+                            const std::string& correlation_id = "");
 
     // Performance metrics and AI insights
     nlohmann::json collect_performance_metrics() const;

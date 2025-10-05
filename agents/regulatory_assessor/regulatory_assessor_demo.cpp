@@ -167,10 +167,15 @@ public:
         logger_->log(LogLevel::INFO, "Regulatory Assessor UI Demo started successfully");
         // Get web server host from configuration (default to 0.0.0.0 for cloud deployment)
         auto& config_manager = ConfigurationManager::get_instance();
-        std::string web_host = config_manager.get_string("WEB_SERVER_HOST").value_or("0.0.0.0");
-
-        // For display purposes, show localhost if running locally, otherwise show the configured host
-        std::string display_host = (web_host == "0.0.0.0") ? "localhost" : web_host;
+        // For display purposes, use WEB_SERVER_DISPLAY_HOST if set, otherwise use WEB_SERVER_HOST
+        const char* display_host_env = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string display_host;
+        if (display_host_env) {
+            display_host = display_host_env;
+        } else {
+            std::string web_host = config_manager.get_string("WEB_SERVER_HOST").value_or("0.0.0.0");
+            display_host = (web_host == "0.0.0.0") ? "localhost" : web_host;
+        }
         logger_->log(LogLevel::INFO, "Web UI available at: http://" + display_host + ":" + std::to_string(ui_port_));
     }
 
@@ -734,8 +739,13 @@ int main(int argc, char* argv[]) {
 
         demo->start_demo();
 
+        // Get display host from configuration
+        const char* display_host = std::getenv("WEB_SERVER_DISPLAY_HOST");
+        std::string host = display_host ? display_host : "localhost";
+        std::string port = std::getenv("WEB_SERVER_UI_PORT") ? std::getenv("WEB_SERVER_UI_PORT") : "8082";
+
         std::cout << "✅ Regulatory Assessor UI Demo started successfully!" << std::endl;
-        std::cout << "🌐 Web UI: http://localhost:8082" << std::endl;
+        std::cout << "🌐 Web UI: http://" << host << ":" << port << std::endl;
         std::cout << "📊 Features: Real-time assessment, AI analysis, trends monitoring" << std::endl;
         std::cout << "🔄 Press Ctrl+C to stop the demo" << std::endl;
         std::cout << std::endl;

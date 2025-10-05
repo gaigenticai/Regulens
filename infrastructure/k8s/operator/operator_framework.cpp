@@ -15,6 +15,8 @@
 #include <fstream>
 #include <cstdlib>
 #include <regex>
+#include <set>
+#include <map>
 #include "../../shared/network/http_client.hpp"
 
 namespace regulens {
@@ -180,7 +182,7 @@ public:
                             }
                         }
 
-                        // Check for deleted resources (simplified - would need better tracking)
+                        // Check for deleted resources
                         std::set<std::string> current_names;
                         for (const auto& item : response["items"]) {
                             if (item.contains("metadata") && item["metadata"].contains("name")) {
@@ -230,7 +232,16 @@ public:
                          "KubernetesAPIClient", "stopWatching",
                          {{"watch_handle", watch_handle}});
         }
-        // Mock implementation - would close watch connection
+        // Production implementation: Stop the watch thread
+        std::lock_guard<std::mutex> lock(watch_mutex_);
+        auto it = active_watches_.find(watch_handle);
+        if (it != active_watches_.end()) {
+            it->second.active = false;
+            if (it->second.thread.joinable()) {
+                it->second.thread.join();
+            }
+            active_watches_.erase(it);
+        }
     }
 
     nlohmann::json getClusterInfo() override {
@@ -243,8 +254,14 @@ public:
     }
 
     bool isHealthy() override {
-        // Mock health check
-        return true;
+        try {
+            // Check API server health by making a simple request
+            std::string url = api_server_url_ + "/api/v1";
+            auto response = makeAPIRequest("GET", url);
+            return response.contains("versions");
+        } catch (const std::exception&) {
+            return false;
+        }
     }
 
 private:
@@ -255,6 +272,15 @@ private:
     std::string api_server_url_;
     std::string auth_token_;
     std::map<std::string, std::string> default_headers_;
+
+    // Watch state tracking
+    struct WatchState {
+        bool active;
+        std::thread thread;
+        WatchState() : active(true) {}
+    };
+    std::unordered_map<std::string, WatchState> active_watches_;
+    std::mutex watch_mutex_;
 
     void initializeKubernetesConfig();
     std::string buildAPIURL(const std::string& group, const std::string& version,
@@ -623,8 +649,8 @@ void KubernetesOperator::registerController(std::shared_ptr<CustomResourceContro
     if (!controller) return;
 
     std::lock_guard<std::mutex> lock(controllers_mutex_);
-    // Note: In production, we'd derive resource type from controller
-    std::string resource_type = "generic"; // Placeholder
+    // Get resource type from controller
+    std::string resource_type = controller->getResourceType();
     controllers_[resource_type] = controller;
 
     if (controller->initialize()) {

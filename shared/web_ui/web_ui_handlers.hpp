@@ -354,6 +354,7 @@ private:
     HTTPResponse create_error_response(int code, const std::string& message);
     bool validate_request(const HTTPRequest& request);
     std::unordered_map<std::string, std::string> parse_form_data(const std::string& body);
+    std::string url_decode(const std::string& input) const;
     std::string escape_html(const std::string& input) const;
 };
 

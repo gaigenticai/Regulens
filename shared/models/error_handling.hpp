@@ -265,7 +265,7 @@ private:
      */
     template<typename T>
     std::optional<T> execute_simplified_fallback(
-        std::function<T()> original_operation,
+        std::function<T()> /*original_operation*/,
         const std::unordered_map<std::string, std::string>& context) {
 
         // Try to execute with reduced parameters or simplified logic
@@ -294,7 +294,7 @@ private:
      */
     template<typename T>
     std::optional<T> execute_degraded_fallback(
-        std::function<T()> original_operation,
+        std::function<T()> /*original_operation*/,
         const std::unordered_map<std::string, std::string>& context) {
 
         // Try the original operation but with timeout or reduced expectations

@@ -366,7 +366,6 @@ std::vector<std::string> ConfigurationManager::get_notification_recipients() con
 
     return recipients;
 }
-}
 
 AgentCapabilityConfig ConfigurationManager::get_agent_capability_config() const {
     AgentCapabilityConfig config;

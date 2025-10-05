@@ -433,15 +433,116 @@ void AgentActivityFeed::cleanup_worker() {
 }
 
 bool AgentActivityFeed::persist_activity(const AgentActivityEvent& event) {
-    // Production-grade activity persistence
-    logger_->debug("Persisting activity: {}", event.event_id);
-    return true;
+    if (!config_.enable_persistence || !db_connection_) {
+        return false;
+    }
+
+    try {
+        std::string query = R"(
+            INSERT INTO agent_activities (
+                event_id, agent_id, activity_type, severity, title,
+                description, timestamp, metadata
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (event_id) DO UPDATE SET
+                activity_type = EXCLUDED.activity_type,
+                severity = EXCLUDED.severity,
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
+                timestamp = EXCLUDED.timestamp,
+                metadata = EXCLUDED.metadata
+        )";
+
+        auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            event.timestamp.time_since_epoch()).count();
+
+        nlohmann::json metadata_json = event.metadata;
+
+        pqxx::work txn(*db_connection_->get_connection());
+        txn.exec_params(query,
+            event.event_id,
+            event.agent_id,
+            static_cast<int>(event.activity_type),
+            static_cast<int>(event.severity),
+            event.title,
+            event.description,
+            timestamp_ms,
+            metadata_json.dump()
+        );
+        txn.commit();
+
+        logger_->debug("Persisted activity: {}", event.event_id);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to persist activity {}: {}", event.event_id, e.what());
+        return false;
+    }
 }
 
-std::vector<AgentActivityEvent> AgentActivityFeed::load_activities_from_persistence(const ActivityFeedFilter& /*filter*/) {
-    // Production-grade activity loading
-    logger_->debug("Loading activities from persistence");
-    return {};
+std::vector<AgentActivityEvent> AgentActivityFeed::load_activities_from_persistence(const ActivityFeedFilter& filter) {
+    std::vector<AgentActivityEvent> activities;
+
+    if (!config_.enable_persistence || !db_connection_) {
+        return activities;
+    }
+
+    try {
+        std::stringstream query;
+        query << "SELECT event_id, agent_id, activity_type, severity, title, "
+              << "description, timestamp, metadata FROM agent_activities WHERE 1=1";
+
+        std::vector<std::string> conditions;
+
+        if (!filter.agent_ids.empty()) {
+            query << " AND agent_id = ANY($1::text[])";
+        }
+
+        if (filter.start_time != std::chrono::system_clock::time_point{}) {
+            auto start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                filter.start_time.time_since_epoch()).count();
+            query << " AND timestamp >= " << start_ms;
+        }
+
+        if (filter.end_time != std::chrono::system_clock::time_point::max()) {
+            auto end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                filter.end_time.time_since_epoch()).count();
+            query << " AND timestamp <= " << end_ms;
+        }
+
+        query << " ORDER BY timestamp " << (filter.ascending_order ? "ASC" : "DESC");
+        query << " LIMIT " << filter.max_results;
+
+        pqxx::work txn(*db_connection_->get_connection());
+        pqxx::result result = txn.exec(query.str());
+
+        for (const auto& row : result) {
+            AgentActivityEvent event;
+            event.event_id = row["event_id"].as<std::string>();
+            event.agent_id = row["agent_id"].as<std::string>();
+            event.activity_type = static_cast<ActivityType>(row["activity_type"].as<int>());
+            event.severity = static_cast<ActivitySeverity>(row["severity"].as<int>());
+            event.title = row["title"].as<std::string>();
+            event.description = row["description"].as<std::string>();
+
+            auto timestamp_ms = row["timestamp"].as<long long>();
+            event.timestamp = std::chrono::system_clock::time_point(
+                std::chrono::milliseconds(timestamp_ms));
+
+            if (!row["metadata"].is_null()) {
+                std::string metadata_str = row["metadata"].as<std::string>();
+                event.metadata = nlohmann::json::parse(metadata_str);
+            }
+
+            activities.push_back(event);
+        }
+
+        logger_->debug("Loaded {} activities from persistence", activities.size());
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to load activities from persistence: {}", e.what());
+    }
+
+    return activities;
 }
 
 std::chrono::system_clock::time_point AgentActivityFeed::get_cutoff_time() const {

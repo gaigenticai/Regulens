@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(find:*)",
+      "Bash(cmake:*)",
+      "Bash(make:*)",
+      "Bash(brew list:*)",
+      "Read(//opt/homebrew/**)",
+      "Bash(pkg-config:*)",
+      "Bash(curl:*)",
+      "Bash(g++:*)"
     ],
     "deny": [],
     "ask": []

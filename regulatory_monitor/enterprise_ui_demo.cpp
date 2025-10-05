@@ -28,6 +28,24 @@
 
 namespace regulens {
 
+// Severity levels for regulatory changes
+enum class RegulatorySeverity {
+    LOW,
+    MEDIUM,
+    HIGH,
+    CRITICAL
+};
+
+// Metadata for regulatory changes
+struct RegulatoryChangeMetadata {
+    std::string regulatory_body;
+    std::string document_type;
+    RegulatorySeverity severity = RegulatorySeverity::MEDIUM;
+    std::chrono::system_clock::time_point effective_date;
+    std::vector<std::string> keywords;
+    std::string summary;
+};
+
 // Forward declarations
 struct SimpleRegulatoryChange {
     std::string id;
@@ -40,6 +58,15 @@ struct SimpleRegulatoryChange {
     SimpleRegulatoryChange(std::string i, std::string t, std::string s, std::string url)
         : id(std::move(i)), title(std::move(t)), source(std::move(s)), content_url(std::move(url)),
           detected_at(std::chrono::system_clock::now()) {}
+};
+
+// Regulatory change with metadata
+struct RegulatoryChange : public SimpleRegulatoryChange {
+    RegulatoryChangeMetadata metadata;
+
+    RegulatoryChange(std::string i, std::string t, std::string url, const RegulatoryChangeMetadata& meta)
+        : SimpleRegulatoryChange(std::move(i), std::move(t), meta.regulatory_body, std::move(url)),
+          metadata(meta) {}
 };
 
 class SimpleKnowledgeBase {

@@ -62,91 +62,255 @@ std::vector<nlohmann::json> DatabaseSource::execute_query(const DatabaseQuery& q
     ++total_queries_executed_;
 
     try {
-        // Simplified - in production would execute actual database queries
-        ++successful_queries_;
-
-        // Return sample data based on query type
-        if (query.query_type == QueryType::SELECT_BATCH) {
-            return {
-                {
-                    {"id", 1},
-                    {"name", "Sample Transaction"},
-                    {"amount", 1000.50},
-                    {"timestamp", "2024-01-01T10:00:00Z"}
-                },
-                {
-                    {"id", 2},
-                    {"name", "Sample Audit Log"},
-                    {"action", "LOGIN"},
-                    {"timestamp", "2024-01-01T11:00:00Z"}
-                }
-            };
+        // Execute actual database query using connection pool
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("Failed to obtain database connection");
         }
 
-        return {};
-    } catch (const std::exception&) {
+        std::vector<nlohmann::json> results;
+
+        // Build and execute SQL query based on query type
+        std::string sql = build_sql_query(query);
+
+        // Execute query with parameters
+        auto db_result = connection->execute_query(sql, query.parameters);
+
+        // Convert database results to JSON
+        for (const auto& row : db_result.rows) {
+            nlohmann::json json_row;
+            for (const auto& [column, value] : row) {
+                // Parse value based on column type
+                json_row[column] = parse_column_value(value, db_result.column_types[column]);
+            }
+            results.push_back(json_row);
+        }
+
+        ++successful_queries_;
+        return results;
+
+    } catch (const std::exception& e) {
         ++failed_queries_;
-        return {};
+        logger_->error("Query execution failed: {}", e.what());
+        throw;
     }
 }
 
 std::vector<nlohmann::json> DatabaseSource::execute_incremental_load() {
-    // Simplified incremental loading
-    if (db_config_.incremental_config.strategy == IncrementalStrategy::TIMESTAMP_COLUMN) {
-        return load_by_timestamp("transactions", "updated_at");
-    } else if (db_config_.incremental_config.strategy == IncrementalStrategy::SEQUENCE_ID) {
-        return load_by_sequence("audit_logs", "id");
+    // Execute incremental data loading based on configured strategy
+    std::vector<nlohmann::json> results;
+
+    for (const auto& table : db_config_.tables) {
+        try {
+            std::vector<nlohmann::json> table_results;
+
+            if (db_config_.incremental_config.strategy == IncrementalStrategy::TIMESTAMP_COLUMN) {
+                table_results = load_by_timestamp(
+                    table,
+                    db_config_.incremental_config.timestamp_column
+                );
+            } else if (db_config_.incremental_config.strategy == IncrementalStrategy::SEQUENCE_ID) {
+                table_results = load_by_sequence(
+                    table,
+                    db_config_.incremental_config.sequence_column
+                );
+            } else if (db_config_.incremental_config.strategy == IncrementalStrategy::CDC) {
+                table_results = get_cdc_changes(table);
+            }
+
+            results.insert(results.end(), table_results.begin(), table_results.end());
+
+        } catch (const std::exception& e) {
+            logger_->error("Incremental load failed for table {}: {}", table, e.what());
+        }
     }
 
-    return {};
+    return results;
 }
 
 nlohmann::json DatabaseSource::get_table_schema(const std::string& table_name) {
     return introspect_table_schema(table_name);
 }
 
-// CDC methods (simplified)
-bool DatabaseSource::enable_cdc(const std::string& /*table_name*/) {
-    return true; // Simplified
+// Change Data Capture (CDC) implementation for PostgreSQL logical replication
+bool DatabaseSource::enable_cdc(const std::string& table_name) {
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
+        }
+
+        // Enable logical replication for the table
+        std::string sql = "ALTER TABLE " + table_name + " REPLICA IDENTITY FULL";
+        connection->execute_query(sql);
+
+        // Create replication slot if it doesn't exist
+        std::string slot_name = "regulens_cdc_" + table_name;
+        std::string create_slot = "SELECT * FROM pg_create_logical_replication_slot('" +
+                                 slot_name + "', 'pgoutput')";
+
+        try {
+            connection->execute_query(create_slot);
+        } catch (const std::exception& e) {
+            // Slot may already exist, which is fine
+            logger_->info("CDC slot already exists for {}: {}", table_name, e.what());
+        }
+
+        logger_->info("CDC enabled for table: {}", table_name);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to enable CDC for {}: {}", table_name, e.what());
+        return false;
+    }
 }
 
-std::vector<nlohmann::json> DatabaseSource::get_cdc_changes(const std::string& /*table_name*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> DatabaseSource::get_cdc_changes(const std::string& table_name) {
+    std::vector<nlohmann::json> changes;
+
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
+        }
+
+        std::string slot_name = "regulens_cdc_" + table_name;
+
+        // Read changes from replication slot
+        std::string sql = "SELECT * FROM pg_logical_slot_get_changes('" +
+                         slot_name + "', NULL, NULL, 'proto_version', '1', 'publication_names', 'regulens_pub')";
+
+        auto result = connection->execute_query(sql);
+
+        for (const auto& row : result.rows) {
+            nlohmann::json change;
+            change["lsn"] = row["lsn"];
+            change["xid"] = row["xid"];
+            change["data"] = nlohmann::json::parse(row["data"]);
+            changes.push_back(change);
+        }
+
+        return changes;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to get CDC changes for {}: {}", table_name, e.what());
+        return {};
+    }
 }
 
-bool DatabaseSource::commit_cdc_changes(const std::string& /*table_name*/, const std::string& /*lsn*/) {
-    return true; // Simplified
+bool DatabaseSource::commit_cdc_changes(const std::string& table_name, const std::string& lsn) {
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
+        }
+
+        std::string slot_name = "regulens_cdc_" + table_name;
+
+        // Acknowledge processing up to this LSN
+        std::string sql = "SELECT * FROM pg_replication_slot_advance('" +
+                         slot_name + "', '" + lsn + "')";
+
+        connection->execute_query(sql);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to commit CDC changes for {}: {}", table_name, e.what());
+        return false;
+    }
 }
 
-// Private methods (simplified implementations)
+// Private methods - database connection management
 bool DatabaseSource::establish_connection() {
-    return test_database_connection();
+    try {
+        configure_connection_pool();
+        return test_database_connection();
+    } catch (const std::exception& e) {
+        logger_->error("Failed to establish database connection: {}", e.what());
+        return false;
+    }
 }
 
 bool DatabaseSource::test_database_connection() {
-    // Simplified - in production would test actual database connection
-    return true;
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            return false;
+        }
+
+        // Test connection with a simple query
+        auto result = connection->execute_query("SELECT 1");
+        return !result.rows.empty();
+
+    } catch (const std::exception& e) {
+        logger_->error("Database connection test failed: {}", e.what());
+        return false;
+    }
 }
 
 void DatabaseSource::configure_connection_pool() {
-    // Simplified
+    if (!connection_pool_) {
+        connection_pool_ = std::make_shared<ConnectionPool>(
+            db_config_.connection_string,
+            db_config_.pool_size
+        );
+
+        logger_->info("Database connection pool configured with {} connections", db_config_.pool_size);
+    }
 }
 
 std::shared_ptr<PostgreSQLConnection> DatabaseSource::get_connection() {
-    // Simplified - would return actual connection from pool
-    return nullptr;
+    if (!connection_pool_) {
+        configure_connection_pool();
+    }
+
+    if (!connection_pool_) {
+        throw std::runtime_error("Connection pool not initialized");
+    }
+
+    return connection_pool_->acquire_connection();
 }
 
-std::vector<nlohmann::json> DatabaseSource::execute_select_query(const DatabaseQuery& /*query*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> DatabaseSource::execute_select_query(const DatabaseQuery& query) {
+    return execute_query(query);
 }
 
-std::vector<nlohmann::json> DatabaseSource::execute_stored_procedure(const DatabaseQuery& /*query*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> DatabaseSource::execute_stored_procedure(const DatabaseQuery& query) {
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
+        }
+
+        std::string sql = "CALL " + query.procedure_name + "(";
+        for (size_t i = 0; i < query.parameters.size(); ++i) {
+            sql += "$" + std::to_string(i + 1);
+            if (i < query.parameters.size() - 1) sql += ", ";
+        }
+        sql += ")";
+
+        auto result = connection->execute_query(sql, query.parameters);
+
+        std::vector<nlohmann::json> results;
+        for (const auto& row : result.rows) {
+            nlohmann::json json_row;
+            for (const auto& [column, value] : row) {
+                json_row[column] = value;
+            }
+            results.push_back(json_row);
+        }
+
+        return results;
+
+    } catch (const std::exception& e) {
+        logger_->error("Stored procedure execution failed: {}", e.what());
+        return {};
+    }
 }
 
-nlohmann::json DatabaseSource::execute_single_row_query(const DatabaseQuery& /*query*/) {
-    return nullptr; // Simplified
+nlohmann::json DatabaseSource::execute_single_row_query(const DatabaseQuery& query) {
+    auto results = execute_query(query);
+    return results.empty() ? nlohmann::json{} : results[0];
 }
 
 std::vector<nlohmann::json> DatabaseSource::load_by_timestamp(const std::string& /*table_name*/, const std::string& /*timestamp_column*/) {
@@ -169,8 +333,38 @@ std::vector<nlohmann::json> DatabaseSource::load_by_sequence(const std::string& 
     };
 }
 
-std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::string& /*table_name*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::string& table_name) {
+    std::vector<nlohmann::json> changes;
+
+    if (!connection_) {
+        logger_->error("Database connection not established for change tracking on table: {}", table_name);
+        return changes;
+    }
+
+    try {
+        std::string query = "SELECT * FROM " + table_name + " WHERE updated_at > $1 ORDER BY updated_at ASC";
+        auto last_sync = last_sync_timestamps_[table_name];
+
+        pqxx::work txn(*connection_);
+        pqxx::result result = txn.exec_params(query, last_sync);
+
+        for (const auto& row : result) {
+            nlohmann::json json_row;
+            for (const auto& field : row) {
+                json_row[field.name()] = field.c_str();
+            }
+            changes.push_back(json_row);
+        }
+
+        if (!changes.empty()) {
+            last_sync_timestamps_[table_name] = std::chrono::system_clock::now();
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to load changes for table {}: {}", table_name, e.what());
+    }
+
+    return changes;
 }
 
 nlohmann::json DatabaseSource::introspect_table_schema(const std::string& table_name) {
@@ -193,7 +387,43 @@ nlohmann::json DatabaseSource::introspect_table_schema(const std::string& table_
 }
 
 nlohmann::json DatabaseSource::introspect_database_schema() {
-    return {}; // Simplified
+    nlohmann::json schema = nlohmann::json::object();
+
+    if (!connection_) {
+        logger_->error("Database connection not established for schema introspection");
+        return schema;
+    }
+
+    try {
+        std::string query = R"(
+            SELECT table_name, column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            ORDER BY table_name, ordinal_position
+        )";
+
+        pqxx::work txn(*connection_);
+        pqxx::result result = txn.exec(query);
+
+        for (const auto& row : result) {
+            std::string table = row["table_name"].c_str();
+            if (!schema.contains(table)) {
+                schema[table] = nlohmann::json::array();
+            }
+
+            schema[table].push_back({
+                {"name", row["column_name"].c_str()},
+                {"type", row["data_type"].c_str()},
+                {"nullable", std::string(row["is_nullable"].c_str()) == "YES"},
+                {"default", row["column_default"].is_null() ? "" : row["column_default"].c_str()}
+            });
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to introspect database schema: {}", e.what());
+    }
+
+    return schema;
 }
 
 std::vector<std::string> DatabaseSource::get_table_list() {
@@ -205,64 +435,366 @@ bool DatabaseSource::validate_table_exists(const std::string& table_name) {
     return std::find(tables.begin(), tables.end(), table_name) != tables.end();
 }
 
-bool DatabaseSource::setup_cdc_for_postgresql(const std::string& /*table_name*/) {
-    return true; // Simplified
+bool DatabaseSource::setup_cdc_for_postgresql(const std::string& table_name) {
+    if (!connection_) {
+        logger_->error("Database connection not established for CDC setup on table: {}", table_name);
+        return false;
+    }
+
+    try {
+        std::string publication_name = "regulens_cdc_" + table_name;
+
+        pqxx::work txn(*connection_);
+
+        std::string create_pub_query = "CREATE PUBLICATION " + publication_name +
+                                       " FOR TABLE " + table_name +
+                                       " WITH (publish = 'insert, update, delete')";
+        txn.exec(create_pub_query);
+        txn.commit();
+
+        logger_->info("CDC publication created for table: {}", table_name);
+        return true;
+
+    } catch (const pqxx::sql_error& e) {
+        if (std::string(e.what()).find("already exists") != std::string::npos) {
+            logger_->info("CDC publication already exists for table: {}", table_name);
+            return true;
+        }
+        logger_->error("Failed to setup CDC for PostgreSQL table {}: {}", table_name, e.what());
+        return false;
+    } catch (const std::exception& e) {
+        logger_->error("Failed to setup CDC for PostgreSQL table {}: {}", table_name, e.what());
+        return false;
+    }
 }
 
-bool DatabaseSource::setup_cdc_for_sql_server(const std::string& /*table_name*/) {
-    return true; // Simplified
+bool DatabaseSource::setup_cdc_for_sql_server(const std::string& table_name) {
+    if (!connection_) {
+        logger_->error("Database connection not established for CDC setup on table: {}", table_name);
+        return false;
+    }
+
+    try {
+        pqxx::work txn(*connection_);
+
+        std::string enable_cdc_db = "EXEC sys.sp_cdc_enable_db";
+        txn.exec(enable_cdc_db);
+
+        std::string enable_cdc_table = "EXEC sys.sp_cdc_enable_table " +
+                                      "@source_schema = N'dbo', " +
+                                      "@source_name = N'" + table_name + "', " +
+                                      "@role_name = NULL";
+        txn.exec(enable_cdc_table);
+        txn.commit();
+
+        logger_->info("CDC enabled for SQL Server table: {}", table_name);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to setup CDC for SQL Server table {}: {}", table_name, e.what());
+        return false;
+    }
 }
 
-std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_postgresql(const std::string& /*table_name*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_postgresql(const std::string& table_name) {
+    std::vector<nlohmann::json> changes;
+
+    if (!connection_) {
+        logger_->error("Database connection not established for CDC polling on table: {}", table_name);
+        return changes;
+    }
+
+    try {
+        std::string slot_name = "regulens_slot_" + table_name;
+
+        pqxx::work txn(*connection_);
+        std::string query = "SELECT * FROM pg_logical_slot_get_changes('" + slot_name +
+                          "', NULL, NULL) LIMIT 1000";
+        pqxx::result result = txn.exec(query);
+
+        for (const auto& row : result) {
+            nlohmann::json change;
+            change["lsn"] = row["lsn"].c_str();
+            change["xid"] = row["xid"].as<int>();
+            change["data"] = row["data"].c_str();
+            changes.push_back(change);
+        }
+
+        txn.commit();
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to poll CDC changes for PostgreSQL table {}: {}", table_name, e.what());
+    }
+
+    return changes;
 }
 
-std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_sql_server(const std::string& /*table_name*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_sql_server(const std::string& table_name) {
+    std::vector<nlohmann::json> changes;
+
+    if (!connection_) {
+        logger_->error("Database connection not established for CDC polling on table: {}", table_name);
+        return changes;
+    }
+
+    try {
+        pqxx::work txn(*connection_);
+        std::string query = "SELECT * FROM cdc.fn_cdc_get_all_changes_dbo_" + table_name +
+                          "(sys.fn_cdc_get_min_lsn('dbo_" + table_name + "'), " +
+                          "sys.fn_cdc_get_max_lsn(), 'all')";
+        pqxx::result result = txn.exec(query);
+
+        for (const auto& row : result) {
+            nlohmann::json change;
+            for (const auto& field : row) {
+                change[field.name()] = field.c_str();
+            }
+            changes.push_back(change);
+        }
+
+        txn.commit();
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to poll CDC changes for SQL Server table {}: {}", table_name, e.what());
+    }
+
+    return changes;
 }
 
-nlohmann::json DatabaseSource::transform_database_row(const nlohmann::json& row_data, const std::string& /*table_name*/) {
-    return row_data; // Simplified
+nlohmann::json DatabaseSource::transform_database_row(const nlohmann::json& row_data, const std::string& table_name) {
+    nlohmann::json transformed = row_data;
+
+    if (config_.transformation_rules.contains(table_name)) {
+        const auto& rules = config_.transformation_rules[table_name];
+
+        for (const auto& [field, rule] : rules.items()) {
+            if (transformed.contains(field)) {
+                if (rule.contains("rename_to")) {
+                    transformed[rule["rename_to"]] = transformed[field];
+                    transformed.erase(field);
+                }
+
+                if (rule.contains("type_cast")) {
+                    std::string target_type = rule["type_cast"];
+                    transformed[field] = convert_database_type(transformed[field].dump(), target_type);
+                }
+
+                if (rule.contains("transform_function")) {
+                    std::string func = rule["transform_function"];
+                    if (func == "uppercase") {
+                        std::string val = transformed[field];
+                        std::transform(val.begin(), val.end(), val.begin(), ::toupper);
+                        transformed[field] = val;
+                    } else if (func == "lowercase") {
+                        std::string val = transformed[field];
+                        std::transform(val.begin(), val.end(), val.begin(), ::tolower);
+                        transformed[field] = val;
+                    }
+                }
+            }
+        }
+    }
+
+    transformed["_source_table"] = table_name;
+    transformed["_ingested_at"] = std::chrono::system_clock::now().time_since_epoch().count();
+
+    return transformed;
 }
 
-std::string DatabaseSource::map_column_name(const std::string& original_name, const std::string& /*table_name*/) {
-    return original_name; // Simplified
+std::string DatabaseSource::map_column_name(const std::string& original_name, const std::string& table_name) {
+    if (config_.column_mappings.contains(table_name)) {
+        const auto& mappings = config_.column_mappings[table_name];
+        if (mappings.contains(original_name)) {
+            return mappings[original_name];
+        }
+    }
+
+    std::string mapped = original_name;
+    std::transform(mapped.begin(), mapped.end(), mapped.begin(),
+        [](char c) { return c == '-' ? '_' : std::tolower(c); });
+
+    return mapped;
 }
 
-nlohmann::json DatabaseSource::convert_database_type(const std::string& /*value*/, const std::string& /*db_type*/) {
-    return nullptr; // Simplified
+nlohmann::json DatabaseSource::convert_database_type(const std::string& value, const std::string& db_type) {
+    if (value.empty() || value == "NULL") {
+        return nullptr;
+    }
+
+    try {
+        if (db_type == "integer" || db_type == "int" || db_type == "bigint") {
+            return std::stoll(value);
+        } else if (db_type == "numeric" || db_type == "decimal" || db_type == "double" || db_type == "float") {
+            return std::stod(value);
+        } else if (db_type == "boolean" || db_type == "bool") {
+            return (value == "t" || value == "true" || value == "1" || value == "yes");
+        } else if (db_type == "json" || db_type == "jsonb") {
+            return nlohmann::json::parse(value);
+        } else if (db_type == "timestamp" || db_type == "date" || db_type == "datetime") {
+            return value;
+        } else {
+            return value;
+        }
+    } catch (const std::exception& e) {
+        logger_->warn("Failed to convert value '{}' to type '{}': {}", value, db_type, e.what());
+        return value;
+    }
 }
 
-bool DatabaseSource::prepare_statement(const DatabaseQuery& /*query*/) {
-    return true; // Simplified
+bool DatabaseSource::prepare_statement(const DatabaseQuery& query) {
+    if (!connection_) {
+        logger_->error("Database connection not established for statement preparation");
+        return false;
+    }
+
+    try {
+        std::string statement_name = "prepared_" + std::to_string(std::hash<std::string>{}(query.sql));
+
+        if (prepared_statements_.find(statement_name) != prepared_statements_.end()) {
+            return true;
+        }
+
+        pqxx::work txn(*connection_);
+        connection_->prepare(statement_name, query.sql);
+        prepared_statements_[statement_name] = query.sql;
+        txn.commit();
+
+        logger_->debug("Prepared statement: {}", statement_name);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to prepare statement: {}", e.what());
+        return false;
+    }
 }
 
-void DatabaseSource::enable_query_caching(const DatabaseQuery& /*query*/) {
-    // Simplified
+void DatabaseSource::enable_query_caching(const DatabaseQuery& query) {
+    std::string query_hash = std::to_string(std::hash<std::string>{}(query.sql));
+    cached_queries_[query_hash] = {
+        {"sql", query.sql},
+        {"enabled", true},
+        {"ttl_seconds", query.cache_ttl_seconds},
+        {"last_cached", std::chrono::system_clock::now().time_since_epoch().count()}
+    };
+    logger_->debug("Enabled caching for query hash: {}", query_hash);
 }
 
-nlohmann::json DatabaseSource::get_cached_query_result(const std::string& /*query_hash*/) {
-    return nullptr; // Simplified
+nlohmann::json DatabaseSource::get_cached_query_result(const std::string& query_hash) {
+    if (query_results_cache_.contains(query_hash)) {
+        const auto& cached = query_results_cache_[query_hash];
+        auto cached_at = cached["cached_at"].get<long long>();
+        auto ttl = cached["ttl_seconds"].get<int>();
+        auto now = std::chrono::system_clock::now().time_since_epoch().count();
+
+        if (now - cached_at < ttl * 1000000000LL) {
+            logger_->debug("Cache hit for query hash: {}", query_hash);
+            return cached["result"];
+        } else {
+            query_results_cache_.erase(query_hash);
+            logger_->debug("Cache expired for query hash: {}", query_hash);
+        }
+    }
+    return nullptr;
 }
 
-void DatabaseSource::set_cached_query_result(const std::string& /*query_hash*/, const nlohmann::json& /*result*/) {
-    // Simplified
+void DatabaseSource::set_cached_query_result(const std::string& query_hash, const nlohmann::json& result) {
+    if (cached_queries_.contains(query_hash)) {
+        query_results_cache_[query_hash] = {
+            {"result", result},
+            {"cached_at", std::chrono::system_clock::now().time_since_epoch().count()},
+            {"ttl_seconds", cached_queries_[query_hash]["ttl_seconds"]}
+        };
+
+        if (query_results_cache_.size() > 1000) {
+            auto oldest = query_results_cache_.begin();
+            query_results_cache_.erase(oldest);
+        }
+
+        logger_->debug("Cached result for query hash: {}", query_hash);
+    }
 }
 
-bool DatabaseSource::handle_connection_error(const std::string& /*error*/) {
-    return false; // Simplified
+bool DatabaseSource::handle_connection_error(const std::string& error) {
+    logger_->error("Database connection error: {}", error);
+
+    if (error.find("timeout") != std::string::npos ||
+        error.find("connection refused") != std::string::npos ||
+        error.find("server closed") != std::string::npos) {
+
+        int max_retries = 3;
+        for (int attempt = 1; attempt <= max_retries; ++attempt) {
+            logger_->info("Attempting to reconnect (attempt {}/{})", attempt, max_retries);
+
+            std::this_thread::sleep_for(std::chrono::seconds(attempt * 2));
+
+            if (test_connection()) {
+                logger_->info("Reconnection successful");
+                return true;
+            }
+        }
+
+        logger_->error("Failed to reconnect after {} attempts", max_retries);
+        return false;
+    }
+
+    return false;
 }
 
-bool DatabaseSource::handle_query_timeout(const DatabaseQuery& /*query*/) {
-    return false; // Simplified
+bool DatabaseSource::handle_query_timeout(const DatabaseQuery& query) {
+    logger_->warn("Query timeout for: {}", query.sql.substr(0, 100));
+
+    if (query.retry_on_timeout && query.max_retries > 0) {
+        logger_->info("Query will be retried {} times", query.max_retries);
+        return true;
+    }
+
+    logger_->error("Query timeout without retry: {}", query.sql.substr(0, 100));
+    return false;
 }
 
-bool DatabaseSource::retry_failed_query(const DatabaseQuery& /*query*/, int /*attempt*/) {
-    return false; // Simplified
+bool DatabaseSource::retry_failed_query(const DatabaseQuery& query, int attempt) {
+    if (attempt > query.max_retries) {
+        logger_->error("Max retries exceeded for query: {}", query.sql.substr(0, 100));
+        return false;
+    }
+
+    int backoff_seconds = std::min(attempt * 2, 30);
+    logger_->info("Retrying query (attempt {}/{}) after {} seconds",
+                 attempt, query.max_retries, backoff_seconds);
+
+    std::this_thread::sleep_for(std::chrono::seconds(backoff_seconds));
+
+    try {
+        pqxx::work txn(*connection_);
+        pqxx::result result = txn.exec(query.sql);
+        txn.commit();
+        logger_->info("Query retry successful on attempt {}", attempt);
+        return true;
+    } catch (const std::exception& e) {
+        logger_->warn("Query retry failed on attempt {}: {}", attempt, e.what());
+        return false;
+    }
 }
 
-void DatabaseSource::record_query_metrics(const DatabaseQuery& /*query*/, const std::chrono::microseconds& /*duration*/, int /*rows_affected*/) {
-    // Simplified
+void DatabaseSource::record_query_metrics(const DatabaseQuery& query, const std::chrono::microseconds& duration, int rows_affected) {
+    total_queries_executed_++;
+    total_rows_ingested_ += rows_affected;
+
+    query_metrics_.push_back({
+        {"sql", query.sql.substr(0, 200)},
+        {"duration_microseconds", duration.count()},
+        {"rows_affected", rows_affected},
+        {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+    });
+
+    if (query_metrics_.size() > 10000) {
+        query_metrics_.erase(query_metrics_.begin(), query_metrics_.begin() + 1000);
+    }
+
+    if (duration.count() > 5000000) {
+        logger_->warn("Slow query detected ({} ms): {}",
+                     duration.count() / 1000, query.sql.substr(0, 100));
+    }
 }
 
 nlohmann::json DatabaseSource::get_query_performance_stats() {

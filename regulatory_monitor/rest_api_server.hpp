@@ -93,6 +93,9 @@ private:
     std::string base64_encode(const std::string& input);
     std::string base64_decode(const std::string& input);
     std::string generate_hmac_signature(const std::string& message);
+    std::string compute_sha256_hash(const std::string& input);
+    std::string compute_password_hash(const std::string& password);
+    bool authenticate_user(const std::string& username, const std::string& password);
 
     // Member variables
     std::shared_ptr<ConnectionPool> db_pool_;

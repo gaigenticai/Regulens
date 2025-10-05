@@ -1768,3 +1768,174 @@ CREATE INDEX IF NOT EXISTS idx_k8s_operator_events_resource ON kubernetes_operat
 CREATE INDEX IF NOT EXISTS idx_k8s_operator_events_time ON kubernetes_operator_events(event_time);
 CREATE INDEX IF NOT EXISTS idx_health_results_check_time ON health_check_results(check_name, check_time);
 CREATE INDEX IF NOT EXISTS idx_alert_history_status_time ON alert_history(status, starts_at);
+
+-- =============================================================================
+-- AUTHENTICATION AND AUTHORIZATION TABLES
+-- =============================================================================
+
+-- User authentication table for secure login
+CREATE TABLE IF NOT EXISTS user_authentication (
+    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    password_algorithm VARCHAR(50) NOT NULL DEFAULT 'bcrypt',
+    email VARCHAR(255) UNIQUE NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+    account_locked_until TIMESTAMP WITH TIME ZONE,
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    last_login_ip VARCHAR(45),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- API keys table for secure API access
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES user_authentication(user_id) ON DELETE CASCADE,
+    key_hash VARCHAR(64) NOT NULL UNIQUE,
+    key_name VARCHAR(255) NOT NULL,
+    key_prefix VARCHAR(20) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    rate_limit_per_minute INTEGER DEFAULT 1000,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- JWT refresh tokens table
+CREATE TABLE IF NOT EXISTS jwt_refresh_tokens (
+    token_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES user_authentication(user_id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    is_revoked BOOLEAN NOT NULL DEFAULT false,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    revoked_reason VARCHAR(255),
+    device_info VARCHAR(500),
+    ip_address VARCHAR(45),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Login history for audit and security monitoring
+CREATE TABLE IF NOT EXISTS login_history (
+    login_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES user_authentication(user_id) ON DELETE SET NULL,
+    username VARCHAR(255) NOT NULL,
+    login_successful BOOLEAN NOT NULL,
+    failure_reason VARCHAR(255),
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    login_timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- =============================================================================
+-- CACHING AND PERFORMANCE TABLES
+-- =============================================================================
+
+-- Query cache for database query results
+CREATE TABLE IF NOT EXISTS query_cache (
+    cache_key VARCHAR(255) PRIMARY KEY,
+    query_sql TEXT NOT NULL,
+    result_data JSONB NOT NULL,
+    result_count INTEGER,
+    cached_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    hit_count INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at TIMESTAMP WITH TIME ZONE
+);
+
+-- CDC (Change Data Capture) tracking
+CREATE TABLE IF NOT EXISTS cdc_tracking (
+    tracking_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    source_database VARCHAR(255) NOT NULL,
+    source_table VARCHAR(255) NOT NULL,
+    last_lsn VARCHAR(100),
+    last_sync_timestamp TIMESTAMP WITH TIME ZONE,
+    replication_slot_name VARCHAR(255),
+    cdc_status VARCHAR(50) NOT NULL DEFAULT 'active',
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(source_database, source_table)
+);
+
+-- Performance baselines for anomaly detection
+CREATE TABLE IF NOT EXISTS performance_baselines (
+    baseline_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    metric_name VARCHAR(255) NOT NULL,
+    entity_id VARCHAR(255),
+    entity_type VARCHAR(100),
+    baseline_mean DECIMAL(15,4),
+    baseline_stddev DECIMAL(15,4),
+    baseline_p95 DECIMAL(15,4),
+    baseline_p99 DECIMAL(15,4),
+    sample_count INTEGER,
+    baseline_start_date DATE NOT NULL,
+    baseline_end_date DATE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(metric_name, entity_id, entity_type, baseline_start_date)
+);
+
+-- Activity feed persistence
+CREATE TABLE IF NOT EXISTS activity_feed_persistence (
+    activity_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_type VARCHAR(100),
+    agent_name VARCHAR(255),
+    entity_id VARCHAR(255),
+    entity_type VARCHAR(100),
+    event_type VARCHAR(100) NOT NULL,
+    event_category VARCHAR(50),
+    event_severity VARCHAR(20),
+    event_description TEXT,
+    event_metadata JSONB,
+    occurred_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- =============================================================================
+-- INDEXES FOR NEW TABLES
+-- =============================================================================
+
+-- Authentication indexes
+CREATE INDEX IF NOT EXISTS idx_user_auth_username ON user_authentication(username);
+CREATE INDEX IF NOT EXISTS idx_user_auth_email ON user_authentication(email);
+CREATE INDEX IF NOT EXISTS idx_user_auth_active ON user_authentication(is_active);
+
+-- API keys indexes
+CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active);
+CREATE INDEX IF NOT EXISTS idx_api_keys_expires ON api_keys(expires_at);
+
+-- JWT tokens indexes
+CREATE INDEX IF NOT EXISTS idx_jwt_tokens_user_id ON jwt_refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_jwt_tokens_hash ON jwt_refresh_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_jwt_tokens_expires ON jwt_refresh_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_jwt_tokens_revoked ON jwt_refresh_tokens(is_revoked);
+
+-- Login history indexes
+CREATE INDEX IF NOT EXISTS idx_login_history_user_id ON login_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_login_history_timestamp ON login_history(login_timestamp);
+CREATE INDEX IF NOT EXISTS idx_login_history_username ON login_history(username);
+
+-- Query cache indexes
+CREATE INDEX IF NOT EXISTS idx_query_cache_expires ON query_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_query_cache_accessed ON query_cache(last_accessed_at);
+
+-- CDC tracking indexes
+CREATE INDEX IF NOT EXISTS idx_cdc_source ON cdc_tracking(source_database, source_table);
+CREATE INDEX IF NOT EXISTS idx_cdc_status ON cdc_tracking(cdc_status);
+
+-- Performance baselines indexes
+CREATE INDEX IF NOT EXISTS idx_perf_baseline_metric ON performance_baselines(metric_name);
+CREATE INDEX IF NOT EXISTS idx_perf_baseline_entity ON performance_baselines(entity_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_perf_baseline_dates ON performance_baselines(baseline_start_date, baseline_end_date);
+
+-- Activity feed indexes
+CREATE INDEX IF NOT EXISTS idx_activity_feed_agent ON activity_feed_persistence(agent_type, agent_name);
+CREATE INDEX IF NOT EXISTS idx_activity_feed_entity ON activity_feed_persistence(entity_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_activity_feed_occurred ON activity_feed_persistence(occurred_at);
+CREATE INDEX IF NOT EXISTS idx_activity_feed_event_type ON activity_feed_persistence(event_type);

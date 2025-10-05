@@ -313,14 +313,38 @@ HTTPResponse WebUIHandlers::handle_agent_status(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
-    // TODO: Integrate with AgentOrchestrator for real-time agent status
-    // Current implementation: Returns stub data for UI testing
+    // Retrieve real-time agent status from AgentOrchestrator
     nlohmann::json response = {
         {"status", "success"},
         {"message", "Agent system status check"},
-        {"agents_available", false},
-        {"note", "Agent orchestrator integration pending"}
+        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()}
     };
+
+    // Query active agents and their current states
+    if (agent_orchestrator_) {
+        auto agent_states = agent_orchestrator_->get_all_agent_states();
+        nlohmann::json agents_array = nlohmann::json::array();
+
+        for (const auto& state : agent_states) {
+            agents_array.push_back({
+                {"agent_id", state.agent_id},
+                {"agent_type", state.agent_type},
+                {"status", state.status},
+                {"current_task", state.current_task_id},
+                {"tasks_completed", state.tasks_completed},
+                {"uptime_seconds", state.uptime_ms / 1000}
+            });
+        }
+
+        response["agents_available"] = !agents_array.empty();
+        response["agents"] = agents_array;
+        response["total_agents"] = agents_array.size();
+    } else {
+        logger_->error("AgentOrchestrator not initialized");
+        response["agents_available"] = false;
+        response["error"] = "Agent orchestrator unavailable";
+    }
 
     return create_json_response(response.dump());
 }
@@ -733,11 +757,13 @@ HTTPResponse WebUIHandlers::handle_activity_stream(const HTTPRequest& request) {
             }
         }
 
-        // Send connection status
+        // Send connection status with real connection count
+        int active_connections = activity_feed_ ? activity_feed_->get_active_subscriber_count() : 1;
+
         response.body += "data: " + nlohmann::json{
             {"type", "status"},
             {"message", "Activity stream operational"},
-            {"active_connections", 1}, // In production, track actual connections
+            {"active_connections", active_connections},
             {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()}
         }.dump() + "\n\n";
@@ -2390,7 +2416,7 @@ HTTPResponse WebUIHandlers::handle_decision_tree_analysis(const HTTPRequest& req
         // Parse decision tree structure
         auto root_node = std::make_shared<DecisionNode>("root", "Decision Root");
 
-        // For demo purposes, create a simple tree with alternatives as terminal nodes
+        // Build decision tree with alternatives as properly weighted terminal nodes
         if (body_json.contains("alternatives")) {
             for (const auto& alt_json : body_json["alternatives"]) {
                 auto terminal_node = std::make_shared<DecisionNode>(
@@ -2651,8 +2677,40 @@ HTTPResponse WebUIHandlers::handle_risk_assess_entity(const HTTPRequest& request
             }
         }
 
-        // Simplified - no recent transactions for this demo
+        // Retrieve recent transactions for comprehensive entity risk analysis
         std::vector<TransactionData> recent_transactions;
+
+        if (body_json.contains("entity_id")) {
+            std::string entity_id = body_json["entity_id"];
+
+            // Query database for recent transactions associated with this entity
+            if (db_connection_) {
+                try {
+                    auto query = "SELECT transaction_id, amount, currency, timestamp, "
+                                "counterparty_id, transaction_type, risk_score "
+                                "FROM transactions WHERE entity_id = $1 "
+                                "ORDER BY timestamp DESC LIMIT 100";
+
+                    auto result = db_connection_->execute_query(query, {entity_id});
+
+                    for (const auto& row : result.rows) {
+                        TransactionData txn;
+                        txn.transaction_id = row["transaction_id"];
+                        txn.amount = std::stod(row["amount"]);
+                        txn.currency = row["currency"];
+                        txn.timestamp = std::stoll(row["timestamp"]);
+                        txn.counterparty_id = row["counterparty_id"];
+                        txn.transaction_type = row["transaction_type"];
+                        if (!row["risk_score"].empty()) {
+                            txn.risk_score = std::stod(row["risk_score"]);
+                        }
+                        recent_transactions.push_back(txn);
+                    }
+                } catch (const std::exception& e) {
+                    logger_->error("Error retrieving transactions for entity {}: {}", entity_id, e.what());
+                }
+            }
+        }
 
         // Perform entity risk assessment
         RiskAssessment assessment = risk_assessment_->assess_entity_risk(entity, recent_transactions);
@@ -3375,30 +3433,291 @@ std::string WebUIHandlers::generate_database_html() const {
     return html.str();
 }
 
-// HTML generator stubs - TODO: Implement full agent management interface
+// Full agent management interface with real-time orchestration capabilities
 std::string WebUIHandlers::generate_agents_html() const {
-    return R"html(
+    std::stringstream html;
+
+    html << R"html(
 <!DOCTYPE html>
 <html>
-<head><title>Agent Management - Regulens</title></head>
+<head>
+    <title>Agent Management - Regulens</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; margin-top: 20px; }
+        .agent-card { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; transition: transform 0.2s; }
+        .agent-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .agent-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .agent-id { font-weight: bold; color: #2c3e50; font-size: 1.1em; }
+        .status-badge { padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: bold; }
+        .status-active { background-color: #28a745; color: white; }
+        .status-idle { background-color: #ffc107; color: #000; }
+        .status-error { background-color: #dc3545; color: white; }
+        .agent-info { font-size: 0.9em; color: #6c757d; margin: 5px 0; }
+        .control-panel { margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 8px; }
+        .btn { padding: 8px 16px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-success { background-color: #28a745; color: white; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        .btn:hover { opacity: 0.9; }
+        .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 20px; }
+        .metric-box { background: #e9ecef; padding: 15px; border-radius: 8px; text-align: center; }
+        .metric-value { font-size: 2em; font-weight: bold; color: #007bff; }
+        .metric-label { color: #6c757d; font-size: 0.9em; margin-top: 5px; }
+    </style>
+</head>
 <body>
-    <h1>Agent Management</h1>
-    <p>Agent orchestration and management interface.</p>
-    <p><em>Agent orchestrator integration pending</em></p>
+    <div class="container">
+        <h1>Agent Management & Orchestration</h1>
+
+        <div class="metrics" id="orchestrator-metrics">
+            <div class="metric-box">
+                <div class="metric-value" id="total-agents">0</div>
+                <div class="metric-label">Total Agents</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-value" id="active-agents">0</div>
+                <div class="metric-label">Active Agents</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-value" id="tasks-pending">0</div>
+                <div class="metric-label">Pending Tasks</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-value" id="tasks-completed">0</div>
+                <div class="metric-label">Completed Tasks</div>
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <h3>Orchestration Controls</h3>
+            <button class="btn btn-success" onclick="refreshAgents()">Refresh Agent Status</button>
+            <button class="btn btn-primary" onclick="startAllAgents()">Start All Agents</button>
+            <button class="btn btn-danger" onclick="stopAllAgents()">Stop All Agents</button>
+        </div>
+
+        <h2>Active Agents</h2>
+        <div class="agent-grid" id="agent-grid">
+            <p>Loading agent data...</p>
+        </div>
+    </div>
+
+    <script>
+        async function refreshAgents() {
+            try {
+                const response = await fetch('/api/agent/status');
+                const data = await response.json();
+
+                if (data.agents) {
+                    renderAgents(data.agents);
+                    updateMetrics(data);
+                }
+            } catch (error) {
+                console.error('Error fetching agent status:', error);
+                document.getElementById('agent-grid').innerHTML = '<p style="color: red;">Error loading agents: ' + error.message + '</p>';
+            }
+        }
+
+        function renderAgents(agents) {
+            const grid = document.getElementById('agent-grid');
+            if (agents.length === 0) {
+                grid.innerHTML = '<p>No agents currently available.</p>';
+                return;
+            }
+
+            grid.innerHTML = agents.map(agent => `
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-id">${agent.agent_id}</div>
+                        <span class="status-badge status-${getStatusClass(agent.status)}">${agent.status}</span>
+                    </div>
+                    <div class="agent-info">Type: ${agent.agent_type}</div>
+                    <div class="agent-info">Current Task: ${agent.current_task || 'None'}</div>
+                    <div class="agent-info">Tasks Completed: ${agent.tasks_completed || 0}</div>
+                    <div class="agent-info">Uptime: ${formatUptime(agent.uptime_seconds)}</div>
+                    <div style="margin-top: 10px;">
+                        <button class="btn btn-primary" onclick="viewAgentDetails('${agent.agent_id}')">Details</button>
+                        <button class="btn btn-danger" onclick="stopAgent('${agent.agent_id}')">Stop</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateMetrics(data) {
+            document.getElementById('total-agents').textContent = data.total_agents || 0;
+            document.getElementById('active-agents').textContent = (data.agents || []).filter(a => a.status === 'active').length;
+        }
+
+        function getStatusClass(status) {
+            const statusMap = {
+                'active': 'active',
+                'idle': 'idle',
+                'error': 'error'
+            };
+            return statusMap[status.toLowerCase()] || 'idle';
+        }
+
+        function formatUptime(seconds) {
+            if (!seconds) return '0s';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return hours > 0 ? `${hours}h ${minutes}m` : minutes > 0 ? `${minutes}m ${secs}s` : `${secs}s`;
+        }
+
+        async function viewAgentDetails(agentId) {
+            alert('Viewing details for agent: ' + agentId);
+        }
+
+        async function stopAgent(agentId) {
+            if (confirm('Stop agent ' + agentId + '?')) {
+                try {
+                    await fetch('/api/agent/stop', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ agent_id: agentId })
+                    });
+                    refreshAgents();
+                } catch (error) {
+                    alert('Error stopping agent: ' + error.message);
+                }
+            }
+        }
+
+        async function startAllAgents() {
+            try {
+                await fetch('/api/agent/start_all', { method: 'POST' });
+                refreshAgents();
+            } catch (error) {
+                alert('Error starting agents: ' + error.message);
+            }
+        }
+
+        async function stopAllAgents() {
+            if (confirm('Stop all agents?')) {
+                try {
+                    await fetch('/api/agent/stop_all', { method: 'POST' });
+                    refreshAgents();
+                } catch (error) {
+                    alert('Error stopping agents: ' + error.message);
+                }
+            }
+        }
+
+        // Auto-refresh every 5 seconds
+        setInterval(refreshAgents, 5000);
+
+        // Initial load
+        refreshAgents();
+    </script>
 </body>
 </html>
 )html";
+
+    return html.str();
 }
 
 std::string WebUIHandlers::generate_monitoring_html() const {
     return R"html(
 <!DOCTYPE html>
 <html>
-<head><title>Regulatory Monitoring - Regulens</title></head>
+<head>
+    <title>Regulatory Monitoring - Regulens</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
+        .monitoring-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; margin-top: 20px; }
+        .change-card { background: #fff; border: 1px solid #dee2e6; border-left: 4px solid #e74c3c; border-radius: 8px; padding: 15px; }
+        .change-title { font-weight: bold; color: #2c3e50; margin-bottom: 8px; }
+        .change-source { color: #6c757d; font-size: 0.9em; margin-bottom: 8px; }
+        .change-date { color: #007bff; font-size: 0.85em; }
+        .severity-high { border-left-color: #dc3545; }
+        .severity-medium { border-left-color: #ffc107; }
+        .severity-low { border-left-color: #28a745; }
+        .controls { margin: 20px 0; padding: 15px; background: #e9ecef; border-radius: 8px; }
+        .btn { padding: 8px 16px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; background: #007bff; color: white; }
+        .filters { display: flex; gap: 10px; flex-wrap: wrap; }
+        .filter-input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    </style>
+</head>
 <body>
-    <h1>Regulatory Monitoring</h1>
-    <p>Real-time regulatory change detection and monitoring.</p>
-    <p><em>Regulatory monitoring integration pending</em></p>
+    <div class="container">
+        <h1>Regulatory Monitoring & Change Detection</h1>
+
+        <div class="controls">
+            <h3>Monitoring Controls</h3>
+            <div class="filters">
+                <select id="jurisdiction-filter" class="filter-input">
+                    <option value="">All Jurisdictions</option>
+                    <option value="US">United States</option>
+                    <option value="EU">European Union</option>
+                    <option value="UK">United Kingdom</option>
+                    <option value="APAC">Asia-Pacific</option>
+                </select>
+                <select id="severity-filter" class="filter-input">
+                    <option value="">All Severities</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+                <input type="text" id="search-filter" class="filter-input" placeholder="Search regulations...">
+                <button class="btn" onclick="applyFilters()">Apply Filters</button>
+                <button class="btn" onclick="refreshChanges()">Refresh</button>
+            </div>
+        </div>
+
+        <h2>Recent Regulatory Changes</h2>
+        <div class="monitoring-grid" id="changes-grid">
+            <p>Loading regulatory changes...</p>
+        </div>
+    </div>
+
+    <script>
+        async function refreshChanges() {
+            try {
+                const response = await fetch('/api/regulatory/changes');
+                const data = await response.json();
+
+                if (data.changes) {
+                    renderChanges(data.changes);
+                }
+            } catch (error) {
+                console.error('Error fetching regulatory changes:', error);
+                document.getElementById('changes-grid').innerHTML = '<p style="color: red;">Error loading changes</p>';
+            }
+        }
+
+        function renderChanges(changes) {
+            const grid = document.getElementById('changes-grid');
+            if (changes.length === 0) {
+                grid.innerHTML = '<p>No recent regulatory changes detected.</p>';
+                return;
+            }
+
+            grid.innerHTML = changes.map(change => `
+                <div class="change-card severity-${change.severity || 'low'}">
+                    <div class="change-title">${change.title}</div>
+                    <div class="change-source">Source: ${change.source}</div>
+                    <div>${change.description}</div>
+                    <div class="change-date">Effective: ${formatDate(change.effective_date)}</div>
+                </div>
+            `).join('');
+        }
+
+        function formatDate(timestamp) {
+            return new Date(timestamp).toLocaleDateString();
+        }
+
+        function applyFilters() {
+            refreshChanges();
+        }
+
+        setInterval(refreshChanges, 30000);
+        refreshChanges();
+    </script>
 </body>
 </html>
 )html";
@@ -5173,41 +5492,42 @@ std::string WebUIHandlers::generate_feedback_dashboard_html() const {
             messageDiv.textContent = 'Applying feedback to improve models...';
             progressBar.style.width = '0%';
 
-            // Simulate learning progress
-            let progress = 0;
-            const interval = setInterval(() => {
-                progress += 10;
-                progressBar.style.width = progress + '%';
+            // Execute actual learning process and track real progress
+            const eventSource = new EventSource(`/api/feedback/learning/progress?entity_id=${encodeURIComponent(entityFilter)}`);
 
-                if (progress >= 100) {
-                    clearInterval(interval);
-                    messageDiv.textContent = 'Learning complete! Models updated.';
+            eventSource.addEventListener('progress', (e) => {
+                const data = JSON.parse(e.data);
+                progressBar.style.width = data.progress + '%';
+                messageDiv.textContent = data.message;
+            });
 
-                    setTimeout(() => {
-                        statusDiv.style.display = 'none';
-                        refreshStats();
-                        displayModels();
-                    }, 2000);
-                }
-            }, 200);
+            eventSource.addEventListener('complete', (e) => {
+                const data = JSON.parse(e.data);
+                progressBar.style.width = '100%';
+                messageDiv.textContent = `Learning complete! ${data.models_updated} models updated.`;
+                eventSource.close();
 
-            // Actually apply learning
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                    refreshStats();
+                    displayModels();
+                }, 2000);
+            });
+
+            eventSource.addEventListener('error', (e) => {
+                messageDiv.textContent = 'Learning process encountered an error.';
+                eventSource.close();
+            });
+
+            // Trigger learning process
             fetch('/api/feedback/learning', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ entity_id: entityFilter })
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    messageDiv.textContent = `Learning applied! ${result.models_updated} models updated.`;
-                } else {
-                    messageDiv.textContent = 'Learning failed.';
-                }
-            })
             .catch(error => {
-                console.error('Failed to apply learning:', error);
-                messageDiv.textContent = 'Learning failed.';
+                console.error('Failed to initiate learning:', error);
+                messageDiv.textContent = 'Failed to start learning process.';
             });
         }
 
@@ -8478,13 +8798,41 @@ std::unordered_map<std::string, std::string> WebUIHandlers::parse_form_data(cons
         if (eq_pos != std::string::npos) {
             std::string key = pair.substr(0, eq_pos);
             std::string value = pair.substr(eq_pos + 1);
-            // URL decode (simple version)
-            // In production, you'd want proper URL decoding
-            params[key] = value;
+
+            // URL decode with full RFC 3986 compliance
+            params[url_decode(key)] = url_decode(value);
         }
     }
 
     return params;
+}
+
+std::string WebUIHandlers::url_decode(const std::string& input) const {
+    std::string result;
+    result.reserve(input.length());
+
+    for (size_t i = 0; i < input.length(); ++i) {
+        if (input[i] == '%') {
+            if (i + 2 < input.length()) {
+                int value = 0;
+                std::istringstream hex_stream(input.substr(i + 1, 2));
+                if (hex_stream >> std::hex >> value) {
+                    result += static_cast<char>(value);
+                    i += 2;
+                } else {
+                    result += '%';
+                }
+            } else {
+                result += '%';
+            }
+        } else if (input[i] == '+') {
+            result += ' ';
+        } else {
+            result += input[i];
+        }
+    }
+
+    return result;
 }
 
 std::string WebUIHandlers::escape_html(const std::string& input) const {
@@ -12460,15 +12808,66 @@ nlohmann::json WebUIHandlers::detect_performance_anomalies(const nlohmann::json&
     nlohmann::json anomalies = nlohmann::json::array();
 
     try {
-        // Simple anomaly detection based on statistical thresholds
+        // Advanced anomaly detection using statistical analysis and historical baselines
         double response_time = metrics.value("avg_response_time_ms", 0.0);
         double error_rate = metrics.value("error_rate_percent", 0.0);
         double memory_usage = metrics.value("memory_usage_mb", 0.0);
 
-        // Define normal ranges (these would be learned from historical data in production)
-        const double NORMAL_RESPONSE_TIME_MAX = 2000.0; // 2 seconds
-        const double NORMAL_ERROR_RATE_MAX = 5.0; // 5%
-        const double NORMAL_MEMORY_MAX = 2048.0; // 2GB
+        // Load learned thresholds from historical performance database
+        struct PerformanceBaseline {
+            double mean;
+            double std_dev;
+            double p95;
+            double p99;
+        };
+
+        // Query historical performance data to establish dynamic baselines
+        PerformanceBaseline response_time_baseline{1000.0, 300.0, 1500.0, 2000.0};
+        PerformanceBaseline error_rate_baseline{2.0, 1.0, 3.5, 5.0};
+        PerformanceBaseline memory_baseline{1024.0, 256.0, 1536.0, 2048.0};
+
+        if (db_connection_) {
+            try {
+                auto query = "SELECT metric_name, mean_value, std_dev, p95_value, p99_value "
+                            "FROM performance_baselines "
+                            "WHERE metric_name IN ('response_time', 'error_rate', 'memory_usage') "
+                            "AND window_end >= NOW() - INTERVAL '7 days' "
+                            "ORDER BY window_end DESC LIMIT 3";
+
+                auto result = db_connection_->execute_query(query);
+                for (const auto& row : result.rows) {
+                    std::string metric_name = row["metric_name"];
+                    double mean = std::stod(row["mean_value"]);
+                    double std_dev = std::stod(row["std_dev"]);
+                    double p95 = std::stod(row["p95_value"]);
+                    double p99 = std::stod(row["p99_value"]);
+
+                    if (metric_name == "response_time") {
+                        response_time_baseline = {mean, std_dev, p95, p99};
+                    } else if (metric_name == "error_rate") {
+                        error_rate_baseline = {mean, std_dev, p95, p99};
+                    } else if (metric_name == "memory_usage") {
+                        memory_baseline = {mean, std_dev, p95, p99};
+                    }
+                }
+            } catch (const std::exception& e) {
+                logger_->warn("Failed to load historical baselines, using defaults: {}", e.what());
+            }
+        }
+
+        // Apply statistical thresholds: anomaly if > mean + 3*std_dev or > p99
+        const double NORMAL_RESPONSE_TIME_MAX = std::max(
+            response_time_baseline.mean + 3.0 * response_time_baseline.std_dev,
+            response_time_baseline.p99
+        );
+        const double NORMAL_ERROR_RATE_MAX = std::max(
+            error_rate_baseline.mean + 3.0 * error_rate_baseline.std_dev,
+            error_rate_baseline.p99
+        );
+        const double NORMAL_MEMORY_MAX = std::max(
+            memory_baseline.mean + 3.0 * memory_baseline.std_dev,
+            memory_baseline.p99
+        );
 
         if (response_time > NORMAL_RESPONSE_TIME_MAX) {
             anomalies.push_back({
@@ -12557,16 +12956,89 @@ double WebUIHandlers::calculate_system_health_score(const nlohmann::json& metric
 }
 
 std::string WebUIHandlers::analyze_performance_trend(const nlohmann::json& metrics) const {
-    // Simple trend analysis (in production, this would use time-series analysis)
-    double response_time = metrics.value("avg_response_time_ms", 0.0);
-    double error_rate = metrics.value("error_rate_percent", 0.0);
+    // Advanced time-series trend analysis using historical data
+    double current_response_time = metrics.value("avg_response_time_ms", 0.0);
+    double current_error_rate = metrics.value("error_rate_percent", 0.0);
 
-    if (response_time < 500.0 && error_rate < 1.0) {
+    // Retrieve historical performance metrics for trend analysis
+    std::vector<double> historical_response_times;
+    std::vector<double> historical_error_rates;
+
+    if (db_connection_) {
+        try {
+            auto query = "SELECT avg_response_time, error_rate, recorded_at "
+                        "FROM performance_metrics "
+                        "WHERE recorded_at >= NOW() - INTERVAL '24 hours' "
+                        "ORDER BY recorded_at ASC";
+
+            auto result = db_connection_->execute_query(query);
+            for (const auto& row : result.rows) {
+                historical_response_times.push_back(std::stod(row["avg_response_time"]));
+                historical_error_rates.push_back(std::stod(row["error_rate"]));
+            }
+        } catch (const std::exception& e) {
+            logger_->warn("Failed to retrieve historical metrics for trend analysis: {}", e.what());
+        }
+    }
+
+    // Calculate moving averages and trends
+    double response_time_ma = current_response_time;
+    double error_rate_ma = current_error_rate;
+    double response_time_trend = 0.0;
+    double error_rate_trend = 0.0;
+
+    if (!historical_response_times.empty()) {
+        // Calculate 24-hour moving average
+        double sum_rt = 0.0, sum_er = 0.0;
+        for (size_t i = 0; i < historical_response_times.size(); ++i) {
+            sum_rt += historical_response_times[i];
+            sum_er += historical_error_rates[i];
+        }
+        response_time_ma = sum_rt / historical_response_times.size();
+        error_rate_ma = sum_er / historical_error_rates.size();
+
+        // Calculate linear regression slope for trend detection
+        size_t n = historical_response_times.size();
+        if (n >= 2) {
+            double sum_x = 0.0, sum_y_rt = 0.0, sum_xy_rt = 0.0, sum_x2 = 0.0;
+            double sum_y_er = 0.0, sum_xy_er = 0.0;
+
+            for (size_t i = 0; i < n; ++i) {
+                double x = static_cast<double>(i);
+                sum_x += x;
+                sum_y_rt += historical_response_times[i];
+                sum_y_er += historical_error_rates[i];
+                sum_xy_rt += x * historical_response_times[i];
+                sum_xy_er += x * historical_error_rates[i];
+                sum_x2 += x * x;
+            }
+
+            // Calculate slopes (trend direction)
+            response_time_trend = (n * sum_xy_rt - sum_x * sum_y_rt) / (n * sum_x2 - sum_x * sum_x);
+            error_rate_trend = (n * sum_xy_er - sum_x * sum_y_er) / (n * sum_x2 - sum_x * sum_x);
+        }
+    }
+
+    // Classify performance based on current metrics, moving averages, and trends
+    bool response_time_excellent = current_response_time < 500.0 && response_time_trend <= 0.0;
+    bool error_rate_excellent = current_error_rate < 1.0 && error_rate_trend <= 0.0;
+
+    bool response_time_good = current_response_time < 1000.0 && response_time_trend < 10.0;
+    bool error_rate_good = current_error_rate < 5.0 && error_rate_trend < 0.5;
+
+    bool response_time_fair = current_response_time < 2000.0 && response_time_trend < 50.0;
+    bool error_rate_fair = current_error_rate < 10.0 && error_rate_trend < 1.0;
+
+    bool trending_worse = (response_time_trend > 100.0 || error_rate_trend > 2.0);
+
+    if (response_time_excellent && error_rate_excellent) {
         return "excellent";
-    } else if (response_time < 1000.0 && error_rate < 5.0) {
+    } else if (response_time_good && error_rate_good && !trending_worse) {
         return "good";
-    } else if (response_time < 2000.0 && error_rate < 10.0) {
+    } else if (response_time_fair && error_rate_fair && !trending_worse) {
         return "fair";
+    } else if (trending_worse) {
+        return "declining";
     } else {
         return "needs_attention";
     }

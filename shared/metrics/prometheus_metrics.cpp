@@ -215,10 +215,11 @@ void LLMMetricsCollector::record_api_call(const std::string& provider, const std
         openai_calls_++;
         if (success) openai_successful_calls_++;
 
-        // Update running averages (simplified)
+        // Update response time histogram
         if (response_time_ms > 0) {
-            openai_avg_response_time_ = (openai_avg_response_time_ + response_time_ms) / 2;
+            openai_response_time_histogram_.observe(static_cast<double>(response_time_ms));
         }
+
         openai_total_tokens_ += (input_tokens + output_tokens);
         openai_total_cost_ += cost_usd;
 
@@ -226,10 +227,11 @@ void LLMMetricsCollector::record_api_call(const std::string& provider, const std
         anthropic_calls_++;
         if (success) anthropic_successful_calls_++;
 
-        // Update running averages (simplified)
+        // Update response time histogram
         if (response_time_ms > 0) {
-            anthropic_avg_response_time_ = (anthropic_avg_response_time_ + response_time_ms) / 2;
+            anthropic_response_time_histogram_.observe(static_cast<double>(response_time_ms));
         }
+
         anthropic_total_tokens_ += (input_tokens + output_tokens);
         anthropic_total_cost_ += cost_usd;
     }
@@ -287,12 +289,35 @@ std::vector<MetricDefinition> LLMMetricsCollector::collect_metrics() {
         std::to_string(openai_rate_limits_)
     );
 
+    // OpenAI response time histogram
+    for (size_t i = 0; i < openai_response_time_histogram_.buckets.size(); ++i) {
+        const auto& bucket = openai_response_time_histogram_.buckets[i];
+        std::string bucket_label = (bucket.upper_bound == std::numeric_limits<double>::infinity()) ?
+            "+Inf" : std::to_string(bucket.upper_bound);
+
+        metrics.emplace_back(
+            "regulens_llm_openai_response_time_ms_bucket",
+            "OpenAI API response time histogram in milliseconds",
+            MetricType::COUNTER,
+            MetricLabels{{"provider", "openai"}, {"le", bucket_label}},
+            std::to_string(bucket.count.load())
+        );
+    }
+
     metrics.emplace_back(
-        "regulens_llm_openai_avg_response_time_ms",
-        "Average OpenAI API response time in milliseconds",
-        MetricType::GAUGE,
+        "regulens_llm_openai_response_time_ms_count",
+        "Total number of OpenAI API response time observations",
+        MetricType::COUNTER,
         MetricLabels{{"provider", "openai"}},
-        std::to_string(openai_avg_response_time_)
+        std::to_string(openai_response_time_histogram_.count.load())
+    );
+
+    metrics.emplace_back(
+        "regulens_llm_openai_response_time_ms_sum",
+        "Sum of OpenAI API response times in milliseconds",
+        MetricType::COUNTER,
+        MetricLabels{{"provider", "openai"}},
+        std::to_string(openai_response_time_histogram_.sum.load())
     );
 
     metrics.emplace_back(
@@ -336,12 +361,35 @@ std::vector<MetricDefinition> LLMMetricsCollector::collect_metrics() {
         std::to_string(anthropic_rate_limits_)
     );
 
+    // Anthropic response time histogram
+    for (size_t i = 0; i < anthropic_response_time_histogram_.buckets.size(); ++i) {
+        const auto& bucket = anthropic_response_time_histogram_.buckets[i];
+        std::string bucket_label = (bucket.upper_bound == std::numeric_limits<double>::infinity()) ?
+            "+Inf" : std::to_string(bucket.upper_bound);
+
+        metrics.emplace_back(
+            "regulens_llm_anthropic_response_time_ms_bucket",
+            "Anthropic API response time histogram in milliseconds",
+            MetricType::COUNTER,
+            MetricLabels{{"provider", "anthropic"}, {"le", bucket_label}},
+            std::to_string(bucket.count.load())
+        );
+    }
+
     metrics.emplace_back(
-        "regulens_llm_anthropic_avg_response_time_ms",
-        "Average Anthropic API response time in milliseconds",
-        MetricType::GAUGE,
+        "regulens_llm_anthropic_response_time_ms_count",
+        "Total number of Anthropic API response time observations",
+        MetricType::COUNTER,
         MetricLabels{{"provider", "anthropic"}},
-        std::to_string(anthropic_avg_response_time_)
+        std::to_string(anthropic_response_time_histogram_.count.load())
+    );
+
+    metrics.emplace_back(
+        "regulens_llm_anthropic_response_time_ms_sum",
+        "Sum of Anthropic API response times in milliseconds",
+        MetricType::COUNTER,
+        MetricLabels{{"provider", "anthropic"}},
+        std::to_string(anthropic_response_time_histogram_.sum.load())
     );
 
     metrics.emplace_back(
@@ -378,9 +426,14 @@ void ComplianceMetricsCollector::record_decision(const std::string& agent_type, 
     else if (decision_type == "deny") deny_decisions_++;
     else if (decision_type == "escalate") escalate_decisions_++;
 
-    // Update average processing time (simplified running average)
+    // Update average processing time using exponential moving average
     if (processing_time_ms > 0) {
-        avg_decision_time_ = (avg_decision_time_ + processing_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (avg_decision_time_ == 0.0) {
+            avg_decision_time_ = processing_time_ms;
+        } else {
+            avg_decision_time_ = alpha * processing_time_ms + (1.0 - alpha) * avg_decision_time_;
+        }
     }
 }
 
@@ -392,9 +445,14 @@ void ComplianceMetricsCollector::record_regulatory_ingestion(const std::string& 
     else if (source == "FCA") fca_documents_processed_ += documents_processed;
     else if (source == "ECB") ecb_documents_processed_ += documents_processed;
 
-    // Update average processing time
+    // Update average processing time using exponential moving average
     if (processing_time_ms > 0) {
-        avg_regulatory_processing_time_ = (avg_regulatory_processing_time_ + processing_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (avg_regulatory_processing_time_ == 0.0) {
+            avg_regulatory_processing_time_ = processing_time_ms;
+        } else {
+            avg_regulatory_processing_time_ = alpha * processing_time_ms + (1.0 - alpha) * avg_regulatory_processing_time_;
+        }
     }
 }
 
@@ -405,9 +463,14 @@ void ComplianceMetricsCollector::record_risk_assessment(const std::string& entit
     else if (risk_level == "HIGH") risk_assessments_high_++;
     else if (risk_level == "CRITICAL") risk_assessments_critical_++;
 
-    // Update average processing time
+    // Update average processing time using exponential moving average
     if (processing_time_ms > 0) {
-        avg_risk_assessment_time_ = (avg_risk_assessment_time_ + processing_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (avg_risk_assessment_time_ == 0.0) {
+            avg_risk_assessment_time_ = processing_time_ms;
+        } else {
+            avg_risk_assessment_time_ = alpha * processing_time_ms + (1.0 - alpha) * avg_risk_assessment_time_;
+        }
     }
 }
 
@@ -562,9 +625,14 @@ void RedisMetricsCollector::record_redis_operation(const std::string& operation_
         redis_cache_misses_++;
     }
 
-    // Update average response time (simple moving average)
+    // Update average response time using exponential moving average
     if (response_time_ms > 0) {
-        redis_avg_response_time_ = (redis_avg_response_time_ + response_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (redis_avg_response_time_ == 0.0) {
+            redis_avg_response_time_ = response_time_ms;
+        } else {
+            redis_avg_response_time_ = alpha * response_time_ms + (1.0 - alpha) * redis_avg_response_time_;
+        }
     }
 
     // Update cache-specific counters
@@ -764,9 +832,14 @@ void SystemMetricsCollector::record_database_operation(const std::string& operat
         db_queries_successful_++;
     }
 
-    // Update average response time
+    // Update average response time using exponential moving average
     if (response_time_ms > 0) {
-        db_avg_response_time_ = (db_avg_response_time_ + response_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (db_avg_response_time_ == 0.0) {
+            db_avg_response_time_ = response_time_ms;
+        } else {
+            db_avg_response_time_ = alpha * response_time_ms + (1.0 - alpha) * db_avg_response_time_;
+        }
     }
 }
 
@@ -778,9 +851,14 @@ void SystemMetricsCollector::record_cache_operation(const std::string& cache_typ
         cache_hits_++;
     }
 
-    // Update average response time
+    // Update average response time using exponential moving average
     if (response_time_ms > 0) {
-        cache_avg_response_time_ = (cache_avg_response_time_ + response_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (cache_avg_response_time_ == 0.0) {
+            cache_avg_response_time_ = response_time_ms;
+        } else {
+            cache_avg_response_time_ = alpha * response_time_ms + (1.0 - alpha) * cache_avg_response_time_;
+        }
     }
 }
 
@@ -796,9 +874,14 @@ void SystemMetricsCollector::record_http_call(const std::string& endpoint, const
         http_requests_5xx_++;
     }
 
-    // Update average response time
+    // Update average response time using exponential moving average
     if (response_time_ms > 0) {
-        http_avg_response_time_ = (http_avg_response_time_ + response_time_ms) / 2;
+        const double alpha = 0.1; // Smoothing factor for EMA
+        if (http_avg_response_time_ == 0.0) {
+            http_avg_response_time_ = response_time_ms;
+        } else {
+            http_avg_response_time_ = alpha * response_time_ms + (1.0 - alpha) * http_avg_response_time_;
+        }
     }
 }
 

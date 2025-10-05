@@ -16,6 +16,7 @@
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <condition_variable>
 #include <nlohmann/json.hpp>
 
 // Include configuration types
@@ -89,6 +90,7 @@ private:
     std::vector<std::shared_ptr<PostgreSQLConnection>> connections_;
     std::vector<std::shared_ptr<PostgreSQLConnection>> available_connections_;
     mutable std::mutex pool_mutex_;
+    std::condition_variable pool_cv_;
     std::atomic<bool> shutdown_;
     std::atomic<size_t> active_connections_;
     std::atomic<size_t> total_connections_created_;

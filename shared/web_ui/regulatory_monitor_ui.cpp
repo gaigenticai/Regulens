@@ -141,6 +141,12 @@ void RegulatoryMonitorUI::setup_routes() {
     server_->add_route("GET", "/api/regulatory/monitor", [this](const HTTPRequest& req) {
         return handlers_->handle_regulatory_monitor(req);
     });
+    server_->add_route("POST", "/api/regulatory/start", [this](const HTTPRequest& req) {
+        return handlers_->handle_regulatory_start(req);
+    });
+    server_->add_route("POST", "/api/regulatory/stop", [this](const HTTPRequest& req) {
+        return handlers_->handle_regulatory_stop(req);
+    });
     server_->add_route("GET", "/monitoring", [this](const HTTPRequest& req) {
         return handlers_->handle_regulatory_monitor(req);
     });

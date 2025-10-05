@@ -46,15 +46,118 @@ find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(spdlog REQUIRED)
 
-# PostgreSQL for database connectivity
-include_directories(/opt/homebrew/include/postgresql@14)
-link_directories(/opt/homebrew/lib/postgresql@14)
-set(PostgreSQL_LIBRARIES pq)
+# PostgreSQL for database connectivity - Cross-platform detection
+# Support multiple installation methods for cloud deployment
+if(DEFINED ENV{POSTGRESQL_ROOT})
+    # Custom PostgreSQL installation path (for cloud/on-prem deployments)
+    set(PostgreSQL_ROOT $ENV{POSTGRESQL_ROOT})
+    find_path(PostgreSQL_INCLUDE_DIR libpq-fe.h
+        PATHS ${PostgreSQL_ROOT}/include
+        NO_DEFAULT_PATH
+    )
+    find_library(PostgreSQL_LIBRARY pq
+        PATHS ${PostgreSQL_ROOT}/lib
+        NO_DEFAULT_PATH
+    )
+    if(PostgreSQL_INCLUDE_DIR AND PostgreSQL_LIBRARY)
+        set(PostgreSQL_FOUND TRUE)
+        set(PostgreSQL_INCLUDE_DIRS ${PostgreSQL_INCLUDE_DIR})
+        set(PostgreSQL_LIBRARIES ${PostgreSQL_LIBRARY})
+        include_directories(${PostgreSQL_INCLUDE_DIRS})
+        message(STATUS "Using custom PostgreSQL installation at ${PostgreSQL_ROOT}")
+    endif()
+elseif(UNIX AND NOT APPLE)
+    # Linux: Use standard system paths or pkg-config
+    pkg_check_modules(PostgreSQL_PKG libpq)
+    if(PostgreSQL_PKG_FOUND)
+        set(PostgreSQL_FOUND TRUE)
+        set(PostgreSQL_INCLUDE_DIRS ${PostgreSQL_PKG_INCLUDE_DIRS})
+        set(PostgreSQL_LIBRARIES ${PostgreSQL_PKG_LIBRARIES})
+        include_directories(${PostgreSQL_INCLUDE_DIRS})
+        link_directories(${PostgreSQL_PKG_LIBRARY_DIRS})
+    else()
+        # Fallback to standard Linux paths
+        find_path(PostgreSQL_INCLUDE_DIR libpq-fe.h
+            PATHS /usr/include /usr/local/include /usr/include/postgresql
+        )
+        find_library(PostgreSQL_LIBRARY pq
+            PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu
+        )
+        if(PostgreSQL_INCLUDE_DIR AND PostgreSQL_LIBRARY)
+            set(PostgreSQL_FOUND TRUE)
+            set(PostgreSQL_INCLUDE_DIRS ${PostgreSQL_INCLUDE_DIR})
+            set(PostgreSQL_LIBRARIES ${PostgreSQL_LIBRARY})
+            include_directories(${PostgreSQL_INCLUDE_DIRS})
+        endif()
+    endif()
+else()
+    # macOS/Windows: Use CMake find_package (may find Homebrew on macOS)
+    find_package(PostgreSQL REQUIRED)
+    if(PostgreSQL_FOUND)
+        include_directories(${PostgreSQL_INCLUDE_DIRS})
+        link_directories(${PostgreSQL_LIBRARY_DIRS})
+        set(PostgreSQL_LIBRARIES ${PostgreSQL_LIBRARIES})
+    endif()
+endif()
 
-# libpqxx for C++ PostgreSQL client
-pkg_check_modules(PQXX REQUIRED libpqxx)
-include_directories(${PQXX_INCLUDE_DIRS})
-link_directories(${PQXX_LIBRARY_DIRS})
+if(NOT PostgreSQL_FOUND)
+    message(FATAL_ERROR "PostgreSQL not found. Please install PostgreSQL development libraries or set POSTGRESQL_ROOT environment variable for custom installations.")
+endif()
+
+# libpqxx for C++ PostgreSQL client - Cross-platform detection
+if(DEFINED ENV{PQXX_ROOT})
+    # Custom libpqxx installation path (for cloud/on-prem deployments)
+    set(PQXX_ROOT $ENV{PQXX_ROOT})
+    find_path(PQXX_INCLUDE_DIR pqxx/pqxx
+        PATHS ${PQXX_ROOT}/include
+        NO_DEFAULT_PATH
+    )
+    find_library(PQXX_LIBRARY pqxx
+        PATHS ${PQXX_ROOT}/lib
+        NO_DEFAULT_PATH
+    )
+    if(PQXX_INCLUDE_DIR AND PQXX_LIBRARY)
+        set(PQXX_FOUND TRUE)
+        set(PQXX_INCLUDE_DIRS ${PQXX_INCLUDE_DIR})
+        set(PQXX_LIBRARIES ${PQXX_LIBRARY})
+        include_directories(${PQXX_INCLUDE_DIRS})
+        link_directories(${PQXX_ROOT}/lib)
+        message(STATUS "Using custom libpqxx installation at ${PQXX_ROOT}")
+    endif()
+elseif(UNIX AND NOT APPLE)
+    # Linux: Use standard system paths
+    pkg_check_modules(PQXX_PKG libpqxx)
+    if(PQXX_PKG_FOUND)
+        set(PQXX_FOUND TRUE)
+        set(PQXX_INCLUDE_DIRS ${PQXX_PKG_INCLUDE_DIRS})
+        set(PQXX_LIBRARIES ${PQXX_PKG_LIBRARIES})
+        include_directories(${PQXX_INCLUDE_DIRS})
+        link_directories(${PQXX_PKG_LIBRARY_DIRS})
+    else()
+        # Fallback to standard Linux paths
+        find_path(PQXX_INCLUDE_DIR pqxx/pqxx
+            PATHS /usr/include /usr/local/include
+        )
+        find_library(PQXX_LIBRARY pqxx
+            PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu
+        )
+        if(PQXX_INCLUDE_DIR AND PQXX_LIBRARY)
+            set(PQXX_FOUND TRUE)
+            set(PQXX_INCLUDE_DIRS ${PQXX_INCLUDE_DIR})
+            set(PQXX_LIBRARIES ${PQXX_LIBRARY})
+            include_directories(${PQXX_INCLUDE_DIRS})
+        endif()
+    endif()
+else()
+    # macOS/Windows: Use pkg-config
+    pkg_check_modules(PQXX REQUIRED libpqxx)
+    include_directories(${PQXX_INCLUDE_DIRS})
+    link_directories(${PQXX_LIBRARY_DIRS})
+endif()
+
+if(NOT PQXX_FOUND)
+    message(FATAL_ERROR "libpqxx not found. Please install libpqxx development libraries or set PQXX_ROOT environment variable for custom installations.")
+endif()
 
 # Boost for enterprise-grade utilities
 find_package(Boost 1.78 QUIET COMPONENTS
@@ -73,7 +176,6 @@ endif()
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/shared
     ${CMAKE_CURRENT_SOURCE_DIR}/core
-    /opt/homebrew/include
 )
 
 # Subdirectories for modular components
@@ -129,6 +231,20 @@ add_executable(enterprise_ui_demo
     regulatory_monitor/enterprise_ui_demo.cpp
 )
 
+add_executable(audit_intelligence_ui_demo
+    agents/audit_intelligence/audit_intelligence_ui_demo.cpp
+)
+
+# Regulatory Assessor Agent UI demonstration executable (Rule 6 compliant)
+add_executable(regulatory_assessor_ui_demo
+    agents/regulatory_assessor/regulatory_assessor_demo.cpp
+)
+
+# Transaction Guardian Agent UI demonstration executable (Rule 6 compliant)
+add_executable(transaction_guardian_ui_demo
+    agents/transaction_guardian/transaction_guardian_demo.cpp
+)
+
 # Production Regulatory Monitoring demonstration executable
 add_executable(production_regulatory_demo
     regulatory_monitor/production_regulatory_demo.cpp
@@ -182,6 +298,20 @@ target_link_libraries(standalone_real_agent_demo
 
 target_link_libraries(enterprise_ui_demo
     PRIVATE
+        Threads::Threads
+)
+
+target_link_libraries(audit_intelligence_ui_demo
+    PRIVATE
+        regulens_agents
+        regulens_web_ui
+        Threads::Threads
+)
+
+target_link_libraries(regulatory_assessor_ui_demo
+    PRIVATE
+        regulens_agents
+        regulens_web_ui
         Threads::Threads
 )
 

@@ -81,6 +81,18 @@ private:
     bool validate_cors(const APIRequest& /*req*/);
     bool rate_limit_check(const std::string& client_ip);
 
+    // Authorization
+    bool is_public_endpoint(const std::string& path);
+    bool authorize_request(const APIRequest& req);
+    bool validate_jwt_token(const std::string& token);
+    bool validate_api_key(const std::string& api_key);
+    APIResponse handle_login(const APIRequest& req);
+    APIResponse handle_token_refresh(const APIRequest& req);
+    std::string generate_jwt_token(const std::string& username);
+    bool validate_refresh_token(const std::string& token);
+    std::string base64_encode(const std::string& input);
+    std::string base64_decode(const std::string& input);
+
     // Member variables
     std::shared_ptr<ConnectionPool> db_pool_;
     std::shared_ptr<ProductionRegulatoryMonitor> monitor_;
@@ -91,10 +103,14 @@ private:
     std::thread server_thread_;
     std::atomic<bool> running_;
 
-    // Rate limiting (simple implementation)
-    std::unordered_map<std::string, std::chrono::steady_clock::time_point> rate_limit_map_;
+    // Rate limiting
+    struct ClientRateLimit {
+        std::deque<std::chrono::steady_clock::time_point> requests;
+    };
+    std::unordered_map<std::string, ClientRateLimit> rate_limit_map_;
     mutable std::mutex rate_limit_mutex_;
-    const int RATE_LIMIT_WINDOW = 60;     // seconds
+    static const int RATE_LIMIT_WINDOW = 60;     // seconds
+    static const int RATE_LIMIT_MAX_REQUESTS = 100; // requests per window
 };
 
 } // namespace regulens

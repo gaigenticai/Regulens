@@ -37,6 +37,7 @@
 #include "../../core/agent/agent_communication.hpp"
 #include "../../core/agent/message_translator.hpp"
 #include "../../core/agent/consensus_engine.hpp"
+#include "../../agents/real_agent.hpp"
 
 namespace regulens {
 
@@ -70,6 +71,8 @@ public:
     HTTPResponse handle_regulatory_sources(const HTTPRequest& request);
     HTTPResponse handle_regulatory_changes(const HTTPRequest& request);
     HTTPResponse handle_regulatory_monitor(const HTTPRequest& request);
+    HTTPResponse handle_regulatory_start(const HTTPRequest& request);
+    HTTPResponse handle_regulatory_stop(const HTTPRequest& request);
 
     // Decision tree visualization handlers
     HTTPResponse handle_decision_tree_visualize(const HTTPRequest& request);
@@ -216,6 +219,9 @@ private:
 
     // Error handling and recovery
     std::shared_ptr<ErrorHandler> error_handler_;
+
+    // Regulatory monitoring
+    std::shared_ptr<RealRegulatoryFetcher> regulatory_fetcher_;
 
     // LLM and OpenAI integration
     std::shared_ptr<OpenAIClient> openai_client_;

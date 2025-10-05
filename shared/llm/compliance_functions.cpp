@@ -721,16 +721,74 @@ bool ComplianceFunctionLibrary::validate_risk_params(const nlohmann::json& args)
 nlohmann::json ComplianceFunctionLibrary::format_regulatory_results(const std::vector<std::string>& results) const {
     nlohmann::json formatted = nlohmann::json::array();
 
+    // Compliance keywords that indicate relevance
+    static const std::vector<std::string> compliance_keywords = {
+        "regulation", "compliance", "requirement", "mandatory", "law", "legal",
+        "standard", "guideline", "policy", "rule", "obligation", "enforcement",
+        "violation", "penalty", "audit", "oversight", "supervision", "reporting"
+    };
+
     for (size_t i = 0; i < results.size(); ++i) {
+        const std::string& content = results[i];
+
+        // Calculate relevance score based on content analysis
+        double relevance_score = calculate_relevance_score(content, compliance_keywords);
+
         formatted.push_back({
             {"id", "result_" + std::to_string(i + 1)},
-            {"content", results[i]},
-            {"relevance_score", 0.8 - (i * 0.1)}, // Mock relevance scores
+            {"content", content},
+            {"relevance_score", relevance_score},
             {"source", "regulatory_database"}
         });
     }
 
     return formatted;
+}
+
+double ComplianceFunctionLibrary::calculate_relevance_score(const std::string& content, const std::vector<std::string>& keywords) const {
+    if (content.empty()) return 0.0;
+
+    std::string lower_content = content;
+    std::transform(lower_content.begin(), lower_content.end(), lower_content.begin(), ::tolower);
+
+    size_t total_keywords = keywords.size();
+    size_t found_keywords = 0;
+    double keyword_score = 0.0;
+
+    // Check for keyword matches
+    for (const std::string& keyword : keywords) {
+        std::string lower_keyword = keyword;
+        std::transform(lower_keyword.begin(), lower_keyword.end(), lower_keyword.begin(), ::tolower);
+
+        size_t pos = lower_content.find(lower_keyword);
+        if (pos != std::string::npos) {
+            found_keywords++;
+
+            // Give higher weight for keywords found earlier in the content
+            double position_weight = 1.0 - (static_cast<double>(pos) / lower_content.length());
+            keyword_score += position_weight;
+        }
+    }
+
+    // Base score from keyword density
+    double base_score = static_cast<double>(found_keywords) / std::max(total_keywords, size_t(1));
+
+    // Boost score based on keyword importance and positioning
+    double final_score = std::min(base_score + (keyword_score * 0.2), 1.0);
+
+    // Additional factors for compliance relevance
+    if (lower_content.find("must") != std::string::npos ||
+        lower_content.find("shall") != std::string::npos ||
+        lower_content.find("required") != std::string::npos) {
+        final_score = std::min(final_score + 0.1, 1.0); // Legal language boost
+    }
+
+    if (lower_content.find("violation") != std::string::npos ||
+        lower_content.find("penalty") != std::string::npos) {
+        final_score = std::min(final_score + 0.1, 1.0); // Risk language boost
+    }
+
+    return final_score;
 }
 
 nlohmann::json ComplianceFunctionLibrary::format_risk_assessment(const RiskAssessment& assessment) const {

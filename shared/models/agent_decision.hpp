@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -314,7 +316,9 @@ public:
 
 private:
     static std::string generate_decision_id() {
-        static std::atomic<uint64_t> counter{0};
+        static uint64_t counter = 0;
+        static std::mutex counter_mutex;
+        std::lock_guard<std::mutex> lock(counter_mutex);
         auto now = std::chrono::system_clock::now();
         auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()).count();

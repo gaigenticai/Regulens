@@ -482,6 +482,24 @@ private:
         const RiskAssessment& assessment);
 
     /**
+     * @brief Calculate deviation from customer's normal transaction patterns
+     */
+    double calculate_deviation_from_norm(double transaction_amount,
+                                       const std::vector<double>& history) const;
+
+    /**
+     * @brief Calculate velocity changes in transaction patterns
+     */
+    double calculate_velocity_changes(const TransactionData& transaction,
+                                    const std::vector<double>& history) const;
+
+    /**
+     * @brief Calculate peer comparison risk (simplified implementation)
+     */
+    double calculate_peer_comparison(double transaction_amount,
+                                   const std::vector<double>& history) const;
+
+    /**
      * @brief Generate recommended mitigation actions
      */
     std::vector<RiskMitigationAction> generate_mitigation_actions(

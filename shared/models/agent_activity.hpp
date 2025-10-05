@@ -6,6 +6,7 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include "agent_decision.hpp"
 
 namespace regulens {
@@ -152,11 +153,15 @@ struct AgentActivityStats {
     std::string agent_id;
     size_t total_activities = 0;
     size_t activities_last_hour = 0;
+    size_t activities_last_6h = 0;
     size_t activities_last_24h = 0;
+    size_t activities_last_7d = 0;
+    size_t activities_last_30d = 0;
     size_t error_count = 0;
     size_t warning_count = 0;
     std::chrono::system_clock::time_point last_activity;
     std::unordered_map<int, size_t> activity_type_counts; // ActivityType -> count
+    std::unordered_map<std::string, std::deque<std::chrono::system_clock::time_point>> time_window_events; // For sliding window calculations
 
     nlohmann::json to_json() const {
         nlohmann::json type_counts_json;
@@ -164,16 +169,30 @@ struct AgentActivityStats {
             type_counts_json[std::to_string(type)] = count;
         }
 
+        nlohmann::json time_windows_json;
+        for (const auto& [window, events] : time_window_events) {
+            nlohmann::json events_json;
+            for (const auto& timestamp : events) {
+                events_json.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    timestamp.time_since_epoch()).count());
+            }
+            time_windows_json[window] = events_json;
+        }
+
         return {
             {"agent_id", agent_id},
             {"total_activities", total_activities},
             {"activities_last_hour", activities_last_hour},
+            {"activities_last_6h", activities_last_6h},
             {"activities_last_24h", activities_last_24h},
+            {"activities_last_7d", activities_last_7d},
+            {"activities_last_30d", activities_last_30d},
             {"error_count", error_count},
             {"warning_count", warning_count},
             {"last_activity", std::chrono::duration_cast<std::chrono::milliseconds>(
                 last_activity.time_since_epoch()).count()},
-            {"activity_type_counts", type_counts_json}
+            {"activity_type_counts", type_counts_json},
+            {"time_window_events", time_windows_json}
         };
     }
 };

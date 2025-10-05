@@ -125,7 +125,14 @@ public:
      * @param source_config Configuration for the source
      * @return true if source added successfully
      */
-    bool add_custom_source(const nlohmann::json& source_config);
+     bool add_custom_source(const nlohmann::json& source_config);
+
+     /**
+      * @brief Add a standard regulatory source (SEC, FCA, ECB)
+      * @param type Type of regulatory source
+      * @return true if source added successfully
+      */
+     bool add_standard_source(RegulatorySourceType type);
 
     /**
      * @brief Remove a regulatory source

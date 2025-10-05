@@ -245,8 +245,35 @@ public:
             }
 
             if (json.contains("analysis")) {
-                // Would need to parse analysis object - simplified for now
-                change.analysis_ = RegulatoryChangeAnalysis{};
+                RegulatoryChangeAnalysis analysis;
+                const auto& analysis_json = json["analysis"];
+
+                analysis.impact_level = static_cast<RegulatoryImpact>(
+                    analysis_json["impact_level"].get<int>());
+                analysis.executive_summary = analysis_json["executive_summary"].get<std::string>();
+
+                // Parse affected domains
+                if (analysis_json.contains("affected_domains")) {
+                    for (const auto& domain_val : analysis_json["affected_domains"]) {
+                        analysis.affected_domains.push_back(
+                            static_cast<BusinessDomain>(domain_val.get<int>()));
+                    }
+                }
+
+                analysis.required_actions = analysis_json["required_actions"].get<std::vector<std::string>>();
+                analysis.compliance_deadlines = analysis_json["compliance_deadlines"].get<std::vector<std::string>>();
+
+                // Parse risk scores
+                if (analysis_json.contains("risk_scores")) {
+                    for (const auto& [domain_str, score] : analysis_json["risk_scores"].items()) {
+                        analysis.risk_scores[domain_str] = score.get<double>();
+                    }
+                }
+
+                analysis.analysis_timestamp = std::chrono::system_clock::time_point(
+                    std::chrono::milliseconds(analysis_json["analysis_timestamp"].get<int64_t>()));
+
+                change.analysis_ = analysis;
             }
 
             return change;

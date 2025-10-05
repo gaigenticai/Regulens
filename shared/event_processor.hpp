@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include "models/compliance_event.hpp"
+#include <optional>
 #include "logging/structured_logger.hpp"
 
 namespace regulens {

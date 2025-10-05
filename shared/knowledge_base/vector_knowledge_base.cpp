@@ -782,7 +782,7 @@ nlohmann::json VectorKnowledgeBase::get_context_for_decision(const std::string& 
             for (const auto& [type, count] : type_counts) {
                 patterns["knowledge_types"][type] = {
                     {"count", count},
-                    {"avg_confidence", avg_confidence_by_type[type] / count}
+                    {"avg_confidence", count > 0 ? avg_confidence_by_type[type] / static_cast<float>(count) : 0.0f}
                 };
             }
 
@@ -1288,10 +1288,16 @@ bool VectorKnowledgeBase::remove_from_index(const std::string& entity_id) {
     return true;
 }
 
-std::vector<std::pair<std::string, float>> VectorKnowledgeBase::find_similar_vectors(const std::vector<float>& /*query_vector*/, const SemanticQuery& config) {
+std::vector<std::pair<std::string, float>> VectorKnowledgeBase::find_similar_vectors(const std::vector<float>& query_vector, const SemanticQuery& config) {
     std::vector<std::pair<std::string, float>> similarities;
 
     try {
+        // Validate input vector
+        if (query_vector.empty()) {
+            logger_->log(LogLevel::WARN, "Empty query vector provided to find_similar_vectors");
+            return similarities;
+        }
+
         auto conn = db_pool_->get_connection();
         if (!conn) return similarities;
 
@@ -1305,10 +1311,13 @@ std::vector<std::pair<std::string, float>> VectorKnowledgeBase::find_similar_vec
             default: similarity_op = "<=>"; break;
         }
 
+        // Convert vector to PostgreSQL vector string format
+        std::string vector_string = vector_to_string(query_vector);
+
         std::string query = "SELECT entity_id, 1 - (embedding " + similarity_op + " $1::vector) as similarity FROM knowledge_entities WHERE domain = $2 ORDER BY embedding " + similarity_op + " $1::vector LIMIT $3";
 
         std::vector<std::string> params = {
-            "[0.1,0.2,0.3]", // Mock vector string
+            vector_string,
             domain_to_string(config.domain_filter),
             std::to_string(config.max_results)
         };
@@ -1425,5 +1434,18 @@ void VectorKnowledgeBase::update_access_patterns(const std::string& entity_id) {
 }
 
 // Private helper methods
+
+std::string VectorKnowledgeBase::vector_to_string(const std::vector<float>& vec) const {
+    if (vec.empty()) return "[]";
+
+    std::stringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        if (i > 0) ss << ",";
+        ss << std::fixed << std::setprecision(6) << vec[i];
+    }
+    ss << "]";
+    return ss.str();
+}
 
 } // namespace regulens

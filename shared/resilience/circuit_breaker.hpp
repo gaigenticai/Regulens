@@ -58,6 +58,35 @@ struct CircuitBreakerMetrics {
 
     CircuitBreakerMetrics() : created_time(std::chrono::system_clock::now()) {}
 
+    CircuitBreakerMetrics(const CircuitBreakerMetrics& other) {
+        total_requests.store(other.total_requests.load());
+        successful_requests.store(other.successful_requests.load());
+        failed_requests.store(other.failed_requests.load());
+        rejected_requests.store(other.rejected_requests.load());
+        state_transitions.store(other.state_transitions.load());
+        recovery_attempts.store(other.recovery_attempts.load());
+        successful_recoveries.store(other.successful_recoveries.load());
+        last_failure_time = other.last_failure_time;
+        last_state_change_time = other.last_state_change_time;
+        created_time = other.created_time;
+    }
+
+    CircuitBreakerMetrics& operator=(const CircuitBreakerMetrics& other) {
+        if (this != &other) {
+            total_requests.store(other.total_requests.load());
+            successful_requests.store(other.successful_requests.load());
+            failed_requests.store(other.failed_requests.load());
+            rejected_requests.store(other.rejected_requests.load());
+            state_transitions.store(other.state_transitions.load());
+            recovery_attempts.store(other.recovery_attempts.load());
+            successful_recoveries.store(other.successful_recoveries.load());
+            last_failure_time = other.last_failure_time;
+            last_state_change_time = other.last_state_change_time;
+            created_time = other.created_time;
+        }
+        return *this;
+    }
+
     nlohmann::json to_json() const;
 };
 

@@ -7,9 +7,14 @@
 
 namespace regulens {
 
-IngestionMetrics::IngestionMetrics(StructuredLogger* logger)
-    : logger_(logger) {
+IngestionMetrics::IngestionMetrics(StructuredLogger* logger, std::shared_ptr<ConnectionPool> db_pool)
+    : logger_(logger), db_pool_(db_pool) {
     global_metrics_.system_start_time = std::chrono::system_clock::now();
+
+    // Load persisted metrics on initialization if database is available
+    if (db_pool_) {
+        load_persisted_metrics();
+    }
 }
 
 void IngestionMetrics::record_batch_processed(const std::string& source_id, const IngestionBatch& batch) {
@@ -394,11 +399,153 @@ void IngestionMetrics::initialize_baseline_metrics() {
 }
 
 void IngestionMetrics::persist_metrics() const {
-    // In production, persist metrics to database
+    if (!db_pool_) {
+        logger_->log(LogLevel::DEBUG, "No database connection pool available for metrics persistence");
+        return;
+    }
+
+    auto conn = db_pool_->get_connection();
+    if (!conn) {
+        logger_->log(LogLevel::WARN, "Failed to get database connection for metrics persistence");
+        return;
+    }
+
+    try {
+        std::lock_guard<std::mutex> lock(metrics_mutex_);
+
+        // Persist source metrics
+        for (const auto& [source_id, metrics] : source_metrics_) {
+            nlohmann::json metric_data = {
+                {"source_id", source_id},
+                {"total_batches", metrics.total_batches},
+                {"successful_batches", metrics.successful_batches},
+                {"failed_batches", metrics.failed_batches},
+                {"total_records", metrics.total_records},
+                {"successful_records", metrics.successful_records},
+                {"failed_records", metrics.failed_records},
+                {"is_healthy", metrics.is_healthy},
+                {"consecutive_failures", metrics.consecutive_failures},
+                {"max_records_per_second", metrics.max_records_per_second},
+                {"avg_records_per_second", metrics.avg_records_per_second},
+                {"error_rate", calculate_error_rate(metrics)},
+                {"throughput_rps", calculate_throughput(metrics)}
+            };
+
+            // Insert batch metrics
+            std::string insert_query = R"(
+                INSERT INTO ingestion_metrics (source_id, metric_type, metric_data, timestamp)
+                VALUES ($1, 'BATCH', $2, NOW())
+            )";
+
+            conn->execute_command(insert_query, {
+                source_id,
+                metric_data.dump()
+            });
+        }
+
+        // Persist global metrics
+        nlohmann::json global_data = {
+            {"total_batches_processed", global_metrics_.total_batches_processed},
+            {"total_records_processed", global_metrics_.total_records_processed},
+            {"current_queue_depth", global_metrics_.current_queue_depth},
+            {"active_workers", global_metrics_.active_workers}
+        };
+
+        std::string global_query = R"(
+            INSERT INTO ingestion_metrics (source_id, metric_type, metric_data, timestamp)
+            VALUES ('GLOBAL', 'SYSTEM', $1, NOW())
+        )";
+
+        conn->execute_command(global_query, {global_data.dump()});
+
+        logger_->log(LogLevel::DEBUG, "Metrics persisted successfully");
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to persist metrics: " + std::string(e.what()));
+    }
 }
 
 void IngestionMetrics::load_persisted_metrics() {
-    // In production, load persisted metrics
+    if (!db_pool_) {
+        logger_->log(LogLevel::DEBUG, "No database connection pool available for metrics loading");
+        return;
+    }
+
+    auto conn = db_pool_->get_connection();
+    if (!conn) {
+        logger_->log(LogLevel::WARN, "Failed to get database connection for metrics loading");
+        return;
+    }
+
+    try {
+        // Load recent metrics (last 24 hours)
+        std::string query = R"(
+            SELECT source_id, metric_type, metric_data, timestamp
+            FROM ingestion_metrics
+            WHERE timestamp >= NOW() - INTERVAL '24 hours'
+            ORDER BY timestamp DESC
+        )";
+
+        auto results = conn->execute_query_multi(query);
+
+        std::lock_guard<std::mutex> lock(metrics_mutex_);
+
+        for (const auto& row : results) {
+            if (!row.contains("source_id") || !row.contains("metric_data")) continue;
+
+            std::string source_id = row["source_id"];
+            std::string metric_data_str = row["metric_data"];
+
+            try {
+                nlohmann::json metric_data = nlohmann::json::parse(metric_data_str);
+
+                if (source_id == "GLOBAL") {
+                    // Load global metrics
+                    if (metric_data.contains("total_batches_processed")) {
+                        global_metrics_.total_batches_processed = metric_data["total_batches_processed"];
+                    }
+                    if (metric_data.contains("total_records_processed")) {
+                        global_metrics_.total_records_processed = metric_data["total_records_processed"];
+                    }
+                } else {
+                    // Load source metrics
+                    auto& metrics = source_metrics_[source_id];
+
+                    if (metric_data.contains("total_batches")) {
+                        metrics.total_batches = metric_data["total_batches"];
+                    }
+                    if (metric_data.contains("successful_batches")) {
+                        metrics.successful_batches = metric_data["successful_batches"];
+                    }
+                    if (metric_data.contains("failed_batches")) {
+                        metrics.failed_batches = metric_data["failed_batches"];
+                    }
+                    if (metric_data.contains("total_records")) {
+                        metrics.total_records = metric_data["total_records"];
+                    }
+                    if (metric_data.contains("successful_records")) {
+                        metrics.successful_records = metric_data["successful_records"];
+                    }
+                    if (metric_data.contains("failed_records")) {
+                        metrics.failed_records = metric_data["failed_records"];
+                    }
+                    if (metric_data.contains("is_healthy")) {
+                        metrics.is_healthy = metric_data["is_healthy"];
+                    }
+                    if (metric_data.contains("consecutive_failures")) {
+                        metrics.consecutive_failures = metric_data["consecutive_failures"];
+                    }
+                }
+            } catch (const nlohmann::json::parse_error& e) {
+                logger_->log(LogLevel::WARN, "Failed to parse metric data for source " + source_id + ": " + e.what());
+            }
+        }
+
+        logger_->log(LogLevel::INFO, "Persisted metrics loaded successfully");
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to load persisted metrics: " + std::string(e.what()));
+    }
 }
 
 } // namespace regulens

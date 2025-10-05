@@ -5,6 +5,8 @@
 #include <memory>
 #include <filesystem>
 #include <optional>
+#include <vector>
+#include <sstream>
 #include <nlohmann/json.hpp>
 
 // Include for configuration struct definitions
@@ -132,6 +134,12 @@ public:
      * @return SMTPConfig struct populated with configuration values
      */
     SMTPConfig get_smtp_config() const;
+
+    /**
+     * @brief Get notification email recipients from configuration
+     * @return Vector of email addresses for notifications
+     */
+    std::vector<std::string> get_notification_recipients() const;
 
     /**
      * @brief Get agent capability configuration
@@ -280,6 +288,7 @@ inline constexpr const char* SMTP_PORT = "SMTP_PORT";
 inline constexpr const char* SMTP_USER = "SMTP_USER";
 inline constexpr const char* SMTP_PASSWORD = "SMTP_PASSWORD";
 inline constexpr const char* SMTP_FROM_EMAIL = "SMTP_FROM_EMAIL";
+inline constexpr const char* SMTP_NOTIFICATION_RECIPIENTS = "SMTP_NOTIFICATION_RECIPIENTS";
 
 inline constexpr const char* JWT_SECRET_KEY = "JWT_SECRET_KEY";
 }

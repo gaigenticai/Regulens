@@ -43,7 +43,7 @@ struct RedisReply;
  * @brief Redis connection configuration
  */
 struct RedisConfig {
-    std::string host = "localhost";
+    std::string host; // Must be explicitly configured - no localhost defaults
     int port = 6379;
     std::string password;
     int database = 0;

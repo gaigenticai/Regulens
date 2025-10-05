@@ -242,18 +242,97 @@ std::unordered_map<std::string, double> DecisionTreeOptimizer::perform_sensitivi
 
     std::unordered_map<std::string, double> sensitivity;
 
-    // Test sensitivity to criteria weights (simplified)
-    for (size_t i = 0; i < analysis.alternatives.size() && i < 3; ++i) {
-        const auto& alt = analysis.alternatives[i];
-        std::string param = "weight_sensitivity_" + alt.id;
+    if (analysis.alternatives.empty()) return sensitivity;
 
-        // Calculate impact of 10% weight change
-        double original_score = analysis.alternative_scores.at(alt.id);
-        double sensitivity_score = original_score * 1.1; // Simplified calculation
-        double impact = std::abs(sensitivity_score - original_score) / original_score;
+    // Test sensitivity to criteria weights
+    for (const auto& alt : analysis.alternatives) {
+        // Test each criterion weight sensitivity
+        for (const auto& [criterion, original_weight] : alt.criteria_weights) {
+            std::string param = "weight_sensitivity_" + alt.id + "_" + decision_criterion_to_string(criterion);
 
-        sensitivity[param] = impact;
+            // Test weight changes: -20%, -10%, +10%, +20%
+            std::vector<double> weight_changes = {-0.2, -0.1, 0.1, 0.2};
+            double max_impact = 0.0;
+
+            for (double change : weight_changes) {
+                double new_weight = std::max(0.0, std::min(1.0, original_weight + change));
+
+                // Recalculate score with modified weight
+                double modified_score = 0.0;
+                double total_weight = 0.0;
+
+                for (const auto& [crit, score] : alt.criteria_scores) {
+                    double weight = (crit == criterion) ? new_weight : alt.criteria_weights.at(crit);
+                    modified_score += score * weight;
+                    total_weight += weight;
+                }
+
+                if (total_weight > 0) {
+                    modified_score /= total_weight; // Normalize
+                }
+
+                double original_score = analysis.alternative_scores.at(alt.id);
+                double impact = std::abs(modified_score - original_score) / std::max(std::abs(original_score), 1e-6);
+                max_impact = std::max(max_impact, impact);
+            }
+
+            sensitivity[param] = max_impact;
+        }
     }
+
+    // Test sensitivity to criteria scores
+    for (const auto& alt : analysis.alternatives) {
+        for (const auto& [criterion, original_score] : alt.criteria_scores) {
+            std::string param = "score_sensitivity_" + alt.id + "_" + decision_criterion_to_string(criterion);
+
+            // Test score changes: -15%, -5%, +5%, +15%
+            std::vector<double> score_changes = {-0.15, -0.05, 0.05, 0.15};
+            double max_impact = 0.0;
+
+            for (double change : score_changes) {
+                double new_score = std::max(0.0, std::min(1.0, original_score + change));
+
+                // Recalculate score with modified criterion score
+                double modified_score = 0.0;
+                for (const auto& [crit, score] : alt.criteria_scores) {
+                    double actual_score = (crit == criterion) ? new_score : score;
+                    modified_score += actual_score * alt.criteria_weights.at(crit);
+                }
+
+                double original_total_score = analysis.alternative_scores.at(alt.id);
+                double impact = std::abs(modified_score - original_total_score) / std::max(std::abs(original_total_score), 1e-6);
+                max_impact = std::max(max_impact, impact);
+            }
+
+            sensitivity[param] = max_impact;
+        }
+    }
+
+    // Test ranking stability - how often ranking changes with perturbations
+    std::string ranking_stability = "ranking_stability";
+    int stable_rankings = 0;
+    int total_tests = 10;
+
+    for (int test = 0; test < total_tests; ++test) {
+        // Add small random perturbations to all scores
+        std::unordered_map<std::string, double> perturbed_scores;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::normal_distribution<> noise(0.0, 0.02); // 2% standard deviation noise
+
+        for (const auto& [id, score] : analysis.alternative_scores) {
+            perturbed_scores[id] = score + noise(gen);
+        }
+
+        auto perturbed_ranking = rank_alternatives(perturbed_scores);
+
+        // Check if top choice remains the same
+        if (!perturbed_ranking.empty() && perturbed_ranking[0] == analysis.recommended_alternative) {
+            stable_rankings++;
+        }
+    }
+
+    sensitivity[ranking_stability] = static_cast<double>(stable_rankings) / total_tests;
 
     return sensitivity;
 }
@@ -332,9 +411,9 @@ DecisionAlternative DecisionTreeOptimizer::create_decision_alternative(
         alt.criteria_weights[criterion] = 1.0 / alt.criteria_scores.size();
     }
 
-    // Parse advantages/disadvantages from description (simplified)
-    alt.advantages = {"AI-generated alternative"};
-    alt.disadvantages = {"Requires further evaluation"};
+    // Parse advantages/disadvantages from description using NLP-like analysis
+    alt.advantages = parse_advantages_from_description(description);
+    alt.disadvantages = parse_disadvantages_from_description(description);
 
     return alt;
 }
@@ -641,8 +720,11 @@ std::unordered_map<std::string, double> DecisionTreeOptimizer::vikor_method(
             }
         }
 
-        // VIKOR combines S and R (simplified - typically uses v parameter)
-        scores[alt.id] = 0.5 * s + 0.5 * r;
+        // VIKOR combines S and R using v parameter: Q = v*S + (1-v)*R
+        // v represents weight of strategy of maximum group utility
+        double v = config_.mcda_params.vikor_v_parameter; // Typically 0.5
+        double q = v * s + (1.0 - v) * r;
+        scores[alt.id] = q;
     }
 
     return scores;
@@ -745,12 +827,49 @@ std::vector<DecisionAlternative> DecisionTreeOptimizer::generate_ai_alternatives
         }
 
         if (response) {
-            // Parse AI response to create alternatives (simplified)
-            for (int i = 0; i < max_alternatives; ++i) {
-                DecisionAlternative alt = create_decision_alternative(
-                    "AI-generated alternative " + std::to_string(i + 1));
-                alt.name = "Alternative " + std::to_string(i + 1);
-                alternatives.push_back(alt);
+            // Parse AI response as JSON to create alternatives
+            try {
+                nlohmann::json response_json = nlohmann::json::parse(*response);
+
+                // Handle different possible JSON structures
+                if (response_json.is_array()) {
+                    // Direct array of alternatives
+                    for (const auto& alt_json : response_json) {
+                        DecisionAlternative alt = parse_alternative_from_json(alt_json);
+                        if (!alt.id.empty()) {
+                            alternatives.push_back(alt);
+                        }
+                    }
+                } else if (response_json.contains("alternatives") && response_json["alternatives"].is_array()) {
+                    // Nested alternatives array
+                    for (const auto& alt_json : response_json["alternatives"]) {
+                        DecisionAlternative alt = parse_alternative_from_json(alt_json);
+                        if (!alt.id.empty()) {
+                            alternatives.push_back(alt);
+                        }
+                    }
+                } else {
+                    // Try to extract alternatives from text response
+                    alternatives = parse_alternatives_from_text(*response, max_alternatives);
+                }
+
+                // Limit to requested number
+                if (alternatives.size() > static_cast<size_t>(max_alternatives)) {
+                    alternatives.resize(max_alternatives);
+                }
+
+            } catch (const nlohmann::json::parse_error& e) {
+                logger_->warn("Failed to parse AI response as JSON, falling back to text parsing: {}", e.what());
+                alternatives = parse_alternatives_from_text(*response, max_alternatives);
+            } catch (const std::exception& e) {
+                logger_->error("Error parsing AI alternatives response: {}", e.what());
+                // Fallback to simple alternatives
+                for (int i = 0; i < max_alternatives; ++i) {
+                    DecisionAlternative alt = create_decision_alternative(
+                        "AI-generated alternative " + std::to_string(i + 1));
+                    alt.name = "Alternative " + std::to_string(i + 1);
+                    alternatives.push_back(alt);
+                }
             }
         }
 
@@ -941,7 +1060,17 @@ void DecisionTreeOptimizer::load_configuration() {
     else config_.default_method = MCDAMethod::WEIGHTED_SUM;
 
     config_.ai_model = config_manager_->get_string("DECISION_AI_MODEL")
-                      .value_or("decision_analysis");
+                       .value_or("decision_analysis");
+
+    // Load MCDA parameters
+    config_.mcda_params.topsis_distance_p = config_manager_->get_double("DECISION_TOPSIS_DISTANCE_P")
+                                           .value_or(2.0);
+    config_.mcda_params.electre_threshold = config_manager_->get_double("DECISION_ELECTRE_THRESHOLD")
+                                           .value_or(0.7);
+    config_.mcda_params.promethee_preference_threshold = config_manager_->get_double("DECISION_PROMETHEE_PREFERENCE_THRESHOLD")
+                                                        .value_or(0.1);
+    config_.mcda_params.vikor_v_parameter = config_manager_->get_double("DECISION_VIKOR_V_PARAMETER")
+                                           .value_or(0.5);
 }
 
 bool DecisionTreeOptimizer::validate_decision_input(
@@ -959,6 +1088,296 @@ bool DecisionTreeOptimizer::validate_decision_input(
     }
 
     return true;
+}
+
+std::vector<std::string> DecisionTreeOptimizer::parse_advantages_from_description(const std::string& description) {
+    std::vector<std::string> advantages;
+
+    // Simple keyword-based parsing for advantages
+    std::vector<std::string> advantage_keywords = {
+        "benefit", "advantage", "strength", "positive", "good", "better", "improved",
+        "efficient", "effective", "reliable", "robust", "flexible", "scalable",
+        "cost-effective", "time-saving", "user-friendly", "innovative"
+    };
+
+    std::string lower_desc = description;
+    std::transform(lower_desc.begin(), lower_desc.end(), lower_desc.begin(), ::tolower);
+
+    // Extract sentences containing advantage keywords
+    std::istringstream iss(description);
+    std::string sentence;
+    while (std::getline(iss, sentence, '.')) {
+        std::string lower_sentence = sentence;
+        std::transform(lower_sentence.begin(), lower_sentence.end(), lower_sentence.begin(), ::tolower);
+
+        for (const auto& keyword : advantage_keywords) {
+            if (lower_sentence.find(keyword) != std::string::npos) {
+                // Clean up the sentence
+                std::string clean_sentence = sentence;
+                // Remove leading/trailing whitespace
+                clean_sentence.erase(clean_sentence.begin(),
+                    std::find_if(clean_sentence.begin(), clean_sentence.end(),
+                        [](int ch) { return !std::isspace(ch); }));
+                clean_sentence.erase(
+                    std::find_if(clean_sentence.rbegin(), clean_sentence.rend(),
+                        [](int ch) { return !std::isspace(ch); }).base(),
+                    clean_sentence.end());
+
+                if (!clean_sentence.empty()) {
+                    advantages.push_back(clean_sentence);
+                }
+                break; // Only add each sentence once
+            }
+        }
+    }
+
+    // If no advantages found, provide defaults
+    if (advantages.empty()) {
+        advantages = {"Potential efficiency improvements", "Structured approach to decision making"};
+    }
+
+    return advantages;
+}
+
+std::vector<std::string> DecisionTreeOptimizer::parse_disadvantages_from_description(const std::string& description) {
+    std::vector<std::string> disadvantages;
+
+    // Simple keyword-based parsing for disadvantages
+    std::vector<std::string> disadvantage_keywords = {
+        "risk", "disadvantage", "weakness", "negative", "problem", "issue", "concern",
+        "costly", "complex", "difficult", "challenging", "limitation", "drawback",
+        "expensive", "time-consuming", "error-prone", "unreliable"
+    };
+
+    std::string lower_desc = description;
+    std::transform(lower_desc.begin(), lower_desc.end(), lower_desc.begin(), ::tolower);
+
+    // Extract sentences containing disadvantage keywords
+    std::istringstream iss(description);
+    std::string sentence;
+    while (std::getline(iss, sentence, '.')) {
+        std::string lower_sentence = sentence;
+        std::transform(lower_sentence.begin(), lower_sentence.end(), lower_sentence.begin(), ::tolower);
+
+        for (const auto& keyword : disadvantage_keywords) {
+            if (lower_sentence.find(keyword) != std::string::npos) {
+                // Clean up the sentence
+                std::string clean_sentence = sentence;
+                // Remove leading/trailing whitespace
+                clean_sentence.erase(clean_sentence.begin(),
+                    std::find_if(clean_sentence.begin(), clean_sentence.end(),
+                        [](int ch) { return !std::isspace(ch); }));
+                clean_sentence.erase(
+                    std::find_if(clean_sentence.rbegin(), clean_sentence.rend(),
+                        [](int ch) { return !std::isspace(ch); }).base(),
+                    clean_sentence.end());
+
+                if (!clean_sentence.empty()) {
+                    disadvantages.push_back(clean_sentence);
+                }
+                break; // Only add each sentence once
+            }
+        }
+    }
+
+    // If no disadvantages found, provide defaults
+    if (disadvantages.empty()) {
+        disadvantages = {"May require additional resources", "Implementation challenges possible"};
+    }
+
+    return disadvantages;
+}
+
+DecisionCriterion string_to_decision_criterion(const std::string& str) {
+    if (str == "FINANCIAL_IMPACT") return DecisionCriterion::FINANCIAL_IMPACT;
+    if (str == "REGULATORY_COMPLIANCE") return DecisionCriterion::REGULATORY_COMPLIANCE;
+    if (str == "RISK_LEVEL") return DecisionCriterion::RISK_LEVEL;
+    if (str == "OPERATIONAL_IMPACT") return DecisionCriterion::OPERATIONAL_IMPACT;
+    if (str == "STRATEGIC_ALIGNMENT") return DecisionCriterion::STRATEGIC_ALIGNMENT;
+    if (str == "ETHICAL_CONSIDERATIONS") return DecisionCriterion::ETHICAL_CONSIDERATIONS;
+    if (str == "LEGAL_RISK") return DecisionCriterion::LEGAL_RISK;
+    if (str == "REPUTATIONAL_IMPACT") return DecisionCriterion::REPUTATIONAL_IMPACT;
+    if (str == "TIME_TO_IMPLEMENT") return DecisionCriterion::TIME_TO_IMPLEMENT;
+    if (str == "RESOURCE_REQUIREMENTS") return DecisionCriterion::RESOURCE_REQUIREMENTS;
+    if (str == "STAKEHOLDER_IMPACT") return DecisionCriterion::STAKEHOLDER_IMPACT;
+    if (str == "MARKET_POSITION") return DecisionCriterion::MARKET_POSITION;
+    return DecisionCriterion::FINANCIAL_IMPACT; // Default fallback
+}
+
+DecisionAlternative DecisionTreeOptimizer::parse_alternative_from_json(const nlohmann::json& alt_json) {
+    DecisionAlternative alt;
+
+    try {
+        // Generate unique ID
+        alt.id = "ai_alt_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) +
+                "_" + std::to_string(rand());
+
+        // Parse name
+        if (alt_json.contains("name") && alt_json["name"].is_string()) {
+            alt.name = alt_json["name"];
+        } else if (alt_json.contains("title") && alt_json["title"].is_string()) {
+            alt.name = alt_json["title"];
+        } else {
+            alt.name = "AI Alternative";
+        }
+
+        // Parse description
+        if (alt_json.contains("description") && alt_json["description"].is_string()) {
+            alt.description = alt_json["description"];
+        } else if (alt_json.contains("summary") && alt_json["summary"].is_string()) {
+            alt.description = alt_json["summary"];
+        } else {
+            alt.description = "AI-generated decision alternative";
+        }
+
+        // Parse advantages
+        if (alt_json.contains("advantages") && alt_json["advantages"].is_array()) {
+            for (const auto& adv : alt_json["advantages"]) {
+                if (adv.is_string()) {
+                    alt.advantages.push_back(adv);
+                }
+            }
+        } else if (alt_json.contains("pros") && alt_json["pros"].is_array()) {
+            for (const auto& pro : alt_json["pros"]) {
+                if (pro.is_string()) {
+                    alt.advantages.push_back(pro);
+                }
+            }
+        }
+
+        // Parse disadvantages
+        if (alt_json.contains("disadvantages") && alt_json["disadvantages"].is_array()) {
+            for (const auto& dis : alt_json["disadvantages"]) {
+                if (dis.is_string()) {
+                    alt.disadvantages.push_back(dis);
+                }
+            }
+        } else if (alt_json.contains("cons") && alt_json["cons"].is_array()) {
+            for (const auto& con : alt_json["cons"]) {
+                if (con.is_string()) {
+                    alt.disadvantages.push_back(con);
+                }
+            }
+        }
+
+        // Parse criteria scores if provided
+        if (alt_json.contains("criteria_scores") && alt_json["criteria_scores"].is_object()) {
+            for (const auto& [criterion_str, score] : alt_json["criteria_scores"].items()) {
+                DecisionCriterion criterion = string_to_decision_criterion(criterion_str);
+                if (score.is_number()) {
+                    alt.criteria_scores[criterion] = score;
+                }
+            }
+        }
+
+        // Set default criteria scores if not provided
+        if (alt.criteria_scores.empty()) {
+            alt.criteria_scores = {
+                {DecisionCriterion::FINANCIAL_IMPACT, 0.5},
+                {DecisionCriterion::REGULATORY_COMPLIANCE, 0.7},
+                {DecisionCriterion::RISK_LEVEL, 0.4},
+                {DecisionCriterion::OPERATIONAL_IMPACT, 0.6},
+                {DecisionCriterion::STRATEGIC_ALIGNMENT, 0.5},
+                {DecisionCriterion::ETHICAL_CONSIDERATIONS, 0.8}
+            };
+        }
+
+        // Set equal weights by default
+        for (const auto& [criterion, _] : alt.criteria_scores) {
+            alt.criteria_weights[criterion] = 1.0 / alt.criteria_scores.size();
+        }
+
+        // Ensure advantages and disadvantages are not empty
+        if (alt.advantages.empty()) {
+            alt.advantages = parse_advantages_from_description(alt.description);
+        }
+        if (alt.disadvantages.empty()) {
+            alt.disadvantages = parse_disadvantages_from_description(alt.description);
+        }
+
+    } catch (const std::exception& e) {
+        logger_->warn("Error parsing alternative from JSON: {}", e.what());
+        // Return empty alternative to indicate parsing failure
+        alt.id = "";
+    }
+
+    return alt;
+}
+
+std::vector<DecisionAlternative> DecisionTreeOptimizer::parse_alternatives_from_text(
+    const std::string& text, int max_alternatives) {
+
+    std::vector<DecisionAlternative> alternatives;
+
+    try {
+        // Simple text parsing - split by numbered items or bullet points
+        std::vector<std::string> lines;
+        std::istringstream iss(text);
+        std::string line;
+
+        while (std::getline(iss, line)) {
+            // Remove leading/trailing whitespace
+            line.erase(line.begin(), std::find_if(line.begin(), line.end(),
+                [](int ch) { return !std::isspace(ch); }));
+            line.erase(std::find_if(line.rbegin(), line.rend(),
+                [](int ch) { return !std::isspace(ch); }).base(), line.end());
+
+            if (!line.empty()) {
+                lines.push_back(line);
+            }
+        }
+
+        // Look for numbered alternatives (1., 2., etc.) or bullet points
+        std::vector<std::string> alt_texts;
+        std::string current_alt;
+
+        for (const auto& line : lines) {
+            // Check if line starts a new alternative
+            if ((line.size() >= 2 && std::isdigit(line[0]) && line[1] == '.') ||
+                (line.size() >= 1 && (line[0] == '-' || line[0] == '•' || line[0] == '*'))) {
+
+                if (!current_alt.empty()) {
+                    alt_texts.push_back(current_alt);
+                }
+                current_alt = line.substr(line.find_first_not_of("-•*1234567890. "));
+            } else if (!line.empty()) {
+                if (!current_alt.empty()) current_alt += " ";
+                current_alt += line;
+            }
+        }
+
+        if (!current_alt.empty()) {
+            alt_texts.push_back(current_alt);
+        }
+
+        // Create alternatives from parsed text
+        for (size_t i = 0; i < alt_texts.size() && i < static_cast<size_t>(max_alternatives); ++i) {
+            DecisionAlternative alt = create_decision_alternative(alt_texts[i]);
+            alt.name = "Alternative " + std::to_string(i + 1);
+            alternatives.push_back(alt);
+        }
+
+        // If no alternatives found, create basic ones
+        if (alternatives.empty()) {
+            for (int i = 0; i < max_alternatives; ++i) {
+                DecisionAlternative alt = create_decision_alternative(
+                    "AI-generated alternative based on: " + text.substr(0, 100));
+                alt.name = "Alternative " + std::to_string(i + 1);
+                alternatives.push_back(alt);
+            }
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("Error parsing alternatives from text: {}", e.what());
+        // Fallback
+        for (int i = 0; i < max_alternatives; ++i) {
+            DecisionAlternative alt = create_decision_alternative("AI-generated alternative");
+            alt.name = "Alternative " + std::to_string(i + 1);
+            alternatives.push_back(alt);
+        }
+    }
+
+    return alternatives;
 }
 
 } // namespace regulens

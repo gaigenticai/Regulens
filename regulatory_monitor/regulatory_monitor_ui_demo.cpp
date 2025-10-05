@@ -30,7 +30,7 @@
 #include "regulatory_monitor.hpp"
 #include "regulatory_source.hpp"
 #include "change_detector.hpp"
-// #include "regulatory_monitor_demo.cpp" // Include simplified demo components - removed
+#include "../shared/regulatory_knowledge_base.hpp"
 
 #include "../web_ui/regulatory_monitor_ui.hpp"
 
@@ -101,10 +101,14 @@ private:
         // Create metrics collector
         metrics_ = std::make_shared<MetricsCollector>();
 
-        // Initialize simplified demo components
-        knowledge_base_ = std::make_shared<SimpleKnowledgeBase>();
-        monitor_ = std::make_shared<SimpleRegulatoryMonitor>();
-        monitor_->set_knowledge_base(knowledge_base_);
+        // Initialize real regulatory monitoring components
+        knowledge_base_ = std::make_shared<RegulatoryKnowledgeBase>(config_, logger_);
+        monitor_ = std::make_shared<RegulatoryMonitor>(config_, logger_, knowledge_base_);
+
+        // Initialize the monitor
+        if (!monitor_->initialize()) {
+            throw std::runtime_error("Failed to initialize regulatory monitor");
+        }
 
         // Add real regulatory sources - production-grade compliance monitoring
         auto sec_source = std::make_shared<SecEdgarSource>(config_, logger_);
@@ -185,7 +189,8 @@ private:
     }
 
     void print_status_update() {
-        monitor_->print_stats();
+        auto stats = monitor_->get_monitoring_stats();
+        std::cout << "📊 Monitoring Stats: " << stats.dump(2) << std::endl;
         std::cout << "💻 Web UI Status: " << (ui_ && ui_->is_running() ? "Running" : "Stopped") << std::endl;
         std::cout << "📍 Dashboard URL: " << (ui_ ? ui_->get_server_url() : "N/A") << std::endl;
         std::cout << std::endl;
@@ -229,7 +234,9 @@ private:
 
         // Final statistics
         if (monitor_) {
-            monitor_->print_stats();
+            auto stats = monitor_->get_monitoring_stats();
+            std::cout << "📊 Final Monitoring Statistics:" << std::endl;
+            std::cout << stats.dump(2) << std::endl;
         }
 
         auto recent_changes = knowledge_base_->get_recent_changes(5);
@@ -258,8 +265,8 @@ private:
     std::shared_ptr<MetricsCollector> metrics_;
 
     // Regulatory monitoring components
-    std::shared_ptr<SimpleRegulatoryMonitor> monitor_;
-    std::shared_ptr<SimpleKnowledgeBase> knowledge_base_;
+    std::shared_ptr<RegulatoryMonitor> monitor_;
+    std::shared_ptr<RegulatoryKnowledgeBase> knowledge_base_;
 
     // Web UI
     std::unique_ptr<RegulatoryMonitorUI> ui_;

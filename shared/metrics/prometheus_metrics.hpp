@@ -172,9 +172,55 @@ private:
     std::atomic<size_t> anthropic_breaker_opened_{0};
     std::atomic<size_t> anthropic_breaker_closed_{0};
 
-    // Performance histograms (simplified as gauges for now)
-    std::atomic<long> openai_avg_response_time_{0};
-    std::atomic<long> anthropic_avg_response_time_{0};
+    // Performance histograms
+    struct HistogramBucket {
+        double upper_bound;
+        std::atomic<size_t> count{0};
+    };
+
+    struct HistogramData {
+        std::vector<HistogramBucket> buckets;
+        std::atomic<size_t> count{0};
+        std::atomic<double> sum{0.0};
+
+        HistogramData() {
+            // Standard buckets for response times (milliseconds)
+            buckets = {
+                {1.0, 0},     // 0-1ms
+                {5.0, 0},     // 1-5ms
+                {10.0, 0},    // 5-10ms
+                {25.0, 0},    // 10-25ms
+                {50.0, 0},    // 25-50ms
+                {100.0, 0},   // 50-100ms
+                {250.0, 0},   // 100-250ms
+                {500.0, 0},   // 250-500ms
+                {1000.0, 0},  // 500ms-1s
+                {2500.0, 0},  // 1-2.5s
+                {5000.0, 0},  // 2.5-5s
+                {10000.0, 0}, // 5-10s
+                {30000.0, 0}, // 10-30s
+                {60000.0, 0}, // 30-60s
+                {std::numeric_limits<double>::infinity(), 0} // >60s
+            };
+        }
+
+        void observe(double value) {
+            count++;
+            sum += value;
+
+            // Update buckets
+            for (auto& bucket : buckets) {
+                if (value <= bucket.upper_bound) {
+                    bucket.count++;
+                }
+            }
+        }
+    };
+
+    HistogramData openai_response_time_histogram_;
+    HistogramData anthropic_response_time_histogram_;
+
+    // Token and cost counters
     std::atomic<size_t> openai_total_tokens_{0};
     std::atomic<size_t> anthropic_total_tokens_{0};
     std::atomic<double> openai_total_cost_{0.0};

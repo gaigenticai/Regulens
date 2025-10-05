@@ -267,7 +267,9 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
         failed_requests_++;
         return std::nullopt;
     }
-}
+
+    // Should not reach here, but add for safety
+    return std::nullopt;
 
 std::optional<std::string> AnthropicClient::advanced_reasoning_analysis(
     const std::string& prompt, const std::string& context, const std::string& analysis_type) {
@@ -1052,7 +1054,7 @@ std::string AnthropicClient::generate_prompt_hash(const ClaudeCompletionRequest&
     // Include key parameters that affect the response
     content << "model:" << request.model << "|";
     content << "max_tokens:" << request.max_tokens << "|";
-    content << "temperature:" << request.temperature << "|";
+    content << "temperature:" << (request.temperature ? std::to_string(*request.temperature) : "null") << "|";
 
     // Simple hash function (in production, use proper crypto hash)
     std::hash<std::string> hasher;
@@ -1080,7 +1082,7 @@ double AnthropicClient::calculate_prompt_complexity(const ClaudeCompletionReques
     double length_score = std::min(1.0, static_cast<double>(total_chars) / 8000.0) * 0.5;
 
     // Temperature affects complexity (lower temp = more deterministic = higher complexity)
-    double temp_score = (1.0 - request.temperature) * 0.2;
+    double temp_score = request.temperature ? (1.0 - *request.temperature) * 0.2 : 0.0;
 
     // Model complexity (Claude 3 Opus is more complex than Sonnet)
     double model_score = 0.0;

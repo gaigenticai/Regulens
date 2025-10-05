@@ -17,6 +17,13 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <chrono>
+
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <sys/time.h>
+#else
+#include <sys/epoll.h>
+#endif
 #include "../config/configuration_manager.hpp"
 #include "../metrics/metrics_collector.hpp"
 
@@ -131,22 +138,115 @@ void WebUIServer::server_loop() {
     // Set non-blocking
     fcntl(server_fd, F_SETFL, O_NONBLOCK);
 
-    while (running_) {
-        // Accept connections (simplified - in production would use epoll/kqueue)
-        sockaddr_in client_addr{};
-        socklen_t client_len = sizeof(client_addr);
-        int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
+#ifdef __APPLE__
+    // kqueue implementation for macOS/BSD
+    int kq = kqueue();
+    if (kq == -1) {
+        if (logger_) logger_->error("Failed to create kqueue");
+        close(server_fd);
+        running_ = false;
+        return;
+    }
 
-        if (client_fd >= 0) {
-            // Handle request in a separate thread
-            std::thread([this, client_fd]() {
-                handle_client(client_fd);
-            }).detach();
-        } else {
-            // Sleep to avoid busy waiting
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    struct kevent change_event;
+    EV_SET(&change_event, server_fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+
+    if (kevent(kq, &change_event, 1, NULL, 0, NULL) == -1) {
+        if (logger_) logger_->error("Failed to add server socket to kqueue");
+        close(kq);
+        close(server_fd);
+        running_ = false;
+        return;
+    }
+
+    const int MAX_EVENTS = 32;
+    struct kevent events[MAX_EVENTS];
+
+    while (running_) {
+        struct timespec timeout = {1, 0}; // 1 second timeout
+        int nev = kevent(kq, NULL, 0, events, MAX_EVENTS, &timeout);
+
+        if (nev == -1) {
+            if (logger_) logger_->error("kqueue wait failed");
+            continue;
+        }
+
+        for (int i = 0; i < nev; ++i) {
+            if (events[i].ident == server_fd) {
+                // Accept new connections
+                sockaddr_in client_addr{};
+                socklen_t client_len = sizeof(client_addr);
+                int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
+
+                if (client_fd >= 0) {
+                    // Set client socket to non-blocking
+                    fcntl(client_fd, F_SETFL, O_NONBLOCK);
+
+                    // Handle request in a separate thread
+                    std::thread([this, client_fd]() {
+                        handle_client(client_fd);
+                    }).detach();
+                }
+            }
         }
     }
+
+    close(kq);
+#else
+    // epoll implementation for Linux
+    int epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        if (logger_) logger_->error("Failed to create epoll instance");
+        close(server_fd);
+        running_ = false;
+        return;
+    }
+
+    struct epoll_event event;
+    event.events = EPOLLIN;
+    event.data.fd = server_fd;
+
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event) == -1) {
+        if (logger_) logger_->error("Failed to add server socket to epoll");
+        close(epoll_fd);
+        close(server_fd);
+        running_ = false;
+        return;
+    }
+
+    const int MAX_EVENTS = 32;
+    struct epoll_event events[MAX_EVENTS];
+
+    while (running_) {
+        int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, 1000); // 1 second timeout
+
+        if (nfds == -1) {
+            if (logger_) logger_->error("epoll_wait failed");
+            continue;
+        }
+
+        for (int i = 0; i < nfds; ++i) {
+            if (events[i].data.fd == server_fd) {
+                // Accept new connections
+                sockaddr_in client_addr{};
+                socklen_t client_len = sizeof(client_addr);
+                int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
+
+                if (client_fd >= 0) {
+                    // Set client socket to non-blocking
+                    fcntl(client_fd, F_SETFL, O_NONBLOCK);
+
+                    // Handle request in a separate thread
+                    std::thread([this, client_fd]() {
+                        handle_client(client_fd);
+                    }).detach();
+                }
+            }
+        }
+    }
+
+    close(epoll_fd);
+#endif
 
     close(server_fd);
 }

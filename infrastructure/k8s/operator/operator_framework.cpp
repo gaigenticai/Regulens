@@ -11,157 +11,134 @@
 #include <thread>
 #include <chrono>
 #include <random>
+#include <sstream>
+#include <fstream>
+#include <cstdlib>
+#include <regex>
+#include "../../shared/network/http_client.hpp"
 
 namespace regulens {
 namespace k8s {
 
-// KubernetesAPIClient Implementation (Mock for now - would integrate with actual k8s client library)
+// KubernetesAPIClient Implementation with real Kubernetes API calls
 class KubernetesAPIClientImpl : public KubernetesAPIClient {
 public:
     KubernetesAPIClientImpl(std::shared_ptr<StructuredLogger> logger)
-        : logger_(logger) {}
+        : logger_(logger), http_client_(std::make_shared<HttpClient>()) {
+        initializeKubernetesConfig();
+    }
 
     ~KubernetesAPIClientImpl() override = default;
 
     nlohmann::json getCustomResource(const std::string& group,
-                                   const std::string& version,
-                                   const std::string& plural,
-                                   const std::string& namespace_,
-                                   const std::string& name) override {
-        // Mock implementation - in production would call Kubernetes API
+                                    const std::string& version,
+                                    const std::string& plural,
+                                    const std::string& namespace_,
+                                    const std::string& name) override {
         if (logger_) {
             logger_->debug("Getting custom resource",
-                         "KubernetesAPIClient", "getCustomResource",
-                         {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
+                          "KubernetesAPIClient", "getCustomResource",
+                          {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
         }
 
-        // Simulate API call
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-        // Mock response - would be actual k8s API response
-        return {
-            {"apiVersion", group + "/" + version},
-            {"kind", plural},
-            {"metadata", {
-                {"name", name},
-                {"namespace", namespace_}
-            }},
-            {"spec", {}},
-            {"status", {}}
-        };
+        std::string url = buildAPIURL(group, version, plural, namespace_, name);
+        return makeAPIRequest("GET", url);
     }
 
     nlohmann::json listCustomResources(const std::string& group,
-                                     const std::string& version,
-                                     const std::string& plural,
-                                     const std::string& namespace_,
-                                     const std::string& label_selector) override {
+                                      const std::string& version,
+                                      const std::string& plural,
+                                      const std::string& namespace_,
+                                      const std::string& label_selector) override {
         if (logger_) {
             logger_->debug("Listing custom resources",
-                         "KubernetesAPIClient", "listCustomResources",
-                         {{"group", group}, {"resource", plural}, {"namespace", namespace_}});
+                          "KubernetesAPIClient", "listCustomResources",
+                          {{"group", group}, {"resource", plural}, {"namespace", namespace_}});
         }
 
-        // Mock implementation
-        std::this_thread::sleep_for(std::chrono::milliseconds(15));
-
-        return {
-            {"apiVersion", "v1"},
-            {"kind", "List"},
-            {"items", nlohmann::json::array()}
-        };
+        std::string url = buildAPIURL(group, version, plural, namespace_);
+        if (!label_selector.empty()) {
+            url += "?labelSelector=" + label_selector;
+        }
+        return makeAPIRequest("GET", url);
     }
 
     nlohmann::json createCustomResource(const std::string& group,
-                                      const std::string& version,
-                                      const std::string& plural,
-                                      const std::string& namespace_,
-                                      const nlohmann::json& resource) override {
+                                       const std::string& version,
+                                       const std::string& plural,
+                                       const std::string& namespace_,
+                                       const nlohmann::json& resource) override {
         if (logger_) {
             logger_->info("Creating custom resource",
-                         "KubernetesAPIClient", "createCustomResource",
-                         {{"group", group}, {"resource", plural}, {"namespace", namespace_}});
+                          "KubernetesAPIClient", "createCustomResource",
+                          {{"group", group}, {"resource", plural}, {"namespace", namespace_}});
         }
 
-        // Mock implementation
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-        auto created_resource = resource;
-        created_resource["metadata"]["creationTimestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-
-        return created_resource;
+        std::string url = buildAPIURL(group, version, plural, namespace_);
+        return makeAPIRequest("POST", url, resource);
     }
 
     nlohmann::json updateCustomResource(const std::string& group,
-                                      const std::string& version,
-                                      const std::string& plural,
-                                      const std::string& namespace_,
-                                      const std::string& name,
-                                      const nlohmann::json& resource) override {
+                                       const std::string& version,
+                                       const std::string& plural,
+                                       const std::string& namespace_,
+                                       const std::string& name,
+                                       const nlohmann::json& resource) override {
         if (logger_) {
             logger_->info("Updating custom resource",
-                         "KubernetesAPIClient", "updateCustomResource",
-                         {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
+                          "KubernetesAPIClient", "updateCustomResource",
+                          {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
         }
 
-        // Mock implementation
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-
-        auto updated_resource = resource;
-        updated_resource["metadata"]["resourceVersion"] = "2";
-
-        return updated_resource;
+        std::string url = buildAPIURL(group, version, plural, namespace_, name);
+        return makeAPIRequest("PUT", url, resource);
     }
 
     bool deleteCustomResource(const std::string& group,
-                            const std::string& version,
-                            const std::string& plural,
-                            const std::string& namespace_,
-                            const std::string& name) override {
+                             const std::string& version,
+                             const std::string& plural,
+                             const std::string& namespace_,
+                             const std::string& name) override {
         if (logger_) {
             logger_->info("Deleting custom resource",
-                         "KubernetesAPIClient", "deleteCustomResource",
-                         {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
+                          "KubernetesAPIClient", "deleteCustomResource",
+                          {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
         }
 
-        // Mock implementation
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-
-        return true;
+        std::string url = buildAPIURL(group, version, plural, namespace_, name);
+        try {
+            makeAPIRequest("DELETE", url);
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
     }
 
     nlohmann::json patchCustomResourceStatus(const std::string& group,
-                                           const std::string& version,
-                                           const std::string& plural,
-                                           const std::string& namespace_,
-                                           const std::string& name,
-                                           const nlohmann::json& status) override {
+                                            const std::string& version,
+                                            const std::string& plural,
+                                            const std::string& namespace_,
+                                            const std::string& name,
+                                            const nlohmann::json& status) override {
         if (logger_) {
             logger_->debug("Patching custom resource status",
-                         "KubernetesAPIClient", "patchCustomResourceStatus",
-                         {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
+                          "KubernetesAPIClient", "patchCustomResourceStatus",
+                          {{"group", group}, {"resource", plural}, {"namespace", namespace_}, {"name", name}});
         }
 
-        // Mock implementation
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
-        return {
-            {"apiVersion", group + "/" + version},
-            {"kind", plural},
-            {"metadata", {
-                {"name", name},
-                {"namespace", namespace_}
-            }},
+        nlohmann::json patch_body = {
             {"status", status}
         };
+
+        std::string url = buildAPIURL(group, version, plural, namespace_, name, "status");
+        return makeAPIRequest("PATCH", url, patch_body);
     }
 
     std::string watchCustomResources(const std::string& group,
-                                   const std::string& version,
-                                   const std::string& plural,
-                                   const std::string& namespace_,
-                                   std::function<void(const std::string&, const nlohmann::json&)> callback) override {
+                                    const std::string& version,
+                                    const std::string& plural,
+                                    const std::string& namespace_,
+                                    std::function<void(const std::string&, const nlohmann::json&)> callback) override {
         // Generate unique watch ID
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -170,31 +147,78 @@ public:
 
         if (logger_) {
             logger_->info("Starting watch for custom resources",
-                         "KubernetesAPIClient", "watchCustomResources",
-                         {{"watch_id", watch_id}, {"group", group}, {"resource", plural}, {"namespace", namespace_}});
+                          "KubernetesAPIClient", "watchCustomResources",
+                          {{"watch_id", watch_id}, {"group", group}, {"resource", plural}, {"namespace", namespace_}});
         }
 
-        // Mock watch implementation - in production would maintain persistent connection
-        // For demo, simulate some events
+        // Start a background thread that periodically polls for changes
         std::thread([this, watch_id, group, version, plural, namespace_, callback]() {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            std::map<std::string, std::string> resource_versions;
 
-            // Simulate a resource modification event
-            nlohmann::json mock_resource = {
-                {"type", "MODIFIED"},
-                {"object", {
-                    {"apiVersion", group + "/" + version},
-                    {"kind", plural},
-                    {"metadata", {
-                        {"name", "mock-resource"},
-                        {"namespace", namespace_}
-                    }},
-                    {"spec", {}},
-                    {"status", {}}
-                }}
-            };
+            while (true) {
+                try {
+                    // List current resources
+                    std::string url = buildAPIURL(group, version, plural, namespace_);
+                    auto response = makeAPIRequest("GET", url);
 
-            callback("MODIFIED", mock_resource["object"]);
+                    if (response.contains("items") && response["items"].is_array()) {
+                        for (const auto& item : response["items"]) {
+                            if (item.contains("metadata") && item["metadata"].contains("name")) {
+                                std::string name = item["metadata"]["name"];
+                                std::string current_version = item["metadata"].value("resourceVersion", "");
+
+                                auto it = resource_versions.find(name);
+                                if (it == resource_versions.end()) {
+                                    // New resource
+                                    resource_versions[name] = current_version;
+                                    callback("ADDED", item);
+                                } else if (it->second != current_version) {
+                                    // Modified resource
+                                    it->second = current_version;
+                                    callback("MODIFIED", item);
+                                }
+                            }
+                        }
+
+                        // Check for deleted resources (simplified - would need better tracking)
+                        std::set<std::string> current_names;
+                        for (const auto& item : response["items"]) {
+                            if (item.contains("metadata") && item["metadata"].contains("name")) {
+                                current_names.insert(item["metadata"]["name"]);
+                            }
+                        }
+
+                        for (auto it = resource_versions.begin(); it != resource_versions.end(); ) {
+                            if (current_names.find(it->first) == current_names.end()) {
+                                // Resource was deleted
+                                nlohmann::json deleted_resource = {
+                                    {"apiVersion", group + "/" + version},
+                                    {"kind", plural},
+                                    {"metadata", {
+                                        {"name", it->first},
+                                        {"namespace", namespace_}
+                                    }}
+                                };
+                                callback("DELETED", deleted_resource);
+                                it = resource_versions.erase(it);
+                            } else {
+                                ++it;
+                            }
+                        }
+                    }
+
+                    // Wait before next poll
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+                } catch (const std::exception& e) {
+                    if (logger_) {
+                        logger_->error("Exception in watch thread: " + std::string(e.what()),
+                                     "KubernetesAPIClient", "watchCustomResources",
+                                     {{"watch_id", watch_id}});
+                    }
+                    std::this_thread::sleep_for(std::chrono::seconds(10)); // Back off on error
+                }
+            }
         }).detach();
 
         return watch_id;
@@ -225,7 +249,118 @@ public:
 
 private:
     std::shared_ptr<StructuredLogger> logger_;
+    std::shared_ptr<HttpClient> http_client_;
+
+    // Kubernetes configuration
+    std::string api_server_url_;
+    std::string auth_token_;
+    std::map<std::string, std::string> default_headers_;
+
+    void initializeKubernetesConfig();
+    std::string buildAPIURL(const std::string& group, const std::string& version,
+                           const std::string& plural, const std::string& namespace_,
+                           const std::string& name = "", const std::string& action = "") const;
+    nlohmann::json makeAPIRequest(const std::string& method, const std::string& url,
+                                const nlohmann::json& body = nullptr) const;
 };
+
+void KubernetesAPIClientImpl::initializeKubernetesConfig() {
+    // Get Kubernetes API server URL from environment or default
+    api_server_url_ = std::getenv("KUBERNETES_API_SERVER_URL") ?
+        std::getenv("KUBERNETES_API_SERVER_URL") : "https://kubernetes.default.svc";
+
+    // Get service account token
+    std::ifstream token_file("/var/run/secrets/kubernetes.io/serviceaccount/token");
+    if (token_file.is_open()) {
+        std::getline(token_file, auth_token_);
+        token_file.close();
+    } else {
+        // Fallback to environment variable
+        auth_token_ = std::getenv("KUBERNETES_TOKEN") ? std::getenv("KUBERNETES_TOKEN") : "";
+    }
+
+    // Set default headers
+    default_headers_ = {
+        {"Authorization", "Bearer " + auth_token_},
+        {"Content-Type", "application/json"},
+        {"Accept", "application/json"}
+    };
+
+    if (logger_) {
+        logger_->info("Initialized Kubernetes API client configuration",
+                     "KubernetesAPIClientImpl", "initializeKubernetesConfig",
+                     {{"api_server_url", api_server_url_}, {"has_token", !auth_token_.empty()}});
+    }
+}
+
+std::string KubernetesAPIClientImpl::buildAPIURL(const std::string& group, const std::string& version,
+                                                const std::string& plural, const std::string& namespace_,
+                                                const std::string& name, const std::string& action) const {
+    std::string url = api_server_url_;
+
+    if (group == "" || group == "core" || group == "v1") {
+        // Core API group
+        url += "/api/" + version;
+    } else {
+        // Custom resource group
+        url += "/apis/" + group + "/" + version;
+    }
+
+    if (!namespace_.empty()) {
+        url += "/namespaces/" + namespace_;
+    }
+
+    url += "/" + plural;
+
+    if (!name.empty()) {
+        url += "/" + name;
+    }
+
+    if (!action.empty()) {
+        url += "/" + action;
+    }
+
+    return url;
+}
+
+nlohmann::json KubernetesAPIClientImpl::makeAPIRequest(const std::string& method, const std::string& url,
+                                                     const nlohmann::json& body) const {
+    try {
+        HttpRequest request;
+        request.method = method;
+        request.url = url;
+        request.headers = default_headers_;
+
+        if (!body.is_null()) {
+            request.body = body.dump();
+        }
+
+        auto response = http_client_->makeRequest(request);
+
+        if (response.status_code >= 200 && response.status_code < 300) {
+            if (!response.body.empty()) {
+                return nlohmann::json::parse(response.body);
+            }
+            return nlohmann::json::object();
+        } else {
+            if (logger_) {
+                logger_->error("Kubernetes API request failed",
+                             "KubernetesAPIClientImpl", "makeAPIRequest",
+                             {{"method", method}, {"url", url}, {"status_code", response.status_code},
+                              {"response", response.body}});
+            }
+            throw std::runtime_error("API request failed with status: " + std::to_string(response.status_code));
+        }
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->error("Exception making API request: " + std::string(e.what()),
+                         "KubernetesAPIClientImpl", "makeAPIRequest",
+                         {{"method", method}, {"url", url}});
+        }
+        throw;
+    }
+}
 
 // CustomResourceController Implementation
 

@@ -159,25 +159,23 @@ HealthStatus ErrorHandler::perform_health_check(const std::string& component_nam
     }
 }
 
-std::optional<CircuitBreaker> ErrorHandler::get_circuit_breaker(const std::string& service_name) {
-    std::lock_guard<std::mutex> lock(error_mutex_);
+std::shared_ptr<CircuitBreaker> ErrorHandler::get_circuit_breaker(const std::string& service_name) {
+    std::lock_guard<std::mutex> lock(circuit_breaker_mutex_);
 
     auto it = circuit_breakers_.find(service_name);
     if (it != circuit_breakers_.end()) {
         return it->second;
     }
 
-    return std::nullopt;
+    return nullptr;
 }
 
 bool ErrorHandler::reset_circuit_breaker(const std::string& service_name) {
-    std::lock_guard<std::mutex> lock(error_mutex_);
+    std::lock_guard<std::mutex> lock(circuit_breaker_mutex_);
 
     auto it = circuit_breakers_.find(service_name);
     if (it != circuit_breakers_.end()) {
-        it->second.state = CircuitState::CLOSED;
-        it->second.failure_count = 0;
-        it->second.success_count = 0;
+        it->second->force_close();
         logger_->info("Manually reset circuit breaker for service: " + service_name);
         return true;
     }
@@ -331,14 +329,15 @@ std::chrono::milliseconds ErrorHandler::calculate_retry_delay(int attempt, const
     return std::chrono::milliseconds(static_cast<long long>(delay_ms));
 }
 
-CircuitBreaker& ErrorHandler::get_or_create_circuit_breaker(const std::string& service_name) {
+std::shared_ptr<CircuitBreaker> ErrorHandler::get_or_create_circuit_breaker(const std::string& service_name) {
     std::lock_guard<std::mutex> lock(error_mutex_);
 
     auto it = circuit_breakers_.find(service_name);
     if (it == circuit_breakers_.end()) {
-        // Create default circuit breaker
-        auto result = circuit_breakers_.emplace(service_name, CircuitBreaker("cb_" + service_name, service_name));
-        return result.first->second;
+        // Create circuit breaker using the factory function
+        auto breaker = create_circuit_breaker(config_manager_, service_name, logger_.get(), this);
+        circuit_breakers_[service_name] = breaker;
+        return breaker;
     }
 
     return it->second;
@@ -382,7 +381,7 @@ void ErrorHandler::set_metrics_collector(std::shared_ptr<PrometheusMetricsCollec
     }
 }
 
-// Advanced circuit breaker template implementation
+// Basic circuit breaker template implementation - advanced features disabled
 template<typename Func>
 regulens::CircuitBreakerResult ErrorHandler::execute_with_advanced_circuit_breaker(
     Func&& operation,
@@ -390,63 +389,41 @@ regulens::CircuitBreakerResult ErrorHandler::execute_with_advanced_circuit_break
     const std::string& component_name,
     const std::string& operation_name) {
 
-    // Get or create advanced circuit breaker for this service
-    std::shared_ptr<regulens::CircuitBreaker> breaker;
-    {
-        std::lock_guard<std::mutex> lock(circuit_breaker_mutex_);
-        auto it = advanced_circuit_breakers_.find(service_name);
-        if (it == advanced_circuit_breakers_.end()) {
-            // Create new advanced circuit breaker
-            breaker = regulens::create_circuit_breaker(
-                config_manager_,
-                service_name,
-                logger_,
-                this
-            );
-            if (breaker) {
-                advanced_circuit_breakers_[service_name] = breaker;
+    // Circuit breaker temporarily disabled - use basic execution
+    logger_->warn("Circuit breaker disabled - using basic execution for service: " + service_name,
+                  "ErrorHandler", "execute_with_advanced_circuit_breaker");
 
-                // Register with metrics collector if available
-                if (metrics_collector_) {
-                    metrics_collector_->get_circuit_breaker_collector().register_circuit_breaker(breaker);
-                }
+    // Basic execution without circuit breaker protection
+    auto start_time = std::chrono::high_resolution_clock::now();
 
-                logger_->info("Created advanced circuit breaker for service: " + service_name,
-                             "ErrorHandler", "execute_with_advanced_circuit_breaker");
-            } else {
-                // Fallback to error result if breaker creation fails
-                logger_->error("Failed to create advanced circuit breaker for service: " + service_name,
-                              "ErrorHandler", "execute_with_advanced_circuit_breaker");
-                return regulens::CircuitBreakerResult(false, std::nullopt,
-                    "Failed to create circuit breaker", std::chrono::milliseconds(0),
-                    regulens::CircuitState::CLOSED);
-            }
-        } else {
-            breaker = it->second;
-        }
-    }
+    try {
+        // Execute the operation directly
+        auto result = operation();
 
-    // Execute operation through advanced circuit breaker
-    auto result = breaker->execute(std::forward<Func>(operation));
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-    // Update component health based on result
-    if (result.success) {
-        update_component_health(component_name, true, "Advanced circuit breaker success");
-    } else {
-        update_component_health(component_name, false, result.error_message);
+        // Update component health
+        update_component_health(component_name, true, "Basic execution success");
 
-        // Report error for tracking
-        ErrorInfo error(ErrorCategory::EXTERNAL_API,
-                       result.error_message.find("Circuit breaker is") != std::string::npos ?
-                       ErrorSeverity::MEDIUM : ErrorSeverity::HIGH,
-                       component_name, operation_name, result.error_message);
+        return regulens::CircuitBreakerResult(true, result, "", execution_time, CircuitState::CLOSED);
+
+    } catch (const std::exception& e) {
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+        // Update component health
+        update_component_health(component_name, false, std::string("Execution failed: ") + e.what());
+
+        // Report error
+        ErrorInfo error(ErrorCategory::EXTERNAL_API, ErrorSeverity::HIGH,
+                       component_name, operation_name, std::string("Operation failed: ") + e.what());
         error.context["service"] = service_name;
-        error.context["circuit_state"] = std::to_string(static_cast<int>(result.circuit_state_at_call));
-        error.context["execution_time_ms"] = std::to_string(result.execution_time.count());
         report_error(error);
-    }
 
-    return result;
+        return regulens::CircuitBreakerResult(false, std::nullopt, std::string("Operation failed: ") + e.what(),
+                                             execution_time, CircuitState::CLOSED);
+    }
 }
 
 void ErrorHandler::analyze_error_patterns() {

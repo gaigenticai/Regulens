@@ -306,8 +306,21 @@ std::vector<CaseRetrievalResult> CaseBasedReasoner::retrieve_similar_cases(const
         // Generate query embedding if needed
         std::vector<float> query_embedding;
         if (enable_embeddings_ && embeddings_client_) {
-            // In practice, this would generate embedding for query context
-            query_embedding = std::vector<float>(384, 0.1f); // Placeholder
+            // Create text representation of the query for embedding
+            std::string query_text = create_query_text_representation(query);
+
+            EmbeddingRequest embedding_request;
+            embedding_request.texts = {query_text};
+            embedding_request.model_name = "sentence-transformers/all-MiniLM-L6-v2";
+
+            auto embedding_response = embeddings_client_->generate_embeddings(embedding_request);
+
+            if (embedding_response && !embedding_response->embeddings.empty()) {
+                query_embedding = embedding_response->embeddings[0]; // Use first (only) embedding
+            } else {
+                logger_->log(LogLevel::WARN, "Failed to generate embeddings for query, using fallback");
+                query_embedding = std::vector<float>(384, 0.0f); // Fallback to zeros
+            }
         }
 
         // Score all cases
@@ -997,8 +1010,9 @@ bool CaseBasedReasoner::validate_case(const ComplianceCase& case_data) const {
 // CaseOutcomePredictor Implementation
 
 CaseOutcomePredictor::CaseOutcomePredictor(std::shared_ptr<ConfigurationManager> config,
-                                         StructuredLogger* logger)
-    : config_(config), logger_(logger) {}
+                                         StructuredLogger* logger,
+                                         std::shared_ptr<CaseBasedReasoner> case_reasoner)
+    : config_(config), logger_(logger), case_reasoner_(case_reasoner) {}
 
 nlohmann::json CaseOutcomePredictor::predict_outcome_probability(const nlohmann::json& context,
                                                                const nlohmann::json& decision) {
@@ -1132,14 +1146,41 @@ std::vector<std::pair<ComplianceCase, double>> CaseOutcomePredictor::find_simila
     std::vector<std::pair<ComplianceCase, double>> similar_cases;
 
     try {
-        // Production-grade implementation: Generate synthetic similar cases based on context analysis
-        // This provides meaningful predictions even without direct case base access
-        // TODO: Refactor architecture to allow direct case base access in future versions
+        // If we have direct case base access, use real cases
+        if (case_reasoner_) {
+            CaseQuery query(context);
+            query.max_results = 20; // Get more cases for better prediction
+
+            auto retrieved_cases = case_reasoner_->retrieve_similar_cases(query);
+
+            for (const auto& result : retrieved_cases) {
+                // Filter cases that have similar decisions
+                if (result.case_.decision.contains("decision_type") && decision.contains("decision_type")) {
+                    if (result.case_.decision["decision_type"] == decision["decision_type"]) {
+                        similar_cases.emplace_back(result.case_, result.similarity_score);
+                    }
+                } else {
+                    // If decision types don't match, still include but with reduced similarity
+                    similar_cases.emplace_back(result.case_, result.similarity_score * 0.7);
+                }
+            }
+
+            if (logger_) {
+                logger_->info("Retrieved " + std::to_string(similar_cases.size()) +
+                              " real similar cases from case base for outcome prediction",
+                              "CaseOutcomePredictor", "find_similar_context_decisions");
+            }
+
+            return similar_cases;
+        }
+
+        // Fallback: Generate synthetic similar cases based on context analysis
+        // This provides meaningful predictions when direct case base access is not available
 
         // Analyze context to determine risk profile and generate relevant similar cases
         double risk_score = analyze_context_risk(context);
         std::string decision_type = decision.contains("decision_type") ?
-                                   decision["decision_type"].get<std::string>() : "unknown";
+                                    decision["decision_type"].get<std::string>() : "unknown";
 
         // Generate 3-5 synthetic similar cases based on context patterns
         int num_similar_cases = std::max(3, std::min(5, static_cast<int>(risk_score * 10)));
@@ -1152,19 +1193,19 @@ std::vector<std::pair<ComplianceCase, double>> CaseOutcomePredictor::find_simila
 
         // Sort by similarity score (highest first)
         std::sort(similar_cases.begin(), similar_cases.end(),
-                 [](const auto& a, const auto& b) { return a.second > b.second; });
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
 
         if (logger_) {
             logger_->info("Generated " + std::to_string(similar_cases.size()) +
-                         " synthetic similar cases for outcome prediction",
-                         "CaseOutcomePredictor", "find_similar_context_decisions");
+                          " synthetic similar cases for outcome prediction (fallback mode)",
+                          "CaseOutcomePredictor", "find_similar_context_decisions");
         }
 
         return similar_cases;
     } catch (const std::exception& e) {
         if (logger_) {
             logger_->error("Exception in find_similar_context_decisions: " + std::string(e.what()),
-                          "CaseOutcomePredictor", "find_similar_context_decisions");
+                           "CaseOutcomePredictor", "find_similar_context_decisions");
         }
         return similar_cases;
     }
@@ -1367,8 +1408,9 @@ double CaseOutcomePredictor::calculate_synthetic_similarity(
 // CaseValidator Implementation
 
 CaseValidator::CaseValidator(std::shared_ptr<ConfigurationManager> config,
-                           StructuredLogger* logger)
-    : config_(config), logger_(logger) {}
+                           StructuredLogger* logger,
+                           std::shared_ptr<CaseBasedReasoner> case_reasoner)
+    : config_(config), logger_(logger), case_reasoner_(case_reasoner) {}
 
 nlohmann::json CaseValidator::validate_against_cases(const nlohmann::json& context,
                                                    const nlohmann::json& decision) {
@@ -1436,18 +1478,40 @@ nlohmann::json CaseValidator::validate_against_cases(const nlohmann::json& conte
 }
 
 std::vector<ComplianceCase> CaseValidator::find_contradictory_cases(const nlohmann::json& context,
-                                                                  const nlohmann::json& decision) {
+                                                                   const nlohmann::json& decision) {
 
     std::vector<ComplianceCase> contradictory_cases;
 
     try {
-        // Production-grade implementation: Generate synthetic contradictory cases based on risk analysis
-        // This provides meaningful validation even without direct case base access
-        // TODO: Refactor architecture to allow direct case base access in future versions
+        // If we have direct case base access, find real contradictory cases
+        if (case_reasoner_) {
+            CaseQuery query(context);
+            query.max_results = 50; // Get many cases to find contradictions
+
+            auto retrieved_cases = case_reasoner_->retrieve_similar_cases(query);
+
+            for (const auto& result : retrieved_cases) {
+                // Check if this case's decision contradicts the current decision
+                if (decisions_are_contradictory(decision, result.case_.decision)) {
+                    contradictory_cases.push_back(result.case_);
+                }
+            }
+
+            if (logger_) {
+                logger_->info("Found " + std::to_string(contradictory_cases.size()) +
+                              " real contradictory cases from case base for validation",
+                              "CaseValidator", "find_contradictory_cases");
+            }
+
+            return contradictory_cases;
+        }
+
+        // Fallback: Generate synthetic contradictory cases based on risk analysis
+        // This provides meaningful validation when direct case base access is not available
 
         // Analyze the decision for potential contradiction patterns
         std::string decision_type = decision.contains("decision_type") ?
-                                   decision["decision_type"].get<std::string>() : "unknown";
+                                    decision["decision_type"].get<std::string>() : "unknown";
 
         double risk_score = 0.0;
         if (context.contains("amount")) {
@@ -1475,8 +1539,8 @@ std::vector<ComplianceCase> CaseValidator::find_contradictory_cases(const nlohma
 
             if (logger_ && !contradictory_cases.empty()) {
                 logger_->info("Generated " + std::to_string(contradictory_cases.size()) +
-                             " contradictory cases for high-risk approval validation",
-                             "CaseValidator", "find_contradictory_cases");
+                              " synthetic contradictory cases for high-risk approval validation (fallback mode)",
+                              "CaseValidator", "find_contradictory_cases");
             }
         }
 
@@ -1484,7 +1548,7 @@ std::vector<ComplianceCase> CaseValidator::find_contradictory_cases(const nlohma
     } catch (const std::exception& e) {
         if (logger_) {
             logger_->error("Exception in find_contradictory_cases: " + std::string(e.what()),
-                          "CaseValidator", "find_contradictory_cases");
+                           "CaseValidator", "find_contradictory_cases");
         }
         return contradictory_cases;
     }
@@ -1575,16 +1639,50 @@ ComplianceCase CaseValidator::generate_contradictory_case(
 }
 
 double CaseValidator::assess_decision_consistency(const nlohmann::json& context,
-                                                const nlohmann::json& decision) {
+                                                 const nlohmann::json& decision) {
 
     try {
-        // Note: Currently no case base access - this is a design limitation
-        // In a proper implementation, this would:
-        // 1. Find similar historical cases
-        // 2. Calculate consistency based on decision similarity and outcomes
-        // 3. Return weighted average consistency score
+        // If we have direct case base access, perform real consistency assessment
+        if (case_reasoner_) {
+            CaseQuery query(context);
+            query.max_results = 20;
 
-        // For now, provide a basic consistency assessment based on decision content
+            auto similar_cases = case_reasoner_->retrieve_similar_cases(query);
+
+            if (similar_cases.empty()) {
+                return 0.5; // Neutral score when no similar cases
+            }
+
+            double total_consistency = 0.0;
+            int valid_cases = 0;
+
+            for (const auto& result : similar_cases) {
+                // Check decision similarity
+                double decision_similarity = 0.0;
+                if (result.case_.decision.contains("decision_type") && decision.contains("decision_type")) {
+                    if (result.case_.decision["decision_type"] == decision["decision_type"]) {
+                        decision_similarity = 1.0;
+                    }
+                }
+
+                // Weight by case success and similarity
+                double case_consistency = decision_similarity * result.similarity_score * result.case_.success_score;
+                total_consistency += case_consistency;
+                valid_cases++;
+            }
+
+            double consistency_score = valid_cases > 0 ? total_consistency / valid_cases : 0.5;
+
+            if (logger_) {
+                logger_->info("Assessed decision consistency: " + std::to_string(consistency_score) +
+                              " based on " + std::to_string(valid_cases) + " similar cases from case base",
+                              "CaseValidator", "assess_decision_consistency");
+            }
+
+            return consistency_score;
+        }
+
+        // Fallback: Basic consistency assessment based on decision content
         double consistency_score = 0.5; // Neutral starting point
 
         // Check if decision has required fields
@@ -1613,15 +1711,15 @@ double CaseValidator::assess_decision_consistency(const nlohmann::json& context,
 
         if (logger_) {
             logger_->info("Assessed decision consistency: " + std::to_string(consistency_score) +
-                         " (limited implementation - no case base access)",
-                         "CaseValidator", "assess_decision_consistency");
+                          " (fallback implementation - no case base access)",
+                          "CaseValidator", "assess_decision_consistency");
         }
 
         return consistency_score;
     } catch (const std::exception& e) {
         if (logger_) {
             logger_->error("Exception in assess_decision_consistency: " + std::string(e.what()),
-                          "CaseValidator", "assess_decision_consistency");
+                           "CaseValidator", "assess_decision_consistency");
         }
         return 0.5; // Return neutral score on error
     }
@@ -1664,16 +1762,68 @@ std::shared_ptr<CaseBasedReasoner> create_case_based_reasoner(
 
 std::shared_ptr<CaseOutcomePredictor> create_case_outcome_predictor(
     std::shared_ptr<ConfigurationManager> config,
-    StructuredLogger* logger) {
+    StructuredLogger* logger,
+    std::shared_ptr<CaseBasedReasoner> case_reasoner) {
 
-    return std::make_shared<CaseOutcomePredictor>(config, logger);
+    return std::make_shared<CaseOutcomePredictor>(config, logger, case_reasoner);
 }
 
 std::shared_ptr<CaseValidator> create_case_validator(
     std::shared_ptr<ConfigurationManager> config,
-    StructuredLogger* logger) {
+    StructuredLogger* logger,
+    std::shared_ptr<CaseBasedReasoner> case_reasoner) {
 
-    return std::shared_ptr<CaseValidator>(new CaseValidator(config, logger));
+    return std::shared_ptr<CaseValidator>(new CaseValidator(config, logger, case_reasoner));
+}
+
+std::string CaseBasedReasoningEngine::create_query_text_representation(const CaseQuery& query) {
+    std::stringstream ss;
+
+    // Build a descriptive text representation of the query
+    ss << "Compliance case query: ";
+
+    // Add domain information
+    if (query.domain) {
+        ss << "Domain: " << static_cast<int>(*query.domain) << ". ";
+    }
+
+    // Add risk level information
+    if (query.risk_level) {
+        ss << "Risk level: " << static_cast<int>(*query.risk_level) << ". ";
+    }
+
+    // Add context information
+    if (!query.context.empty()) {
+        ss << "Context: " << query.context << ". ";
+    }
+
+    // Add description
+    if (!query.description.empty()) {
+        ss << "Description: " << query.description << ". ";
+    }
+
+    // Add keywords
+    if (!query.keywords.empty()) {
+        ss << "Keywords: ";
+        for (size_t i = 0; i < query.keywords.size(); ++i) {
+            if (i > 0) ss << ", ";
+            ss << query.keywords[i];
+        }
+        ss << ". ";
+    }
+
+    // Add outcome information
+    if (query.desired_outcome) {
+        ss << "Desired outcome: " << static_cast<int>(*query.desired_outcome) << ". ";
+    }
+
+    // Add similarity threshold
+    ss << "Similarity threshold: " << query.similarity_threshold << ". ";
+
+    // Add max results
+    ss << "Maximum results: " << query.max_results << ".";
+
+    return ss.str();
 }
 
 } // namespace regulens

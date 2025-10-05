@@ -540,9 +540,40 @@ std::vector<std::shared_ptr<SequencePattern>> PatternRecognitionEngine::analyze_
             generate_pattern_id(PatternType::SEQUENCE_PATTERN, entity_id),
             seq);
 
-        pattern->support = 0.1; // Placeholder
-        pattern->confidence = 0.8; // Placeholder
-        pattern->occurrences = config_.min_pattern_occurrences;
+        // Calculate actual support and confidence based on sequence analysis
+        size_t total_sequences = events.size();
+
+        // Count actual occurrences of this sequence in the original events
+        size_t pattern_occurrences = count_sequence_occurrences(events, seq);
+
+        // Support = frequency of pattern / total possible positions
+        size_t max_possible_positions = events.size() - seq.size() + 1;
+        pattern->support = static_cast<double>(pattern_occurrences) / std::max(max_possible_positions, size_t(1));
+
+        // Calculate confidence using sequence mining principles
+        if (seq.size() > 1) {
+            // For sequences longer than 1, confidence is P(sequence | prefix)
+            // where prefix is the sequence without the last element
+            std::vector<std::string> prefix(seq.begin(), seq.end() - 1);
+            size_t prefix_occurrences = count_sequence_occurrences(events, prefix);
+
+            if (prefix_occurrences > 0) {
+                // Confidence = support(sequence) / support(prefix)
+                pattern->confidence = pattern->support / (static_cast<double>(prefix_occurrences) / std::max(max_possible_positions - 1, size_t(1)));
+            } else {
+                // If prefix doesn't exist, this is a novel sequence
+                pattern->confidence = pattern->support;
+            }
+        } else {
+            // For single-item sequences, confidence equals support
+            pattern->confidence = pattern->support;
+        }
+
+        // Apply length-based adjustment (longer sequences are more significant)
+        double length_factor = std::min(static_cast<double>(seq.size()) / 3.0, 1.0);
+        pattern->confidence = std::min(pattern->confidence * (0.8 + 0.2 * length_factor), 1.0);
+
+        pattern->occurrences = pattern_occurrences;
 
         sequences.push_back(pattern);
     }
@@ -660,15 +691,40 @@ std::optional<std::shared_ptr<TrendPattern>> PatternRecognitionEngine::detect_li
     if (denominator == 0.0) return std::nullopt;
 
     double slope = (n * sum_xy - sum_x * sum_y) / denominator;
+    double intercept = (sum_y - slope * sum_x) / n;
 
-    if (std::abs(slope) > 0.01) { // Significant slope
+    // Calculate R-squared (coefficient of determination)
+    double ss_res = 0.0; // Sum of squares of residuals
+    double ss_tot = 0.0; // Total sum of squares
+    double y_mean = sum_y / n;
+
+    for (size_t i = 0; i < n; ++i) {
+        double x = i;
+        double y_actual = series[i].first;
+        double y_predicted = slope * x + intercept;
+
+        ss_res += (y_actual - y_predicted) * (y_actual - y_predicted);
+        ss_tot += (y_actual - y_mean) * (y_actual - y_mean);
+    }
+
+    double r_squared = (ss_tot != 0.0) ? 1.0 - (ss_res / ss_tot) : 0.0;
+
+    if (std::abs(slope) > 0.01 && r_squared > 0.3) { // Significant slope and reasonable fit
         auto trend = std::make_shared<TrendPattern>(
             generate_pattern_id(PatternType::TREND_PATTERN, "system"),
             slope > 0 ? "increasing" : "decreasing", metric, slope);
 
-        trend->r_squared = 0.8; // Placeholder
-        trend->confidence = PatternConfidence::MEDIUM;
-        trend->impact = PatternImpact::LOW;
+        trend->r_squared = r_squared;
+
+        // Set confidence based on R-squared value
+        if (r_squared > 0.8) trend->confidence = PatternConfidence::HIGH;
+        else if (r_squared > 0.6) trend->confidence = PatternConfidence::MEDIUM;
+        else trend->confidence = PatternConfidence::LOW;
+
+        // Set impact based on slope magnitude
+        if (std::abs(slope) > 1.0) trend->impact = PatternImpact::HIGH;
+        else if (std::abs(slope) > 0.5) trend->impact = PatternImpact::MEDIUM;
+        else trend->impact = PatternImpact::LOW;
 
         return trend;
     }
@@ -731,22 +787,142 @@ std::vector<std::shared_ptr<CorrelationPattern>> PatternRecognitionEngine::calcu
 std::vector<std::string> PatternRecognitionEngine::find_frequent_sequences(
     const std::vector<std::string>& events, size_t min_occurrences) {
 
-    std::unordered_map<std::string, size_t> sequence_counts;
+    // Implement PrefixSpan-like algorithm for sequence mining
+    std::vector<std::string> frequent_sequences;
 
-    // Simple approach: look for consecutive pairs
-    for (size_t i = 0; i < events.size() - 1; ++i) {
-        std::string sequence = events[i] + "," + events[i + 1];
-        sequence_counts[sequence]++;
+    if (events.empty()) return frequent_sequences;
+
+    // Find frequent 1-sequences (individual events)
+    std::unordered_map<std::string, size_t> item_counts;
+    for (const auto& event : events) {
+        item_counts[event]++;
     }
 
-    std::vector<std::string> frequent_sequences;
-    for (const auto& [sequence, count] : sequence_counts) {
+    std::vector<std::string> frequent_items;
+    for (const auto& [item, count] : item_counts) {
         if (count >= min_occurrences) {
-            frequent_sequences.push_back(sequence);
+            frequent_items.push_back(item);
         }
     }
 
+    // Find frequent sequences of length 2 and longer using projection
+    for (const auto& item : frequent_items) {
+        // Find all positions where this item appears
+        std::vector<size_t> positions;
+        for (size_t i = 0; i < events.size(); ++i) {
+            if (events[i] == item) {
+                positions.push_back(i);
+            }
+        }
+
+        // For each frequent item, try to extend it
+        std::vector<std::string> current_sequences = {item};
+        extend_sequence(current_sequences, events, positions, min_occurrences, frequent_sequences);
+    }
+
+    // Also find frequent pairs directly (for completeness)
+    std::unordered_map<std::string, size_t> pair_counts;
+    for (size_t i = 0; i < events.size() - 1; ++i) {
+        std::string pair = events[i] + "," + events[i + 1];
+        pair_counts[pair]++;
+    }
+
+    for (const auto& [pair, count] : pair_counts) {
+        if (count >= min_occurrences) {
+            frequent_sequences.push_back(pair);
+        }
+    }
+
+    // Remove duplicates
+    std::sort(frequent_sequences.begin(), frequent_sequences.end());
+    auto last = std::unique(frequent_sequences.begin(), frequent_sequences.end());
+    frequent_sequences.erase(last, frequent_sequences.end());
+
     return frequent_sequences;
+}
+
+void PatternRecognitionEngine::extend_sequence(std::vector<std::string> current_sequences,
+                                             const std::vector<std::string>& events,
+                                             const std::vector<size_t>& positions,
+                                             size_t min_occurrences,
+                                             std::vector<std::string>& frequent_sequences) {
+
+    // For each current sequence, try to extend it by finding frequent extensions
+    std::unordered_map<std::string, std::vector<size_t>> extension_positions;
+
+    for (const auto& seq_str : current_sequences) {
+        // Parse sequence
+        std::vector<std::string> seq;
+        std::stringstream ss(seq_str);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            seq.push_back(item);
+        }
+
+        // Find positions where this sequence appears
+        std::vector<size_t> seq_positions;
+        for (size_t start_pos : positions) {
+            if (matches_sequence(events, start_pos, seq)) {
+                seq_positions.push_back(start_pos + seq.size() - 1); // End position
+            }
+        }
+
+        if (seq_positions.size() < min_occurrences) continue;
+
+        // Try to extend with each possible next item
+        std::unordered_map<std::string, size_t> next_item_counts;
+        for (size_t end_pos : seq_positions) {
+            if (end_pos + 1 < events.size()) {
+                next_item_counts[events[end_pos + 1]]++;
+            }
+        }
+
+        for (const auto& [next_item, count] : next_item_counts) {
+            if (count >= min_occurrences) {
+                std::string extended_seq = seq_str + "," + next_item;
+                frequent_sequences.push_back(extended_seq);
+
+                // Recursively extend further
+                std::vector<size_t> new_positions;
+                for (size_t end_pos : seq_positions) {
+                    if (end_pos + 1 < events.size() && events[end_pos + 1] == next_item) {
+                        new_positions.push_back(end_pos + 1);
+                    }
+                }
+
+                if (new_positions.size() >= min_occurrences) {
+                    std::vector<std::string> extended_sequences = {extended_seq};
+                    extend_sequence(extended_sequences, events, new_positions, min_occurrences, frequent_sequences);
+                }
+            }
+        }
+    }
+}
+
+bool PatternRecognitionEngine::matches_sequence(const std::vector<std::string>& events,
+                                              size_t start_pos,
+                                              const std::vector<std::string>& sequence) {
+    if (start_pos + sequence.size() > events.size()) return false;
+
+    for (size_t i = 0; i < sequence.size(); ++i) {
+        if (events[start_pos + i] != sequence[i]) return false;
+    }
+
+    return true;
+}
+
+size_t PatternRecognitionEngine::count_sequence_occurrences(const std::vector<std::string>& events,
+                                                          const std::vector<std::string>& sequence) {
+    if (sequence.empty() || events.size() < sequence.size()) return 0;
+
+    size_t count = 0;
+    for (size_t i = 0; i <= events.size() - sequence.size(); ++i) {
+        if (matches_sequence(events, i, sequence)) {
+            count++;
+        }
+    }
+
+    return count;
 }
 
 void PatternRecognitionEngine::analysis_worker() {

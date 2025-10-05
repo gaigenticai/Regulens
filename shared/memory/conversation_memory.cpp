@@ -418,9 +418,29 @@ std::vector<SimilarityResult> ConversationMemory::retrieve_similar_memories(cons
         // Generate query embedding if we have query text
         std::vector<float> query_embedding;
         if (enable_embeddings_ && embeddings_client_ && !query.query_text.empty()) {
-            // In practice, this would call the embeddings service
-            // For now, we'll use a simplified approach
-            query_embedding = std::vector<float>(384, 0.0f); // Placeholder
+            try {
+                // Call the embeddings service to generate embedding for query text
+                auto embedding_result = embeddings_client_->generate_single_embedding(query.query_text);
+                if (embedding_result) {
+                    query_embedding = *embedding_result;
+                    if (logger_) {
+                        logger_->debug("Generated embedding for query: " + query.query_text.substr(0, 50) + "...",
+                                      "ConversationMemory", "retrieve_similar_memories");
+                    }
+                } else {
+                    if (logger_) {
+                        logger_->warn("Failed to generate embedding for query, falling back to topic matching",
+                                     "ConversationMemory", "retrieve_similar_memories");
+                    }
+                    query_embedding.clear(); // Will fall back to topic matching
+                }
+            } catch (const std::exception& e) {
+                if (logger_) {
+                    logger_->error("Exception generating query embedding: " + std::string(e.what()),
+                                  "ConversationMemory", "retrieve_similar_memories");
+                }
+                query_embedding.clear(); // Will fall back to topic matching
+            }
         }
 
         // Search through memories

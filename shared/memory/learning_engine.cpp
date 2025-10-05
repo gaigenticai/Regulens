@@ -253,29 +253,52 @@ std::pair<nlohmann::json, double> ReinforcementLearner::select_action(
         size_t random_index = action_dis(gen);
         return {available_actions[random_index], 0.5}; // Lower confidence for exploration
     } else {
-        // Exploit: choose best action based on learned patterns
-        // Simplified: choose action with highest historical success
+        // Exploit: choose best action based on Q-values
+        std::string current_state = get_state_representation(context);
+
+        // Read Q-table (shared lock for reading)
+        std::shared_lock<std::shared_mutex> lock(agent_profile.q_table_mutex);
+
         size_t best_index = 0;
-        double best_score = 0.0;
+        double best_q_value = std::numeric_limits<double>::lowest();
+        bool found_q_value = false;
 
         for (size_t i = 0; i < available_actions.size(); ++i) {
-            double score = 0.5; // Default neutral score
+            std::string action_str = get_action_representation(available_actions[i]);
+            double q_value = 0.0;
 
-            // Check if this action matches any learned patterns
-            for (const auto& pattern : agent_profile.learned_patterns) {
-                if (pattern.learned_decision == available_actions[i]) {
-                    score = pattern.success_rate;
-                    break;
+            // Look up Q-value for this state-action pair
+            auto state_it = agent_profile.q_table.find(current_state);
+            if (state_it != agent_profile.q_table.end()) {
+                auto action_it = state_it->second.find(action_str);
+                if (action_it != state_it->second.end()) {
+                    q_value = action_it->second;
+                    found_q_value = true;
                 }
             }
 
-            if (score > best_score) {
-                best_score = score;
+            // If no Q-value found, fall back to pattern-based scoring
+            if (!found_q_value) {
+                q_value = 0.5; // Default neutral score
+                for (const auto& pattern : agent_profile.learned_patterns) {
+                    if (pattern.learned_decision == available_actions[i]) {
+                        q_value = pattern.success_rate;
+                        break;
+                    }
+                }
+            }
+
+            if (q_value > best_q_value) {
+                best_q_value = q_value;
                 best_index = i;
             }
         }
 
-        return {available_actions[best_index], best_score};
+        // Convert Q-value to confidence (normalize to 0.5-1.0 range)
+        double confidence = 0.5 + (best_q_value / (1.0 + std::abs(best_q_value))) * 0.5;
+        confidence = std::max(0.5, std::min(1.0, confidence));
+
+        return {available_actions[best_index], confidence};
     }
 }
 
@@ -285,22 +308,36 @@ void ReinforcementLearner::update_q_value(AgentLearningProfile& agent_profile,
                                         double reward,
                                         const std::string& next_state) {
 
-    // Simplified Q-learning update
-    std::string state_action_key = state + "|" + action;
+    // Thread-safe Q-table update
+    std::unique_lock<std::shared_mutex> lock(agent_profile.q_table_mutex);
 
-    // Get current Q-value (simplified - in practice would be stored)
-    double current_q = agent_profile.context_performance[state_action_key];
-
-    // Get max Q-value for next state (simplified)
-    double max_next_q = 0.0;
-    for (const auto& [key, value] : agent_profile.context_performance) {
-        if (key.find(next_state + "|") == 0) {
-            max_next_q = std::max(max_next_q, value);
+    // Get current Q-value for state-action pair
+    double current_q = 0.0;
+    auto state_it = agent_profile.q_table.find(state);
+    if (state_it != agent_profile.q_table.end()) {
+        auto action_it = state_it->second.find(action);
+        if (action_it != state_it->second.end()) {
+            current_q = action_it->second;
         }
     }
 
-    // Q-learning update
+    // Get max Q-value for next state (best action in next state)
+    double max_next_q = 0.0;
+    auto next_state_it = agent_profile.q_table.find(next_state);
+    if (next_state_it != agent_profile.q_table.end() && !next_state_it->second.empty()) {
+        for (const auto& [action, q_value] : next_state_it->second) {
+            max_next_q = std::max(max_next_q, q_value);
+        }
+    }
+
+    // Q-learning update: Q(s,a) = Q(s,a) + α[r + γ*max(Q(s',a')) - Q(s,a)]
     double new_q = current_q + alpha_ * (reward + gamma_ * max_next_q - current_q);
+
+    // Store updated Q-value
+    agent_profile.q_table[state][action] = new_q;
+
+    // Update legacy context_performance for backward compatibility
+    std::string state_action_key = state + "|" + action;
     agent_profile.context_performance[state_action_key] = new_q;
 }
 
@@ -979,13 +1016,60 @@ nlohmann::json LearningEngine::export_agent_profile(const AgentLearningProfile& 
         {"learning_enabled", profile.learning_enabled}
     };
 
-    // Export learned patterns (simplified)
+    // Export learned patterns with full details
     profile_json["learned_patterns"] = nlohmann::json::array();
     for (const auto& pattern : profile.learned_patterns) {
-        profile_json["learned_patterns"].push_back({
+        nlohmann::json pattern_json = {
             {"pattern_id", pattern.pattern_id},
+            {"agent_type", pattern.agent_type},
+            {"decision_context", pattern.decision_context},
+            {"learned_decision", pattern.learned_decision},
             {"success_rate", pattern.success_rate},
-            {"application_count", pattern.application_count}
+            {"application_count", pattern.application_count},
+            {"average_confidence", pattern.average_confidence},
+            {"first_learned", std::chrono::duration_cast<std::chrono::milliseconds>(
+                pattern.first_learned.time_since_epoch()).count()},
+            {"last_updated", std::chrono::duration_cast<std::chrono::milliseconds>(
+                pattern.last_updated.time_since_epoch()).count()},
+            {"context_weights", pattern.context_weights}
+        };
+
+        // Export recent signals
+        pattern_json["recent_signals"] = nlohmann::json::array();
+        for (const auto& signal : pattern.recent_signals) {
+            pattern_json["recent_signals"].push_back({
+                {"type", static_cast<int>(signal.type)},
+                {"strength", signal.strength},
+                {"confidence", signal.confidence},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    signal.timestamp.time_since_epoch()).count()}
+            });
+        }
+
+        profile_json["learned_patterns"].push_back(pattern_json);
+    }
+
+    // Export Q-table
+    {
+        std::shared_lock<std::shared_mutex> lock(profile.q_table_mutex);
+        profile_json["q_table"] = nlohmann::json::object();
+        for (const auto& [state, actions] : profile.q_table) {
+            profile_json["q_table"][state] = nlohmann::json::object();
+            for (const auto& [action, q_value] : actions) {
+                profile_json["q_table"][state][action] = q_value;
+            }
+        }
+    }
+
+    // Export recent feedback
+    profile_json["recent_feedback"] = nlohmann::json::array();
+    for (const auto& signal : profile.recent_feedback) {
+        profile_json["recent_feedback"].push_back({
+            {"type", static_cast<int>(signal.type)},
+            {"strength", signal.strength},
+            {"confidence", signal.confidence},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                signal.timestamp.time_since_epoch()).count()}
         });
     }
 

@@ -337,7 +337,8 @@ enum class AdaptationStrategy {
 class CaseOutcomePredictor {
 public:
     CaseOutcomePredictor(std::shared_ptr<ConfigurationManager> config,
-                        StructuredLogger* logger);
+                        StructuredLogger* logger,
+                        std::shared_ptr<CaseBasedReasoner> case_reasoner = nullptr);
 
     /**
      * @brief Predict outcome probability for a decision
@@ -366,9 +367,18 @@ public:
     double calculate_historical_risk_score(const nlohmann::json& context,
                                          const nlohmann::json& decision);
 
+    /**
+     * @brief Create text representation of a case query for embedding generation
+     * @param query The case query to convert to text
+     * @return Text representation suitable for embedding
+     */
+    std::string create_query_text_representation(const CaseQuery& query);
+
 private:
     std::shared_ptr<ConfigurationManager> config_;
     StructuredLogger* logger_;
+    std::shared_ptr<CaseBasedReasoner> case_reasoner_;
+    std::shared_ptr<CaseBasedReasoner> case_reasoner_;
 
     /**
      * @brief Find cases with similar context-decision combinations
@@ -417,7 +427,8 @@ private:
 class CaseValidator {
 public:
     CaseValidator(std::shared_ptr<ConfigurationManager> config,
-                 StructuredLogger* logger);
+                 StructuredLogger* logger,
+                 std::shared_ptr<CaseBasedReasoner> case_reasoner = nullptr);
 
     /**
      * @brief Validate decision against case base
@@ -492,20 +503,24 @@ std::shared_ptr<CaseBasedReasoner> create_case_based_reasoner(
  * @brief Create case outcome predictor instance
  * @param config Configuration manager
  * @param logger Structured logger
+ * @param case_reasoner Optional case-based reasoner for direct case base access
  * @return Shared pointer to outcome predictor
  */
 std::shared_ptr<CaseOutcomePredictor> create_case_outcome_predictor(
     std::shared_ptr<ConfigurationManager> config,
-    StructuredLogger* logger);
+    StructuredLogger* logger,
+    std::shared_ptr<CaseBasedReasoner> case_reasoner = nullptr);
 
 /**
  * @brief Create case validator instance
  * @param config Configuration manager
  * @param logger Structured logger
+ * @param case_reasoner Optional case-based reasoner for direct case base access
  * @return Shared pointer to case validator
  */
 std::shared_ptr<CaseValidator> create_case_validator(
     std::shared_ptr<ConfigurationManager> config,
-    StructuredLogger* logger);
+    StructuredLogger* logger,
+    std::shared_ptr<CaseBasedReasoner> case_reasoner = nullptr);
 
 } // namespace regulens

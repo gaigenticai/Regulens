@@ -217,6 +217,15 @@ private:
 };
 
 /**
+ * @brief Rate limiting record for function calls
+ */
+struct RateLimitRecord {
+    std::chrono::steady_clock::time_point timestamp;
+    std::string agent_id;
+    std::string function_name;
+};
+
+/**
  * @brief Function execution dispatcher with security controls
  */
 class FunctionDispatcher {
@@ -250,6 +259,10 @@ private:
     StructuredLogger* logger_;
     ErrorHandler* error_handler_;  // For future error reporting enhancements
 
+    // Rate limiting data
+    std::vector<RateLimitRecord> rate_limit_calls_;
+    mutable std::mutex rate_limit_mutex_;
+
     /**
      * @brief Validate function call before execution
      * @param call Function call
@@ -265,6 +278,14 @@ private:
      * @return true if execution should proceed
      */
     bool apply_security_controls(const FunctionCall& call, const FunctionContext& context);
+
+    /**
+     * @brief Check rate limits for function calls
+     * @param call Function call
+     * @param context Execution context
+     * @return true if within rate limits
+     */
+    bool check_rate_limits(const FunctionCall& call, const FunctionContext& context);
 };
 
 } // namespace regulens

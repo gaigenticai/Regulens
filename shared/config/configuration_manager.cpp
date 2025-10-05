@@ -210,6 +210,7 @@ bool ConfigurationManager::load_from_environment() {
     load_env_var(config_keys::SMTP_USER);
     load_env_var(config_keys::SMTP_PASSWORD);
     load_env_var(config_keys::SMTP_FROM_EMAIL);
+    load_env_var(config_keys::SMTP_NOTIFICATION_RECIPIENTS);
 
     // System configuration
     load_env_var(config_keys::ENVIRONMENT);
@@ -336,6 +337,35 @@ SMTPConfig ConfigurationManager::get_smtp_config() const {
     config.from_email = get_string(config_keys::SMTP_FROM_EMAIL).value_or("regulens@gaigentic.ai");
 
     return config;
+}
+
+std::vector<std::string> ConfigurationManager::get_notification_recipients() const {
+    auto recipients_str = get_string(config_keys::SMTP_NOTIFICATION_RECIPIENTS);
+    if (!recipients_str) {
+        // Default fallback recipients for development/demo
+        return {"compliance@company.com", "legal@company.com", "risk@company.com"};
+    }
+
+    std::vector<std::string> recipients;
+    std::stringstream ss(*recipients_str);
+    std::string recipient;
+
+    while (std::getline(ss, recipient, ',')) {
+        // Trim whitespace
+        recipient.erase(recipient.begin(), std::find_if(recipient.begin(), recipient.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }));
+        recipient.erase(std::find_if(recipient.rbegin(), recipient.rend(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }).base(), recipient.end());
+
+        if (!recipient.empty()) {
+            recipients.push_back(recipient);
+        }
+    }
+
+    return recipients;
+}
 }
 
 AgentCapabilityConfig ConfigurationManager::get_agent_capability_config() const {

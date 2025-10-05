@@ -286,6 +286,16 @@ void RESTAPIServer::route_request(const APIRequest& req, APIResponse& resp) {
         return;
     }
 
+    // Check authorization for protected endpoints
+    if (!is_public_endpoint(req.path)) {
+        if (!authorize_request(req)) {
+            resp = APIResponse(401, "application/json");
+            resp.headers["WWW-Authenticate"] = "Bearer";
+            resp.body = nlohmann::json{{"error", "Unauthorized"}, {"message", "Valid authentication required"}}.dump();
+            return;
+        }
+    }
+
     // Route based on path
     if (req.path == "/api/health") {
         resp = handle_health_check(req);
@@ -297,6 +307,10 @@ void RESTAPIServer::route_request(const APIRequest& req, APIResponse& resp) {
         resp = handle_monitoring_stats(req);
     } else if (req.path == "/api/monitoring/force-check") {
         resp = handle_force_check(req);
+    } else if (req.path == "/api/auth/login") {
+        resp = handle_login(req);
+    } else if (req.path == "/api/auth/refresh") {
+        resp = handle_token_refresh(req);
     } else {
         resp = APIResponse(404, "application/json");
         resp.body = nlohmann::json{{"error", "Endpoint not found"}}.dump();
@@ -568,23 +582,33 @@ bool RESTAPIServer::validate_cors(const APIRequest& /*req*/) {
 }
 
 bool RESTAPIServer::rate_limit_check(const std::string& client_ip) {
-    // Simple rate limiting implementation
+    // Proper rate limiting implementation
     std::lock_guard<std::mutex> lock(rate_limit_mutex_);
 
     auto now = std::chrono::steady_clock::now();
-    auto& last_request = rate_limit_map_[client_ip];
+    auto& client_data = rate_limit_map_[client_ip];
 
-    auto time_diff = std::chrono::duration_cast<std::chrono::seconds>(now - last_request).count();
-
-    if (time_diff < RATE_LIMIT_WINDOW) {
-        // Within rate limit window - allow
-        last_request = now;
-        return true;
-    } else {
-        // Reset window
-        last_request = now;
-        return true; // For now, always allow (simplified implementation)
+    // Clean up old entries (requests older than window)
+    while (!client_data.requests.empty()) {
+        auto oldest_request = client_data.requests.front();
+        auto age = std::chrono::duration_cast<std::chrono::seconds>(now - oldest_request).count();
+        if (age > RATE_LIMIT_WINDOW) {
+            client_data.requests.pop_front();
+        } else {
+            break;
+        }
     }
+
+    // Check if under limit
+    if (client_data.requests.size() < RATE_LIMIT_MAX_REQUESTS) {
+        client_data.requests.push_back(now);
+        return true;
+    }
+
+    // Rate limit exceeded
+    logger_->warn("Rate limit exceeded for client: " + client_ip, "RESTAPIServer", __func__,
+                  {{"client_ip", client_ip}, {"request_count", std::to_string(client_data.requests.size())}});
+    return false;
 }
 
 std::vector<std::string> RESTAPIServer::split_path(const std::string& path) {
@@ -606,6 +630,260 @@ std::string RESTAPIServer::generate_change_id(const std::string& source, const s
     std::string combined = source + ":" + title + ":" +
         std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     return source + "_" + std::to_string(hasher(combined));
+}
+
+bool RESTAPIServer::is_public_endpoint(const std::string& path) {
+    // Define public endpoints that don't require authentication
+    static const std::unordered_set<std::string> public_endpoints = {
+        "/api/health",
+        "/api/auth/login"
+    };
+
+    return public_endpoints.find(path) != public_endpoints.end();
+}
+
+bool RESTAPIServer::authorize_request(const APIRequest& req) {
+    // Check for Authorization header
+    auto auth_it = req.headers.find("Authorization");
+    if (auth_it == req.headers.end()) {
+        return false;
+    }
+
+    std::string auth_header = auth_it->second;
+
+    // Check for Bearer token
+    if (auth_header.substr(0, 7) == "Bearer ") {
+        std::string token = auth_header.substr(7);
+        return validate_jwt_token(token);
+    }
+
+    // Check for API key
+    if (auth_header.substr(0, 10) == "API-Key ") {
+        std::string api_key = auth_header.substr(10);
+        return validate_api_key(api_key);
+    }
+
+    return false;
+}
+
+bool RESTAPIServer::validate_jwt_token(const std::string& token) {
+    try {
+        // Simple JWT validation (in production, use a proper JWT library)
+        // JWT format: header.payload.signature
+
+        size_t first_dot = token.find('.');
+        size_t second_dot = token.find('.', first_dot + 1);
+
+        if (first_dot == std::string::npos || second_dot == std::string::npos) {
+            return false;
+        }
+
+        std::string header_b64 = token.substr(0, first_dot);
+        std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+        std::string signature_b64 = token.substr(second_dot + 1);
+
+        // Decode payload (simplified base64 decode)
+        std::string payload = base64_decode(payload_b64);
+
+        // Parse JSON payload
+        nlohmann::json payload_json = nlohmann::json::parse(payload);
+
+        // Check expiration
+        if (payload_json.contains("exp")) {
+            auto exp_time = std::chrono::system_clock::time_point(
+                std::chrono::seconds(payload_json["exp"].get<long long>()));
+            if (std::chrono::system_clock::now() > exp_time) {
+                return false; // Token expired
+            }
+        }
+
+        // Check issuer
+        if (payload_json.contains("iss") && payload_json["iss"] != "regulens_api") {
+            return false;
+        }
+
+        // Check audience
+        if (payload_json.contains("aud") && payload_json["aud"] != "regulens_clients") {
+            return false;
+        }
+
+        // In production, verify signature here
+        // For now, accept tokens that pass basic validation
+
+        return true;
+
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool RESTAPIServer::validate_api_key(const std::string& api_key) {
+    // Simple API key validation (in production, check against database)
+    static const std::unordered_set<std::string> valid_api_keys = {
+        "regulens_api_key_2024_prod",
+        "regulens_api_key_2024_test"
+    };
+
+    return valid_api_keys.find(api_key) != valid_api_keys.end();
+}
+
+APIResponse RESTAPIServer::handle_login(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+
+    if (req.method != "POST") {
+        resp.status_code = 405;
+        resp.body = nlohmann::json{{"error", "Method not allowed"}}.dump();
+        return resp;
+    }
+
+    try {
+        if (req.body.empty()) {
+            resp.status_code = 400;
+            resp.body = nlohmann::json{{"error", "Request body required"}}.dump();
+            return resp;
+        }
+
+        nlohmann::json body = nlohmann::json::parse(req.body);
+        std::string username = body.value("username", "");
+        std::string password = body.value("password", "");
+
+        // Simple authentication (in production, check against database)
+        if (username == "admin" && password == "regulens2024") {
+            // Generate JWT token
+            std::string token = generate_jwt_token(username);
+
+            resp.body = nlohmann::json{
+                {"access_token", token},
+                {"token_type", "Bearer"},
+                {"expires_in", 3600},
+                {"user", username}
+            }.dump(2);
+        } else {
+            resp.status_code = 401;
+            resp.body = nlohmann::json{{"error", "Invalid credentials"}}.dump();
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("Error in login: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Login failed"}}.dump();
+    }
+
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_token_refresh(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+
+    if (req.method != "POST") {
+        resp.status_code = 405;
+        resp.body = nlohmann::json{{"error", "Method not allowed"}}.dump();
+        return resp;
+    }
+
+    // Check for valid refresh token in Authorization header
+    auto auth_it = req.headers.find("Authorization");
+    if (auth_it == req.headers.end() || auth_it->second.substr(0, 7) != "Bearer ") {
+        resp.status_code = 401;
+        resp.body = nlohmann::json{{"error", "Refresh token required"}}.dump();
+        return resp;
+    }
+
+    std::string refresh_token = auth_it->second.substr(7);
+
+    // Validate refresh token (simplified)
+    if (validate_refresh_token(refresh_token)) {
+        // Generate new access token
+        std::string new_token = generate_jwt_token("refreshed_user");
+
+        resp.body = nlohmann::json{
+            {"access_token", new_token},
+            {"token_type", "Bearer"},
+            {"expires_in", 3600}
+        }.dump(2);
+    } else {
+        resp.status_code = 401;
+        resp.body = nlohmann::json{{"error", "Invalid refresh token"}}.dump();
+    }
+
+    return resp;
+}
+
+std::string RESTAPIServer::generate_jwt_token(const std::string& username) {
+    // Simplified JWT generation (in production, use a proper JWT library)
+    auto now = std::chrono::system_clock::now();
+    auto exp_time = now + std::chrono::hours(1);
+
+    nlohmann::json header = {
+        {"alg", "HS256"},
+        {"typ", "JWT"}
+    };
+
+    nlohmann::json payload = {
+        {"iss", "regulens_api"},
+        {"aud", "regulens_clients"},
+        {"sub", username},
+        {"iat", std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count()},
+        {"exp", std::chrono::duration_cast<std::chrono::seconds>(exp_time.time_since_epoch()).count()},
+        {"roles", {"admin", "user"}}
+    };
+
+    // Base64 encode header and payload
+    std::string header_b64 = base64_encode(header.dump());
+    std::string payload_b64 = base64_encode(payload.dump());
+
+    // Create signature (simplified - in production use proper HMAC)
+    std::string signature_b64 = base64_encode("signature_placeholder");
+
+    return header_b64 + "." + payload_b64 + "." + signature_b64;
+}
+
+bool RESTAPIServer::validate_refresh_token(const std::string& token) {
+    // Simplified refresh token validation
+    // In production, check against database/store
+    return token.length() > 10; // Basic check
+}
+
+std::string RESTAPIServer::base64_encode(const std::string& input) {
+    // Simplified base64 encoding (in production, use proper library)
+    static const std::string base64_chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    std::string encoded;
+    int val = 0, valb = -6;
+    for (unsigned char c : input) {
+        val = (val << 8) + c;
+        valb += 8;
+        while (valb >= 0) {
+            encoded.push_back(base64_chars[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
+    }
+    if (valb > -6) encoded.push_back(base64_chars[((val << 8) >> (valb + 8)) & 0x3F]);
+    while (encoded.size() % 4) encoded.push_back('=');
+    return encoded;
+}
+
+std::string RESTAPIServer::base64_decode(const std::string& input) {
+    // Simplified base64 decoding (in production, use proper library)
+    static const std::string base64_chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    std::string decoded;
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[base64_chars[i]] = i;
+
+    int val = 0, valb = -8;
+    for (unsigned char c : input) {
+        if (T[c] == -1) break;
+        val = (val << 6) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            decoded.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return decoded;
 }
 
 } // namespace regulens

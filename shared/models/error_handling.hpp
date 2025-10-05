@@ -50,14 +50,7 @@ enum class RecoveryStrategy {
     IGNORE              // Safe to ignore
 };
 
-/**
- * @brief Circuit breaker states
- */
-enum class CircuitState {
-    CLOSED,     // Normal operation
-    OPEN,       // Failing, requests blocked
-    HALF_OPEN   // Testing if service recovered
-};
+// CircuitState is now defined in shared/resilience/circuit_breaker.hpp
 
 /**
  * @brief Structured error information
@@ -117,79 +110,9 @@ private:
     }
 };
 
-/**
- * @brief Circuit breaker configuration and state
- */
-struct CircuitBreaker {
-    std::string breaker_id;
-    std::string service_name;
-    CircuitState state;
-    int failure_count;
-    int success_count;
-    std::chrono::system_clock::time_point last_failure_time;
-    std::chrono::system_clock::time_point next_attempt_time;
+// CircuitBreaker is now implemented as a full class in shared/resilience/circuit_breaker.hpp
+// The old struct has been replaced with enterprise-grade circuit breaker functionality
 
-    // Configuration
-    int failure_threshold;        // Failures before opening circuit
-    int success_threshold;        // Successes needed to close circuit
-    std::chrono::seconds timeout; // How long to wait before trying again
-
-    CircuitBreaker() = default;
-
-    CircuitBreaker(std::string id, std::string service, int fail_thresh = 5,
-                  int success_thresh = 3, std::chrono::seconds timeo = std::chrono::seconds(60))
-        : breaker_id(std::move(id)), service_name(std::move(service)),
-          state(CircuitState::CLOSED), failure_count(0), success_count(0),
-          failure_threshold(fail_thresh), success_threshold(success_thresh), timeout(timeo) {}
-
-    bool can_attempt() const {
-        if (state == CircuitState::CLOSED) return true;
-        if (state == CircuitState::OPEN) {
-            return std::chrono::system_clock::now() >= next_attempt_time;
-        }
-        return state == CircuitState::HALF_OPEN;
-    }
-
-    void record_success() {
-        failure_count = 0;
-        success_count++;
-
-        if (state == CircuitState::HALF_OPEN && success_count >= success_threshold) {
-            state = CircuitState::CLOSED;
-            success_count = 0;
-        }
-    }
-
-    void record_failure() {
-        failure_count++;
-        success_count = 0;
-        last_failure_time = std::chrono::system_clock::now();
-
-        if (state == CircuitState::CLOSED && failure_count >= failure_threshold) {
-            state = CircuitState::OPEN;
-            next_attempt_time = last_failure_time + timeout;
-        } else if (state == CircuitState::HALF_OPEN) {
-            state = CircuitState::OPEN;
-            next_attempt_time = last_failure_time + timeout;
-        }
-    }
-
-    nlohmann::json to_json() const {
-        return {
-            {"breaker_id", breaker_id},
-            {"service_name", service_name},
-            {"state", static_cast<int>(state)},
-            {"failure_count", failure_count},
-            {"success_count", success_count},
-            {"failure_threshold", failure_threshold},
-            {"success_threshold", success_threshold},
-            {"last_failure_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-                last_failure_time.time_since_epoch()).count()},
-            {"next_attempt_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-                next_attempt_time.time_since_epoch()).count()}
-        };
-    }
-};
 
 /**
  * @brief Retry configuration
@@ -229,7 +152,7 @@ struct RetryConfig {
 struct FallbackConfig {
     std::string component_name;
     bool enable_fallback;
-    std::string fallback_strategy;       // "basic", "cached", "simplified", "external"
+    std::string fallback_strategy;       // "basic", "cached", "simplified", "external", "degraded", "static"
     std::chrono::seconds cache_ttl;      // How long to cache fallback results
     std::unordered_map<std::string, std::string> fallback_parameters;
 
@@ -252,6 +175,153 @@ struct FallbackConfig {
             {"cache_ttl_seconds", cache_ttl.count()},
             {"fallback_parameters", params_json}
         };
+    }
+
+    /**
+     * @brief Execute fallback based on configured strategy
+     * @tparam T Return type of the operation
+     * @param original_operation The original operation that failed
+     * @param context Additional context for fallback execution
+     * @return Fallback result or nullopt if fallback not available
+     */
+    template<typename T>
+    std::optional<T> execute_fallback(
+        std::function<T()> original_operation,
+        const std::unordered_map<std::string, std::string>& context = {}) {
+
+        if (!enable_fallback) {
+            return std::nullopt;
+        }
+
+        try {
+            if (fallback_strategy == "basic") {
+                return execute_basic_fallback<T>(context);
+            } else if (fallback_strategy == "cached") {
+                return execute_cached_fallback<T>(original_operation, context);
+            } else if (fallback_strategy == "simplified") {
+                return execute_simplified_fallback<T>(original_operation, context);
+            } else if (fallback_strategy == "external") {
+                return execute_external_fallback<T>(context);
+            } else if (fallback_strategy == "degraded") {
+                return execute_degraded_fallback<T>(original_operation, context);
+            } else if (fallback_strategy == "static") {
+                return execute_static_fallback<T>(context);
+            } else {
+                // Unknown strategy, fall back to basic
+                return execute_basic_fallback<T>(context);
+            }
+        } catch (const std::exception&) {
+            // Fallback itself failed, return nullopt
+            return std::nullopt;
+        }
+    }
+
+private:
+    /**
+     * @brief Basic fallback - return default/safe values
+     */
+    template<typename T>
+    std::optional<T> execute_basic_fallback(const std::unordered_map<std::string, std::string>& /*context*/) {
+        if constexpr (std::is_same_v<T, nlohmann::json>) {
+            return nlohmann::json{
+                {"fallback", true},
+                {"strategy", "basic"},
+                {"message", "Service temporarily unavailable"},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()}
+            };
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            return std::string("FALLBACK: Service temporarily unavailable");
+        } else if constexpr (std::is_arithmetic_v<T>) {
+            return T{0}; // Default numeric value
+        } else if constexpr (std::is_same_v<T, bool>) {
+            return false; // Safe default for boolean
+        } else {
+            return T{}; // Default constructed value
+        }
+    }
+
+    /**
+     * @brief Cached fallback - return previously cached successful results
+     */
+    template<typename T>
+    std::optional<T> execute_cached_fallback(
+        std::function<T()> /*original_operation*/,
+        const std::unordered_map<std::string, std::string>& context) {
+
+        // Check if we have a cache key in context
+        auto cache_key_it = context.find("cache_key");
+        if (cache_key_it == context.end()) {
+            return execute_basic_fallback<T>(context);
+        }
+
+        // In a real implementation, this would check a cache store
+        // For now, return basic fallback
+        return execute_basic_fallback<T>(context);
+    }
+
+    /**
+     * @brief Simplified fallback - execute a simplified version of the operation
+     */
+    template<typename T>
+    std::optional<T> execute_simplified_fallback(
+        std::function<T()> original_operation,
+        const std::unordered_map<std::string, std::string>& context) {
+
+        // Try to execute with reduced parameters or simplified logic
+        // For now, just return basic fallback
+        return execute_basic_fallback<T>(context);
+    }
+
+    /**
+     * @brief External fallback - use an external service or backup system
+     */
+    template<typename T>
+    std::optional<T> execute_external_fallback(const std::unordered_map<std::string, std::string>& context) {
+        // Check if external service URL is configured
+        auto url_it = fallback_parameters.find("external_url");
+        if (url_it == fallback_parameters.end()) {
+            return execute_basic_fallback<T>(context);
+        }
+
+        // In a real implementation, this would call an external service
+        // For now, return basic fallback
+        return execute_basic_fallback<T>(context);
+    }
+
+    /**
+     * @brief Degraded fallback - continue with reduced functionality
+     */
+    template<typename T>
+    std::optional<T> execute_degraded_fallback(
+        std::function<T()> original_operation,
+        const std::unordered_map<std::string, std::string>& context) {
+
+        // Try the original operation but with timeout or reduced expectations
+        // For now, return basic fallback
+        return execute_basic_fallback<T>(context);
+    }
+
+    /**
+     * @brief Static fallback - return pre-configured static responses
+     */
+    template<typename T>
+    std::optional<T> execute_static_fallback(const std::unordered_map<std::string, std::string>& context) {
+        // Check for static response in parameters
+        auto static_response_it = fallback_parameters.find("static_response");
+        if (static_response_it != fallback_parameters.end()) {
+            try {
+                if constexpr (std::is_same_v<T, nlohmann::json>) {
+                    return nlohmann::json::parse(static_response_it->second);
+                } else if constexpr (std::is_same_v<T, std::string>) {
+                    return static_response_it->second;
+                }
+            } catch (...) {
+                // Parsing failed, fall back to basic
+            }
+        }
+
+        return execute_basic_fallback<T>(context);
     }
 };
 

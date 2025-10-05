@@ -9,12 +9,22 @@
 #include "../tool_interface.hpp"
 #include <curl/curl.h>
 #include <sstream>
+#include <websocketpp/client.hpp>
+#include <websocketpp/config/asio_no_tls_client.hpp>
+#include <websocketpp/common/thread.hpp>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 namespace regulens {
 
+// WebSocket client type alias
+typedef websocketpp::client<websocketpp::config::asio_client> ws_client;
+typedef websocketpp::lib::shared_ptr<websocketpp::lib::thread> thread_ptr;
+
 // MCP Tool Implementation
 MCPToolIntegration::MCPToolIntegration(const ToolConfig& config, StructuredLogger* logger)
-    : Tool(config, logger), server_connected_(false) {
+    : Tool(config, logger), server_connected_(false), ws_client_(nullptr), ws_thread_(nullptr) {
 
     // Parse MCP server configuration from tool config
     if (config.metadata.contains("mcp_server_url")) {
@@ -237,27 +247,48 @@ ToolResult MCPToolIntegration::subscribe_to_resource(const std::string& uri) {
 
 bool MCPToolIntegration::initialize_mcp_connection() {
     try {
-        // Initialize MCP handshake
-        nlohmann::json handshake_request = {
-            {"jsonrpc", "2.0"},
-            {"id", generate_request_id()},
-            {"method", "initialize"},
-            {"params", {
-                {"protocolVersion", "2024-11-05"},
-                {"capabilities", {
-                    {"tools", {{"listChanged", true}}},
-                    {"resources", {{"listChanged", true}, {"subscribe", true}}}
-                }},
-                {"clientInfo", {
-                    {"name", "Regulens Agent"},
-                    {"version", "1.0.0"}
-                }}
+        // Initialize WebSocket connection
+        if (!initialize_websocket_connection()) {
+            return false;
+        }
+
+        // Perform MCP handshake
+        nlohmann::json handshake_params = {
+            {"protocolVersion", "2024-11-05"},
+            {"capabilities", {
+                {"tools", {{"listChanged", true}}},
+                {"resources", {{"listChanged", true}, {"subscribe", true}}},
+                {"sampling", {}}
+            }},
+            {"clientInfo", {
+                {"name", "Regulens Agent"},
+                {"version", "1.0.0"}
             }}
         };
 
-        nlohmann::json response = send_mcp_request("initialize", handshake_request["params"]);
+        nlohmann::json response = send_mcp_request("initialize", handshake_params);
 
         if (response.contains("result")) {
+            // Store server capabilities
+            if (response["result"].contains("capabilities")) {
+                mcp_config_.server_capabilities = response["result"]["capabilities"];
+            }
+
+            // Send initialized notification
+            nlohmann::json initialized_notification = {
+                {"jsonrpc", "2.0"},
+                {"method", "notifications/initialized"},
+                {"params", nlohmann::json::object()}
+            };
+
+            websocketpp::lib::error_code ec;
+            ws_client_->send(ws_connection_, initialized_notification.dump(),
+                           websocketpp::frame::opcode::text, ec);
+
+            if (ec) {
+                logger_->log(LogLevel::WARN, "Failed to send initialized notification: " + ec.message());
+            }
+
             logger_->log(LogLevel::INFO, "MCP server initialized successfully");
             return true;
         } else {
@@ -317,58 +348,196 @@ bool MCPToolIntegration::discover_mcp_resources() {
     }
 }
 
+bool MCPToolIntegration::initialize_websocket_connection() {
+    try {
+        ws_client_ = std::make_unique<ws_client>();
+        ws_connected_ = false;
+
+        // Set up WebSocket event handlers
+        ws_client_->set_access_channels(websocketpp::log::alevel::none);
+        ws_client_->set_error_channels(websocketpp::log::elevel::none);
+
+        ws_client_->set_open_handler([this](websocketpp::connection_hdl hdl) {
+            std::lock_guard<std::mutex> lock(ws_mutex_);
+            ws_connection_ = hdl;
+            ws_connected_ = true;
+            response_cv_.notify_all();
+            logger_->log(LogLevel::INFO, "WebSocket connection established to MCP server");
+        });
+
+        ws_client_->set_close_handler([this](websocketpp::connection_hdl hdl) {
+            std::lock_guard<std::mutex> lock(ws_mutex_);
+            ws_connected_ = false;
+            logger_->log(LogLevel::INFO, "WebSocket connection closed");
+        });
+
+        ws_client_->set_message_handler([this](websocketpp::connection_hdl hdl,
+                                              ws_client::message_ptr msg) {
+            handle_websocket_message(msg->get_payload());
+        });
+
+        ws_client_->set_fail_handler([this](websocketpp::connection_hdl hdl) {
+            std::lock_guard<std::mutex> lock(ws_mutex_);
+            ws_connected_ = false;
+            logger_->log(LogLevel::ERROR, "WebSocket connection failed");
+            response_cv_.notify_all();
+        });
+
+        // Initialize ASIO
+        ws_client_->init_asio();
+
+        // Start WebSocket thread
+        ws_thread_ = std::make_unique<websocketpp::lib::thread>(
+            &ws_client::run, ws_client_.get());
+
+        // Connect to server
+        websocketpp::lib::error_code ec;
+        ws_client::connection_ptr con = ws_client_->get_connection(mcp_config_.server_url, ec);
+        if (ec) {
+            logger_->log(LogLevel::ERROR, "WebSocket connection creation failed: " + ec.message());
+            return false;
+        }
+
+        // Add authorization header if token provided
+        if (!mcp_config_.auth_token.empty()) {
+            con->add_subprotocol("authorization");
+            con->add_header("Authorization", "Bearer " + mcp_config_.auth_token);
+        }
+
+        ws_client_->connect(con);
+
+        // Wait for connection with timeout
+        {
+            std::unique_lock<std::mutex> lock(ws_mutex_);
+            if (!response_cv_.wait_for(lock, std::chrono::seconds(mcp_config_.connection_timeout),
+                                     [this]() { return ws_connected_.load(); })) {
+                logger_->log(LogLevel::ERROR, "WebSocket connection timeout");
+                return false;
+            }
+        }
+
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "WebSocket initialization failed: " + std::string(e.what()));
+        return false;
+    }
+}
+
+void MCPToolIntegration::handle_websocket_message(const std::string& message) {
+    try {
+        nlohmann::json response = nlohmann::json::parse(message);
+
+        if (response.contains("id")) {
+            std::string request_id = response["id"];
+            std::lock_guard<std::mutex> lock(ws_mutex_);
+            pending_responses_[request_id] = response;
+            response_cv_.notify_all();
+        } else if (response.contains("method")) {
+            // Handle server-initiated messages (notifications)
+            handle_mcp_notification(response);
+        }
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to parse WebSocket message: " + std::string(e.what()));
+    }
+}
+
+void MCPToolIntegration::handle_mcp_notification(const nlohmann::json& notification) {
+    std::string method = notification.value("method", "");
+
+    if (method == "notifications/tools/list_changed") {
+        // Tools list changed, rediscover tools
+        discover_mcp_tools();
+    } else if (method == "notifications/resources/list_changed") {
+        // Resources list changed, rediscover resources
+        discover_mcp_resources();
+    } else if (method == "notifications/resources/updated") {
+        // Resource updated
+        if (notification.contains("params") && notification["params"].contains("uri")) {
+            std::string uri = notification["params"]["uri"];
+            logger_->log(LogLevel::INFO, "MCP resource updated: " + uri);
+        }
+    }
+}
+
 nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, const nlohmann::json& params) {
-    // HTTP-based MCP communication (simplified implementation)
-    // In production, this would use WebSocket or other transport
+    if (!ws_connected_) {
+        return {{"error", "WebSocket not connected"}};
+    }
 
     try {
-        CURL* curl = curl_easy_init();
-        if (!curl) {
-            throw std::runtime_error("Failed to initialize CURL");
-        }
+        std::string request_id = generate_request_id();
 
         nlohmann::json request = {
             {"jsonrpc", "2.0"},
-            {"id", generate_request_id()},
+            {"id", request_id},
             {"method", method},
             {"params", params}
         };
 
-        std::string request_body = request.dump();
-        std::string response_body;
+        std::string request_str = request.dump();
 
-        // Set up HTTP headers
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        if (!mcp_config_.auth_token.empty()) {
-            std::string auth_header = "Authorization: Bearer " + mcp_config_.auth_token;
-            headers = curl_slist_append(headers, auth_header.c_str());
+        // Send request via WebSocket
+        websocketpp::lib::error_code ec;
+        ws_client_->send(ws_connection_, request_str, websocketpp::frame::opcode::text, ec);
+
+        if (ec) {
+            logger_->log(LogLevel::ERROR, "WebSocket send failed: " + ec.message());
+            return {{"error", "WebSocket send failed: " + ec.message()}};
         }
 
-        // Configure CURL
-        curl_easy_setopt(curl, CURLOPT_URL, mcp_config_.server_url.c_str());
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_body.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, request_body.length());
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, mcp_config_.connection_timeout);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+        // Wait for response with timeout
+        {
+            std::unique_lock<std::mutex> lock(ws_mutex_);
+            if (!response_cv_.wait_for(lock, std::chrono::seconds(mcp_config_.read_timeout),
+                                     [this, &request_id]() {
+                                         return pending_responses_.find(request_id) != pending_responses_.end();
+                                     })) {
+                logger_->log(LogLevel::ERROR, "MCP request timeout for method: " + method);
+                return {{"error", "Request timeout"}};
+            }
 
-        // Perform request
-        CURLcode res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-        curl_slist_free_all(headers);
-
-        if (res != CURLE_OK) {
-            throw std::runtime_error("HTTP request failed: " + std::string(curl_easy_strerror(res)));
+            auto it = pending_responses_.find(request_id);
+            if (it != pending_responses_.end()) {
+                nlohmann::json response = it->second;
+                pending_responses_.erase(it);
+                return response;
+            }
         }
 
-        return nlohmann::json::parse(response_body);
+        return {{"error", "No response received"}};
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "MCP request failed: " + std::string(e.what()));
+        logger_->log(LogLevel::ERROR, "MCP WebSocket request failed: " + std::string(e.what()));
         return {{"error", e.what()}};
+    }
+}
+
+bool MCPToolIntegration::disconnect() {
+    try {
+        server_connected_ = false;
+        available_tools_.clear();
+        available_resources_.clear();
+
+        if (ws_connected_ && ws_client_) {
+            websocketpp::lib::error_code ec;
+            ws_client_->close(ws_connection_, websocketpp::close::status::normal, "Client disconnect", ec);
+            ws_connected_ = false;
+        }
+
+        if (ws_thread_ && ws_thread_->joinable()) {
+            ws_thread_->join();
+        }
+
+        ws_client_.reset();
+        ws_thread_.reset();
+
+        logger_->log(LogLevel::INFO, "Disconnected from MCP server");
+        return true;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "MCP disconnect failed: " + std::string(e.what()));
+        return false;
     }
 }
 

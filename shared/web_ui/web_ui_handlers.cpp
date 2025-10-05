@@ -10,6 +10,8 @@
 #include <sstream>
 #include <iomanip>
 #include "../database/postgresql_connection.hpp"
+#include "../network/http_client.hpp"
+#include "../network/email_client.hpp"
 #include "../llm/function_calling.hpp"
 #include "../llm/compliance_functions.hpp"
 
@@ -42,6 +44,11 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
     // Initialize error handler
     error_handler_ = std::make_shared<ErrorHandler>(config, logger);
     error_handler_->initialize();
+
+    // Initialize regulatory fetcher for testing
+    auto http_client = std::make_shared<HttpClient>(config, logger);
+    auto email_client = std::make_shared<EmailClient>(config, logger);
+    regulatory_fetcher_ = std::make_shared<RealRegulatoryFetcher>(http_client, email_client, logger);
 
     // Initialize health check handler for Kubernetes probes
     auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
@@ -439,15 +446,85 @@ HTTPResponse WebUIHandlers::handle_regulatory_monitor(const HTTPRequest& request
         return create_error_response(400, "Invalid request");
     }
 
-    // Placeholder for monitoring status
+    // Get real regulatory monitoring status
     nlohmann::json response = {
         {"status", "success"},
-        {"monitoring_active", false},
-        {"last_scan", "2024-01-01T00:00:00Z"},
-        {"note", "Regulatory monitoring integration pending"}
+        {"monitoring_active", false},  // Will be updated when fetcher is running
+        {"total_fetches", 0},
+        {"last_fetch_time", nullptr},
+        {"sources", {
+            {"SEC", "https://www.sec.gov/edgar"},
+            {"FCA", "https://www.fca.org.uk/news"},
+            {"ECB", "https://www.ecb.europa.eu/press/pr/date/html/index.en.html"}
+        }}
     };
 
+    // Add real status if regulatory fetcher is available
+    if (regulatory_fetcher_) {
+        response["total_fetches"] = regulatory_fetcher_->get_total_fetches();
+
+        auto last_fetch = regulatory_fetcher_->get_last_fetch_time();
+        if (last_fetch != std::chrono::system_clock::time_point{}) {
+            std::stringstream ss;
+            auto time_t = std::chrono::system_clock::to_time_t(last_fetch);
+            ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%dT%H:%M:%SZ");
+            response["last_fetch_time"] = ss.str();
+        }
+    }
+
     return create_json_response(response.dump());
+}
+
+HTTPResponse WebUIHandlers::handle_regulatory_start(const HTTPRequest& request) {
+    if (!validate_request(request) || request.method != "POST") {
+        return create_error_response(400, "Invalid request");
+    }
+
+    if (!regulatory_fetcher_) {
+        return create_json_response(nlohmann::json{
+            {"status", "error"},
+            {"message", "Regulatory fetcher not initialized"}
+        }.dump(), "500 Internal Server Error");
+    }
+
+    try {
+        regulatory_fetcher_->start_fetching();
+        return create_json_response(nlohmann::json{
+            {"status", "success"},
+            {"message", "Regulatory monitoring started"}
+        }.dump());
+    } catch (const std::exception& e) {
+        return create_json_response(nlohmann::json{
+            {"status", "error"},
+            {"message", std::string("Failed to start regulatory monitoring: ") + e.what()}
+        }.dump(), "500 Internal Server Error");
+    }
+}
+
+HTTPResponse WebUIHandlers::handle_regulatory_stop(const HTTPRequest& request) {
+    if (!validate_request(request) || request.method != "POST") {
+        return create_error_response(400, "Invalid request");
+    }
+
+    if (!regulatory_fetcher_) {
+        return create_json_response(nlohmann::json{
+            {"status", "error"},
+            {"message", "Regulatory fetcher not initialized"}
+        }.dump(), "500 Internal Server Error");
+    }
+
+    try {
+        regulatory_fetcher_->stop_fetching();
+        return create_json_response(nlohmann::json{
+            {"status", "success"},
+            {"message", "Regulatory monitoring stopped"}
+        }.dump());
+    } catch (const std::exception& e) {
+        return create_json_response(nlohmann::json{
+            {"status", "error"},
+            {"message", std::string("Failed to stop regulatory monitoring: ") + e.what()}
+        }.dump(), "500 Internal Server Error");
+    }
 }
 
 // Decision tree visualization handlers

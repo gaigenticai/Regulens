@@ -246,6 +246,7 @@ struct DecisionTreeConfig {
         double topsis_distance_p = 2.0;  // p-norm for TOPSIS
         double electre_threshold = 0.7;  // Concordance threshold for ELECTRE
         double promethee_preference_threshold = 0.1;  // Preference threshold for PROMETHEE
+        double vikor_v_parameter = 0.5;  // Weight for group utility in VIKOR (0-1)
     } mcda_params;
 
     nlohmann::json to_json() const {
@@ -262,7 +263,8 @@ struct DecisionTreeConfig {
             {"mcda_params", {
                 {"topsis_distance_p", mcda_params.topsis_distance_p},
                 {"electre_threshold", mcda_params.electre_threshold},
-                {"promethee_preference_threshold", mcda_params.promethee_preference_threshold}
+                {"promethee_preference_threshold", mcda_params.promethee_preference_threshold},
+                {"vikor_v_parameter", mcda_params.vikor_v_parameter}
             }}
         };
     }

@@ -437,18 +437,101 @@ ValidationResult FunctionDispatcher::pre_execution_validation(const FunctionCall
 }
 
 bool FunctionDispatcher::apply_security_controls(const FunctionCall& call,
-                                               const FunctionContext& context) {
-    // Rate limiting check (simplified)
-    // In production, this would integrate with the rate limiter
+                                                const FunctionContext& context) {
+    // Rate limiting check
+    if (!check_rate_limits(call, context)) {
+        if (logger_) {
+            logger_->warn("Rate limit exceeded for function call: " + call.name,
+                         "FunctionDispatcher", "apply_security_controls",
+                         {{"agent_id", context.agent_id},
+                          {"function_name", call.name},
+                          {"correlation_id", context.correlation_id}});
+        }
+        return false;
+    }
 
     // Audit logging
     if (logger_) {
         logger_->info("Function call security check passed: " + call.name,
-                     "FunctionDispatcher", "apply_security_controls",
-                     {{"agent_id", context.agent_id},
-                      {"function_name", call.name},
-                      {"correlation_id", context.correlation_id}});
+                      "FunctionDispatcher", "apply_security_controls",
+                      {{"agent_id", context.agent_id},
+                       {"function_name", call.name},
+                       {"correlation_id", context.correlation_id}});
     }
+
+    return true;
+}
+
+bool FunctionDispatcher::check_rate_limits(const FunctionCall& call, const FunctionContext& context) {
+    std::lock_guard<std::mutex> lock(rate_limit_mutex_);
+
+    auto now = std::chrono::steady_clock::now();
+
+    // Clean up old entries (older than rate limit window)
+    auto cutoff_time = now - std::chrono::minutes(1); // 1 minute window
+    for (auto it = rate_limit_calls_.begin(); it != rate_limit_calls_.end(); ) {
+        if (it->timestamp < cutoff_time) {
+            it = rate_limit_calls_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Count calls in the current window
+    int agent_calls = 0;
+    int function_calls = 0;
+    int global_calls = 0;
+
+    for (const auto& call_record : rate_limit_calls_) {
+        if (call_record.timestamp >= cutoff_time) {
+            global_calls++;
+            if (call_record.agent_id == context.agent_id) {
+                agent_calls++;
+            }
+            if (call_record.function_name == call.name) {
+                function_calls++;
+            }
+        }
+    }
+
+    // Check rate limits
+    const int MAX_AGENT_CALLS_PER_MINUTE = 100;    // Per agent
+    const int MAX_FUNCTION_CALLS_PER_MINUTE = 50;  // Per function
+    const int MAX_GLOBAL_CALLS_PER_MINUTE = 1000;  // Global
+
+    if (agent_calls >= MAX_AGENT_CALLS_PER_MINUTE) {
+        if (logger_) {
+            logger_->warn("Agent rate limit exceeded: " + context.agent_id,
+                         "FunctionDispatcher", "check_rate_limits",
+                         {{"agent_id", context.agent_id}, {"calls", std::to_string(agent_calls)}});
+        }
+        return false;
+    }
+
+    if (function_calls >= MAX_FUNCTION_CALLS_PER_MINUTE) {
+        if (logger_) {
+            logger_->warn("Function rate limit exceeded: " + call.name,
+                         "FunctionDispatcher", "check_rate_limits",
+                         {{"function_name", call.name}, {"calls", std::to_string(function_calls)}});
+        }
+        return false;
+    }
+
+    if (global_calls >= MAX_GLOBAL_CALLS_PER_MINUTE) {
+        if (logger_) {
+            logger_->warn("Global rate limit exceeded",
+                         "FunctionDispatcher", "check_rate_limits",
+                         {{"calls", std::to_string(global_calls)}});
+        }
+        return false;
+    }
+
+    // Record this call
+    RateLimitRecord record;
+    record.timestamp = now;
+    record.agent_id = context.agent_id;
+    record.function_name = call.name;
+    rate_limit_calls_.push_back(record);
 
     return true;
 }

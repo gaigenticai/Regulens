@@ -13,6 +13,7 @@
 
 #include "models/human_ai_interaction.hpp"
 #include "logging/structured_logger.hpp"
+#include <condition_variable>
 #include "config/configuration_manager.hpp"
 
 namespace regulens {

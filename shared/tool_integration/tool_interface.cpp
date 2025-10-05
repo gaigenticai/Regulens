@@ -1,6 +1,7 @@
 #include "tool_interface.hpp"
 #include "tools/email_tool.hpp"
 #include "tools/web_search_tool.hpp"
+#include <deque>
 #include "tools/mcp_tool.hpp"
 #include <algorithm>
 #include <sstream>
@@ -155,8 +156,8 @@ void Tool::update_health_status() {
 
     size_t failed = metrics_.operations_failed.load();
     size_t timeouts = metrics_.timeouts.load();
-    double failure_rate = static_cast<double>(failed) / total;
-    double timeout_rate = static_cast<double>(timeouts) / total;
+    double failure_rate = total > 0 ? static_cast<double>(failed) / static_cast<double>(total) : 0.0;
+    double timeout_rate = total > 0 ? static_cast<double>(timeouts) / static_cast<double>(total) : 0.0;
 
     if (failure_rate > 0.5 || timeout_rate > 0.3) {
         metrics_.health_status = ToolHealthStatus::UNHEALTHY;

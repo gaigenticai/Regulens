@@ -169,6 +169,14 @@ private:
      * @return ISO 8601 formatted string
      */
     std::string format_timestamp(std::chrono::system_clock::time_point tp) const;
+
+    /**
+     * @brief Calculate relevance score for regulatory content
+     * @param content The content to analyze
+     * @param keywords Compliance-related keywords to check for
+     * @return Relevance score between 0.0 and 1.0
+     */
+    double calculate_relevance_score(const std::string& content, const std::vector<std::string>& keywords) const;
 };
 
 /**

@@ -96,54 +96,10 @@ bool RedisConnectionWrapper::is_connected() const {
 
 RedisResult RedisConnectionWrapper::execute_command(const std::string& command,
                                                    const std::vector<std::string>& args) {
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    try {
-        update_activity();
-
-        // In production, this would construct Redis command and execute:
-        // redisReply* reply = (redisReply*)redisCommand(connection_, formatted_command.c_str());
-
-        // Simulate command execution based on command type
-        RedisResult result(true, "", std::chrono::milliseconds(0));
-
-        if (command == "PING") {
-            result.value = "PONG";
-        } else if (command == "GET") {
-            // Simulate cache hit/miss randomly for demo
-            static std::random_device rd;
-            static std::mt19937 gen(rd());
-            static std::uniform_int_distribution<> dis(0, 1);
-
-            if (dis(gen) == 1) {
-                result.value = "cached_value_" + args[0];
-            } else {
-                result.success = false;
-                result.error_message = "Key not found";
-            }
-        } else if (command == "SET") {
-            result.integer_value = 1; // OK
-        } else if (command == "DEL") {
-            result.integer_value = 1; // Deleted
-        } else if (command == "EXISTS") {
-            result.integer_value = 1; // Exists
-        } else {
-            result.success = false;
-            result.error_message = "Unknown command: " + command;
-        }
-
-        auto end_time = std::chrono::high_resolution_clock::now();
-        result.execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-
-        return result;
-
-    } catch (const std::exception& e) {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-
-        return RedisResult(false, "Exception during command execution: " + std::string(e.what()),
-                          execution_time);
-    }
+    // PRODUCTION REQUIREMENT: Redis command execution requires proper hiredis integration
+    // Cannot use simulation code per rule.mdc requirements
+    throw std::runtime_error("Redis command execution requires proper hiredis integration. "
+                           "This cannot use simulation code - must implement real Redis connectivity.");
 }
 
 void RedisConnectionWrapper::update_activity() {
@@ -364,40 +320,21 @@ void RedisClient::set_metrics_collector(std::shared_ptr<PrometheusMetricsCollect
 }
 
 bool RedisClient::initialize() {
-    if (initialized_) return true;
+    // PRODUCTION REQUIREMENT: Redis client requires proper hiredis integration
+    // Per rule.mdc #1: No simulation, mock, or dummy code allowed in production
 
-    try {
-        load_config();
-
-        // Initialize connection pool
-        connection_pool_ = std::make_unique<RedisConnectionPool>(redis_config_, logger_);
-
-        if (!connection_pool_->initialize()) {
-            if (logger_) {
-                logger_->error("Failed to initialize Redis connection pool",
-                              "RedisClient", "initialize");
-            }
-            return false;
-        }
-
-        initialized_ = true;
-
-        if (logger_) {
-            logger_->info("Redis client initialized successfully",
-                         "RedisClient", "initialize",
-                         {{"host", redis_config_.host},
-                          {"port", std::to_string(redis_config_.port)},
-                          {"max_connections", std::to_string(redis_config_.max_connections)}});
-        }
-
-        return true;
-    } catch (const std::exception& e) {
-        if (logger_) {
-            logger_->error("Failed to initialize Redis client: " + std::string(e.what()),
-                          "RedisClient", "initialize");
-        }
-        return false;
+    if (logger_) {
+        logger_->error("Redis client initialization failed - hiredis integration required",
+                      "RedisClient", "initialize",
+                      {{"error", "PRODUCTION_REQUIREMENT: Redis requires hiredis library integration"}});
     }
+
+    // This will cause the application to fail fast rather than silently use simulation
+    throw std::runtime_error("Redis client requires proper hiredis integration for production use. "
+                           "Cannot use simulation code per rule.mdc requirements. "
+                           "Please integrate hiredis library and implement real Redis connectivity.");
+
+    return false; // Never reached, but required for compilation
 }
 
 void RedisClient::shutdown() {
@@ -462,26 +399,9 @@ void RedisClient::load_config() {
 }
 
 RedisResult RedisClient::get(const std::string& key) {
-    auto result = execute_with_connection([key](std::shared_ptr<RedisConnectionWrapper> conn) {
-        return conn->execute_command("GET", {key});
-    });
-
-    // Record metrics
-    if (metrics_collector_) {
-        std::string cache_type = "unknown";
-        if (key.find("llm:") != std::string::npos) cache_type = "llm";
-        else if (key.find("regulatory:") != std::string::npos) cache_type = "regulatory";
-        else if (key.find("session:") != std::string::npos) cache_type = "session";
-        else if (key.find("temp:") != std::string::npos) cache_type = "temp";
-        else if (key.find("preferences:") != std::string::npos) cache_type = "preferences";
-
-        metrics_collector_->get_redis_collector().record_redis_operation(
-            "GET", cache_type, result.success,
-            std::chrono::duration_cast<std::chrono::milliseconds>(result.execution_time).count(),
-            result.success && result.value); // Hit if successful and has value
-    }
-
-    return result;
+    // PRODUCTION REQUIREMENT: Redis GET operation requires hiredis integration
+    throw std::runtime_error("Redis GET operation requires proper hiredis integration. "
+                           "Cannot use simulation code per rule.mdc requirements.");
 }
 
 RedisResult RedisClient::set(const std::string& key, const std::string& value,
@@ -581,13 +501,9 @@ RedisResult RedisClient::subscribe(const std::vector<std::string>& channels,
                                  std::function<void(const std::string&, const std::string&)> message_callback,
                                  int timeout_seconds) {
     // PRODUCTION REQUIREMENT: Redis pub/sub requires proper hiredis integration
-    // Subscription functionality cannot be simulated - it requires:
-    // 1. Dedicated Redis connection for pub/sub
-    // 2. Async message handling
-    // 3. Proper cleanup and reconnection logic
-
+    // Cannot use simulation - must implement real Redis pub/sub functionality
     throw std::runtime_error("Redis pub/sub functionality requires proper hiredis integration. "
-                           "This cannot be simulated and must use real Redis connectivity.");
+                           "This cannot be simulated per rule.mdc requirements.");
 }
 
 RedisResult RedisClient::eval(const std::string& script,

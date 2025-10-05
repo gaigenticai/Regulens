@@ -77,8 +77,8 @@ bool CircuitBreaker::initialize() {
     } catch (const std::exception& e) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
-                ErrorSeverity::ERROR,
+                ErrorCategory::CONFIGURATION,
+                ErrorSeverity::HIGH,
                 "CircuitBreaker",
                 "initialize",
                 "Failed to initialize circuit breaker: " + std::string(e.what()),
@@ -174,7 +174,7 @@ bool CircuitBreaker::update_config(const CircuitBreakerConfig& new_config) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::CONFIGURATION,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "CircuitBreaker",
                 "update_config",
                 "Failed to update circuit breaker config: " + std::string(e.what()),
@@ -187,7 +187,18 @@ bool CircuitBreaker::update_config(const CircuitBreakerConfig& new_config) {
 
 CircuitBreakerMetrics CircuitBreaker::get_metrics() const {
     std::lock_guard<std::mutex> lock(metrics_mutex_);
-    return metrics_;
+    CircuitBreakerMetrics result;
+    result.total_requests = metrics_.total_requests.load();
+    result.successful_requests = metrics_.successful_requests.load();
+    result.failed_requests = metrics_.failed_requests.load();
+    result.rejected_requests = metrics_.rejected_requests.load();
+    result.state_transitions = metrics_.state_transitions.load();
+    result.recovery_attempts = metrics_.recovery_attempts.load();
+    result.successful_recoveries = metrics_.successful_recoveries.load();
+    result.last_failure_time = metrics_.last_failure_time;
+    result.last_state_change_time = metrics_.last_state_change_time;
+    result.created_time = metrics_.created_time;
+    return result;
 }
 
 bool CircuitBreaker::force_open() {
@@ -205,9 +216,19 @@ bool CircuitBreaker::force_close() {
 }
 
 bool CircuitBreaker::reset() {
-    force_close();
+    transition_to_state(CircuitState::CLOSED);
     std::lock_guard<std::mutex> lock(metrics_mutex_);
-    metrics_ = CircuitBreakerMetrics();
+    // Reset all atomic counters
+    metrics_.total_requests = 0;
+    metrics_.successful_requests = 0;
+    metrics_.failed_requests = 0;
+    metrics_.rejected_requests = 0;
+    metrics_.state_transitions = 0;
+    metrics_.recovery_attempts = 0;
+    metrics_.successful_recoveries = 0;
+    metrics_.last_failure_time = std::chrono::system_clock::time_point{};
+    metrics_.last_state_change_time = std::chrono::system_clock::now();
+    metrics_.created_time = std::chrono::system_clock::now();
     return true;
 }
 
@@ -216,10 +237,10 @@ nlohmann::json CircuitBreaker::get_health_status() const {
     CircuitState state = get_current_state();
 
     double failure_rate = metrics.total_requests > 0 ?
-        static_cast<double>(metrics.failed_requests) / metrics.total_requests : 0.0;
+        static_cast<double>(metrics.failed_requests) / static_cast<double>(metrics.total_requests) : 0.0;
 
     double success_rate = metrics.total_requests > 0 ?
-        static_cast<double>(metrics.successful_requests) / metrics.total_requests : 0.0;
+        static_cast<double>(metrics.successful_requests) / static_cast<double>(metrics.total_requests) : 0.0;
 
     return {
         {"circuit_name", config_.name},
@@ -266,7 +287,7 @@ void CircuitBreaker::on_success(std::chrono::milliseconds execution_time) {
     }
 }
 
-void CircuitBreaker::on_failure(std::chrono::milliseconds execution_time) {
+void CircuitBreaker::on_failure(std::chrono::milliseconds /*execution_time*/) {
     metrics_.total_requests++;
     metrics_.last_failure_time = std::chrono::system_clock::now();
 
@@ -332,8 +353,9 @@ std::chrono::milliseconds CircuitBreaker::calculate_backoff_duration() {
     std::chrono::milliseconds base_backoff = current_backoff_time_;
 
     // Apply exponential backoff
-    double multiplier = std::pow(config_.backoff_multiplier, backoff_attempt_count_);
-    std::chrono::milliseconds calculated_backoff = base_backoff * multiplier;
+    double multiplier = std::pow(config_.backoff_multiplier, static_cast<double>(backoff_attempt_count_));
+    auto base_count = static_cast<double>(base_backoff.count());
+    std::chrono::milliseconds calculated_backoff(static_cast<long long>(base_count * multiplier));
 
     // Cap at maximum backoff time
     calculated_backoff = std::min(calculated_backoff, config_.max_backoff_time);
@@ -343,8 +365,9 @@ std::chrono::milliseconds CircuitBreaker::calculate_backoff_duration() {
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(-config_.jitter_factor, config_.jitter_factor);
     double jitter = 1.0 + dis(gen);
+    auto current_count = static_cast<double>(calculated_backoff.count());
     calculated_backoff = std::chrono::milliseconds(
-        static_cast<long long>(calculated_backoff.count() * jitter));
+        static_cast<long long>(current_count * jitter));
 
     // Ensure minimum backoff
     calculated_backoff = std::max(calculated_backoff, std::chrono::milliseconds(1000));

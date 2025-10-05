@@ -14,6 +14,7 @@
 #include "models/agent_activity.hpp"
 #include "logging/structured_logger.hpp"
 #include "config/configuration_manager.hpp"
+#include <condition_variable>
 #include "database/postgresql_connection.hpp"
 
 namespace regulens {

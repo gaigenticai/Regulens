@@ -96,6 +96,15 @@ private:
     std::unordered_map<std::string, MCPResource> available_resources_;
     bool server_connected_;
 
+    // WebSocket communication
+    std::unique_ptr<ws_client> ws_client_;
+    websocketpp::connection_hdl ws_connection_;
+    std::unique_ptr<websocketpp::lib::thread> ws_thread_;
+    std::mutex ws_mutex_;
+    std::condition_variable response_cv_;
+    std::unordered_map<std::string, nlohmann::json> pending_responses_;
+    std::atomic<bool> ws_connected_;
+
     // MCP protocol methods
     bool initialize_mcp_connection();
     bool discover_mcp_tools();

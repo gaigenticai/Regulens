@@ -20,6 +20,7 @@
 #include <chrono>
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
+#include <thread>
 #include "../agentic_brain/llm_interface.hpp"
 #include <nlohmann/json.hpp>
 
@@ -283,6 +284,9 @@ private:
     std::atomic<int64_t> total_searches_;
     std::atomic<int64_t> cache_hits_;
     std::atomic<int64_t> cache_misses_;
+
+    // Utility Methods
+    std::string vector_to_string(const std::vector<float>& vec) const;
 
     // Constants
     const std::string EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2";

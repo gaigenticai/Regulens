@@ -13,8 +13,30 @@
 #include <nlohmann/json.hpp>
 
 #include "models/error_handling.hpp"
-#include "resilience/circuit_breaker.hpp"
-#include "metrics/prometheus_metrics.hpp"
+
+// Circuit breaker and metrics temporarily disabled - circular dependency issues
+// #include "resilience/circuit_breaker.hpp"
+// #include "metrics/prometheus_metrics.hpp"
+
+// Basic circuit breaker state enum for compatibility
+enum class CircuitState {
+    CLOSED,     // Normal operation
+    OPEN,       // Failing, requests blocked
+    HALF_OPEN   // Testing if service recovered
+};
+
+// Basic circuit breaker result for compatibility
+struct CircuitBreakerResult {
+    bool success;
+    std::optional<nlohmann::json> result;
+    std::string error_message;
+    std::chrono::milliseconds execution_time;
+    CircuitState circuit_state_at_call;
+
+    CircuitBreakerResult(bool s, std::optional<nlohmann::json> r, std::string err,
+                        std::chrono::milliseconds et, CircuitState cs)
+        : success(s), result(r), error_message(err), execution_time(et), circuit_state_at_call(cs) {}
+};
 #include "logging/structured_logger.hpp"
 #include "config/configuration_manager.hpp"
 
@@ -88,26 +110,15 @@ public:
         const std::string& component_name,
         const std::string& operation_name);
 
-    /**
-     * @brief Set the metrics collector for circuit breaker monitoring
-     * @param metrics_collector Shared pointer to metrics collector
-     */
-    void set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector);
+    // Circuit breaker and metrics temporarily disabled - circular dependency issues
+    // void set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector);
 
-    /**
-     * @brief Execute an operation with advanced circuit breaker protection
-     * @param operation Function to execute (should return CircuitBreakerResult)
-     * @param service_name Name of the external service
-     * @param component_name Component performing the operation
-     * @param operation_name Operation name
-     * @return CircuitBreakerResult with detailed execution information
-     */
-    template<typename Func>
-    regulens::CircuitBreakerResult execute_with_advanced_circuit_breaker(
-        Func&& operation,
-        const std::string& service_name,
-        const std::string& component_name,
-        const std::string& operation_name);
+    // template<typename Func>
+    // regulens::CircuitBreakerResult execute_with_advanced_circuit_breaker(
+    //     Func&& operation,
+    //     const std::string& service_name,
+    //     const std::string& component_name,
+    //     const std::string& operation_name);
 
     /**
      * @brief Report an error for logging and recovery
@@ -132,19 +143,9 @@ public:
     HealthStatus perform_health_check(const std::string& component_name,
                                     std::function<bool()> health_check);
 
-    /**
-     * @brief Get circuit breaker status
-     * @param service_name Service name
-     * @return Circuit breaker information
-     */
-    std::optional<CircuitBreaker> get_circuit_breaker(const std::string& service_name);
-
-    /**
-     * @brief Reset a circuit breaker (manual intervention)
-     * @param service_name Service name
-     * @return true if reset successful
-     */
-    bool reset_circuit_breaker(const std::string& service_name);
+    // Circuit breaker temporarily disabled - circular dependency issues
+    // std::shared_ptr<CircuitBreaker> get_circuit_breaker(const std::string& service_name);
+    // bool reset_circuit_breaker(const std::string& service_name);
 
     /**
      * @brief Get fallback configuration for a component
@@ -200,10 +201,10 @@ private:
     std::mutex error_mutex_;
     std::deque<ErrorInfo> error_history_;
     std::unordered_map<std::string, ComponentHealth> component_health_;
-    std::unordered_map<std::string, CircuitBreaker> circuit_breakers_;
-    std::unordered_map<std::string, std::shared_ptr<regulens::CircuitBreaker>> advanced_circuit_breakers_;
-    std::shared_ptr<PrometheusMetricsCollector> metrics_collector_;
-    std::mutex circuit_breaker_mutex_;
+    // Circuit breaker and metrics temporarily disabled - circular dependency issues
+    // std::unordered_map<std::string, std::shared_ptr<CircuitBreaker>> circuit_breakers_;
+    // std::shared_ptr<PrometheusMetricsCollector> metrics_collector_;
+    // std::mutex circuit_breaker_mutex_;
     std::unordered_map<std::string, FallbackConfig> fallback_configs_;
 
     std::mutex stats_mutex_;
@@ -232,7 +233,7 @@ private:
                                     std::function<T()> original_operation);
 
     // Circuit breaker management
-    CircuitBreaker& get_or_create_circuit_breaker(const std::string& service_name);
+    std::shared_ptr<CircuitBreaker> get_or_create_circuit_breaker(const std::string& service_name);
 
     // Health monitoring
     void update_component_health(const std::string& component_name, bool success,

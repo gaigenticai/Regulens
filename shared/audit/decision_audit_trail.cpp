@@ -145,14 +145,8 @@ bool DecisionAuditTrailManager::record_decision_step(
     step.timestamp = std::chrono::system_clock::now();
     step.decision_id = decision_id;
 
-    // Calculate confidence impact (simplified - in real implementation this would be more sophisticated)
-    step.confidence_impact = 0.0;
-    if (event_type == AuditEventType::RISK_ASSESSMENT || event_type == AuditEventType::CONFIDENCE_CALCULATION) {
-        // These steps directly affect confidence
-        if (output_data.contains("confidence_score")) {
-            step.confidence_impact = output_data["confidence_score"].get<double>() * 0.1;
-        }
-    }
+    // Calculate sophisticated confidence impact based on step type, data quality, and context
+    step.confidence_impact = calculate_confidence_impact(event_type, input_data, output_data, metadata);
 
     // Store in active trail
     {
@@ -1181,6 +1175,149 @@ std::string DecisionAuditTrailManager::event_type_to_string(AuditEventType type)
         case AuditEventType::HUMAN_FEEDBACK_RECEIVED: return "Human Feedback Received";
         default: return "Unknown";
     }
+}
+
+double DecisionAuditTrailManager::calculate_confidence_impact(
+    AuditEventType event_type,
+    const nlohmann::json& input_data,
+    const nlohmann::json& output_data,
+    const nlohmann::json& metadata
+) {
+    double impact = 0.0;
+
+    // Base impact factors by event type
+    std::unordered_map<AuditEventType, double> base_impact_factors = {
+        {AuditEventType::DATA_RETRIEVAL, 0.05},           // Data quality affects confidence
+        {AuditEventType::PATTERN_ANALYSIS, 0.15},         // Pattern recognition is significant
+        {AuditEventType::RISK_ASSESSMENT, 0.20},          // Risk assessment is critical
+        {AuditEventType::KNOWLEDGE_QUERY, 0.10},          // Knowledge base queries are reliable
+        {AuditEventType::LLM_INFERENCE, 0.08},            // LLM outputs vary in reliability
+        {AuditEventType::RULE_EVALUATION, 0.12},          // Rule-based decisions are predictable
+        {AuditEventType::CONFIDENCE_CALCULATION, 0.25},   // Direct confidence calculation
+        {AuditEventType::HUMAN_FEEDBACK_RECEIVED, 0.30},  // Human input is highly reliable
+        {AuditEventType::DECISION_STARTED, 0.0},          // No impact
+        {AuditEventType::DECISION_FINALIZED, 0.0},        // No impact
+        {AuditEventType::HUMAN_REVIEW_REQUESTED, -0.10}   // Requesting review indicates uncertainty
+    };
+
+    auto base_it = base_impact_factors.find(event_type);
+    if (base_it != base_impact_factors.end()) {
+        impact = base_it->second;
+    }
+
+    // Adjust impact based on output data quality and content
+    if (output_data.contains("confidence_score")) {
+        double confidence_score = output_data["confidence_score"].get<double>();
+        // Confidence scores directly contribute to impact
+        impact += confidence_score * 0.3;
+    }
+
+    if (output_data.contains("data_quality_score")) {
+        double quality_score = output_data["data_quality_score"].get<double>();
+        // High-quality data increases confidence impact
+        impact *= (0.8 + 0.4 * quality_score); // Range: 0.8 to 1.2
+    }
+
+    if (output_data.contains("consistency_score")) {
+        double consistency = output_data["consistency_score"].get<double>();
+        // Consistent results increase confidence
+        impact *= (0.9 + 0.2 * consistency); // Range: 0.9 to 1.1
+    }
+
+    // Adjust for data source reliability
+    if (metadata.contains("data_source")) {
+        std::string source = metadata["data_source"];
+        std::unordered_map<std::string, double> source_reliability = {
+            {"primary_database", 1.0},
+            {"cache", 0.9},
+            {"external_api", 0.8},
+            {"user_input", 0.95},
+            {"llm_generated", 0.7},
+            {"inferred", 0.6}
+        };
+
+        auto source_it = source_reliability.find(source);
+        if (source_it != source_reliability.end()) {
+            impact *= source_it->second;
+        }
+    }
+
+    // Adjust for processing time (faster processing may indicate more reliable methods)
+    if (metadata.contains("processing_time_ms")) {
+        double processing_time = metadata["processing_time_ms"].get<double>();
+        // Penalize very slow processing (may indicate complex/computationally intensive operations)
+        if (processing_time > 5000) { // More than 5 seconds
+            impact *= 0.9;
+        } else if (processing_time < 100) { // Very fast (may be too simplistic)
+            impact *= 0.95;
+        }
+    }
+
+    // Adjust for error indicators
+    if (output_data.contains("error_rate")) {
+        double error_rate = output_data["error_rate"].get<double>();
+        impact *= (1.0 - error_rate * 0.5); // Reduce impact based on error rate
+    }
+
+    if (output_data.contains("warning_count")) {
+        int warning_count = output_data["warning_count"].get<int>();
+        impact *= std::max(0.7, 1.0 - warning_count * 0.05); // Reduce for warnings
+    }
+
+    // Special handling for risk assessment
+    if (event_type == AuditEventType::RISK_ASSESSMENT) {
+        if (output_data.contains("risk_level")) {
+            std::string risk_level = output_data["risk_level"];
+            if (risk_level == "CRITICAL" || risk_level == "HIGH") {
+                impact *= 0.8; // High risk reduces confidence impact
+            } else if (risk_level == "LOW") {
+                impact *= 1.1; // Low risk increases confidence impact
+            }
+        }
+    }
+
+    // Special handling for pattern analysis
+    if (event_type == AuditEventType::PATTERN_ANALYSIS) {
+        if (output_data.contains("pattern_strength")) {
+            double pattern_strength = output_data["pattern_strength"].get<double>();
+            impact *= (0.7 + 0.6 * pattern_strength); // Stronger patterns increase impact
+        }
+
+        if (output_data.contains("sample_size")) {
+            int sample_size = output_data["sample_size"].get<int>();
+            // Larger sample sizes increase confidence
+            double sample_factor = std::min(1.2, 0.8 + sample_size / 1000.0);
+            impact *= sample_factor;
+        }
+    }
+
+    // LLM inference confidence adjustment
+    if (event_type == AuditEventType::LLM_INFERENCE) {
+        if (output_data.contains("model_confidence")) {
+            double model_confidence = output_data["model_confidence"].get<double>();
+            impact *= model_confidence;
+        }
+
+        if (output_data.contains("temperature")) {
+            double temperature = output_data["temperature"].get<double>();
+            // Higher temperature (more creative) reduces confidence impact
+            impact *= (1.0 - temperature * 0.1);
+        }
+    }
+
+    // Human feedback is highly reliable
+    if (event_type == AuditEventType::HUMAN_FEEDBACK_RECEIVED) {
+        if (output_data.contains("approved") && output_data["approved"].get<bool>()) {
+            impact = std::abs(impact); // Ensure positive impact for approvals
+        } else {
+            impact *= -0.5; // Negative impact for disapprovals
+        }
+    }
+
+    // Clamp impact to reasonable range [-0.5, 0.5]
+    impact = std::max(-0.5, std::min(0.5, impact));
+
+    return impact;
 }
 
 } // namespace regulens

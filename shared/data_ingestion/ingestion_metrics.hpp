@@ -20,12 +20,13 @@
 #include "data_ingestion_framework.hpp"
 #include "../logging/structured_logger.hpp"
 #include <nlohmann/json.hpp>
+#include "../database/postgresql_connection.hpp"
 
 namespace regulens {
 
 class IngestionMetrics {
 public:
-    IngestionMetrics(StructuredLogger* logger);
+    IngestionMetrics(StructuredLogger* logger, std::shared_ptr<ConnectionPool> db_pool = nullptr);
 
     // Batch processing metrics
     void record_batch_processed(const std::string& source_id, const IngestionBatch& batch);
@@ -110,11 +111,12 @@ private:
     void load_alert_thresholds();
     void initialize_baseline_metrics();
 
-    // Data persistence (simplified)
+    // Data persistence - Production-grade database storage
     void persist_metrics() const;
     void load_persisted_metrics();
 
     StructuredLogger* logger_;
+    std::shared_ptr<ConnectionPool> db_pool_;
     mutable std::mutex metrics_mutex_;
 
     std::unordered_map<std::string, SourceMetrics> source_metrics_;

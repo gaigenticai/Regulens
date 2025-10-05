@@ -132,6 +132,31 @@ bool RegulatoryMonitor::remove_source(const std::string& source_id) {
     return false;
 }
 
+bool RegulatoryMonitor::add_standard_source(RegulatorySourceType type) {
+    try {
+        // Use RegulatorySourceFactory to create standard source
+        auto source = RegulatorySourceFactory::create_source(type, nlohmann::json{}, config_, logger_);
+
+        if (!source) {
+            logger_->error("Failed to create standard regulatory source of type: {}", static_cast<int>(type));
+            return false;
+        }
+
+        source->set_active(true);
+
+        std::string source_id = source->get_source_id();
+        std::lock_guard<std::mutex> lock(sources_mutex_);
+        active_sources_[source_id] = source;
+
+        logger_->info("Added standard regulatory source: {}", source->get_name());
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to add standard source: {}", e.what());
+        return false;
+    }
+}
+
 std::vector<std::string> RegulatoryMonitor::get_active_sources() const {
     std::lock_guard<std::mutex> lock(sources_mutex_);
     std::vector<std::string> sources;

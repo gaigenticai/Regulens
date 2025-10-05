@@ -573,10 +573,103 @@ HealthCheckFunction memory_health_check(double max_memory_percent) {
 HealthCheckFunction cpu_health_check(double max_cpu_percent) {
     return [max_cpu_percent]() -> HealthCheckResult {
         try {
-            // Get CPU usage (simplified implementation)
-            double cpu_usage = 0.0; // Would need actual CPU monitoring implementation
+            static std::chrono::steady_clock::time_point last_check = std::chrono::steady_clock::now();
+            static uint64_t last_total = 0;
+            static uint64_t last_idle = 0;
+            static double last_cpu_usage = 0.0;
 
-            // Placeholder - in production would use getrusage or similar
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_check).count();
+
+            // Only update CPU usage every 1 second minimum to avoid excessive calculations
+            if (elapsed < 1000 && last_total > 0) {
+                // Use cached value
+                double cpu_usage = last_cpu_usage;
+                if (cpu_usage > max_cpu_percent) {
+                    return HealthCheckResult{
+                        false, "unhealthy",
+                        "High CPU usage: " + std::to_string(cpu_usage) + "% (max: " + std::to_string(max_cpu_percent) + "%)",
+                        {{"cpu_usage_percent", cpu_usage}, {"max_allowed_percent", max_cpu_percent}}
+                    };
+                }
+                return HealthCheckResult{
+                    true, "healthy",
+                    "CPU usage within limits: " + std::to_string(cpu_usage) + "%",
+                    {{"cpu_usage_percent", cpu_usage}, {"max_allowed_percent", max_cpu_percent}}
+                };
+            }
+
+            double cpu_usage = 0.0;
+
+#ifdef __APPLE__
+            // macOS implementation using host_statistics
+            mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
+            host_cpu_load_info_data_t cpu_load;
+            kern_return_t kr = host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, (host_info_t)&cpu_load, &count);
+            if (kr != KERN_SUCCESS) {
+                return HealthCheckResult{
+                    false, "unhealthy",
+                    "Failed to get CPU statistics from macOS",
+                    {{"error", "host_statistics_failed"}}
+                };
+            }
+
+            uint64_t total_ticks = 0;
+            for (int i = 0; i < CPU_STATE_MAX; i++) {
+                total_ticks += cpu_load.cpu_ticks[i];
+            }
+            uint64_t idle_ticks = cpu_load.cpu_ticks[CPU_STATE_IDLE];
+
+            if (last_total > 0) {
+                uint64_t total_diff = total_ticks - last_total;
+                uint64_t idle_diff = idle_ticks - last_idle;
+
+                if (total_diff > 0) {
+                    cpu_usage = 100.0 * (1.0 - (double)idle_diff / total_diff);
+                }
+            }
+
+            last_total = total_ticks;
+            last_idle = idle_ticks;
+#else
+            // Linux implementation using /proc/stat
+            std::ifstream stat_file("/proc/stat");
+            if (!stat_file.is_open()) {
+                return HealthCheckResult{
+                    false, "unhealthy",
+                    "Failed to open /proc/stat for CPU monitoring",
+                    {{"error", "proc_stat_unavailable"}}
+                };
+            }
+
+            std::string line;
+            std::getline(stat_file, line);
+            stat_file.close();
+
+            // Parse CPU line: cpu user nice system idle iowait irq softirq steal guest guest_nice
+            std::istringstream iss(line);
+            std::string cpu_label;
+            uint64_t user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice;
+            iss >> cpu_label >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal >> guest >> guest_nice;
+
+            uint64_t total = user + nice + system + idle + iowait + irq + softirq + steal + guest + guest_nice;
+
+            if (last_total > 0) {
+                uint64_t total_diff = total - last_total;
+                uint64_t idle_diff = idle - last_idle;
+
+                if (total_diff > 0) {
+                    cpu_usage = 100.0 * (1.0 - (double)idle_diff / total_diff);
+                }
+            }
+
+            last_total = total;
+            last_idle = idle;
+#endif
+
+            last_check = now;
+            last_cpu_usage = cpu_usage;
+
             if (cpu_usage > max_cpu_percent) {
                 return HealthCheckResult{
                     false, "unhealthy",
@@ -587,7 +680,7 @@ HealthCheckFunction cpu_health_check(double max_cpu_percent) {
 
             return HealthCheckResult{
                 true, "healthy",
-                "CPU usage within limits",
+                "CPU usage within limits: " + std::to_string(cpu_usage) + "%",
                 {{"cpu_usage_percent", cpu_usage}, {"max_allowed_percent", max_cpu_percent}}
             };
         } catch (const std::exception& e) {

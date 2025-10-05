@@ -1630,6 +1630,33 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- =============================================================================
+-- DATA INGESTION METRICS TABLES
+-- =============================================================================
+
+-- Data ingestion metrics table - Production-grade monitoring for data pipelines
+CREATE TABLE IF NOT EXISTS ingestion_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    source_id VARCHAR(255) NOT NULL,
+    metric_type VARCHAR(50) NOT NULL, -- 'BATCH', 'PERFORMANCE', 'HEALTH', 'ERROR'
+    metric_data JSONB NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Create indexes for ingestion metrics
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_source ON ingestion_metrics(source_id);
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_type ON ingestion_metrics(metric_type);
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_timestamp ON ingestion_metrics(timestamp);
+
+-- Add trigger for updated_at
+CREATE TRIGGER update_ingestion_metrics_updated_at BEFORE UPDATE ON ingestion_metrics FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+-- =============================================================================
+-- NEW FEATURES TABLES (Added for Circuit Breaker, Redis, Kubernetes, Monitoring)
+-- =============================================================================
 
 -- =============================================================================
 -- NEW FEATURES TABLES (Added for Circuit Breaker, Redis, Kubernetes, Monitoring)

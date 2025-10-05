@@ -344,17 +344,8 @@ void AgentActivityFeed::update_agent_stats(const AgentActivityEvent& event) {
         stats.warning_count++;
     }
 
-    // Update time-based counts (simplified)
-    auto now = std::chrono::system_clock::now();
-    auto one_hour_ago = now - std::chrono::hours(1);
-    auto one_day_ago = now - std::chrono::hours(24);
-
-    if (event.timestamp > one_hour_ago) {
-        stats.activities_last_hour++;
-    }
-    if (event.timestamp > one_day_ago) {
-        stats.activities_last_24h++;
-    }
+    // Update time-based counts with proper sliding windows
+    update_time_based_counts(stats, event);
 }
 
 void AgentActivityFeed::notify_subscribers(const AgentActivityEvent& event) {
@@ -455,6 +446,96 @@ std::vector<AgentActivityEvent> AgentActivityFeed::load_activities_from_persiste
 
 std::chrono::system_clock::time_point AgentActivityFeed::get_cutoff_time() const {
     return std::chrono::system_clock::now() - config_.retention_period;
+}
+
+void AgentActivityFeed::update_time_based_counts(AgentActivityStats& stats, const AgentActivityEvent& event) {
+    auto now = std::chrono::system_clock::now();
+
+    // Define time windows
+    auto one_hour_ago = now - std::chrono::hours(1);
+    auto six_hours_ago = now - std::chrono::hours(6);
+    auto one_day_ago = now - std::chrono::hours(24);
+    auto seven_days_ago = now - std::chrono::hours(24 * 7);
+    auto thirty_days_ago = now - std::chrono::hours(24 * 30);
+
+    // Initialize time window tracking if not already done
+    if (stats.time_window_events.empty()) {
+        stats.time_window_events = {
+            {"1h", std::deque<std::chrono::system_clock::time_point>()},
+            {"6h", std::deque<std::chrono::system_clock::time_point>()},
+            {"24h", std::deque<std::chrono::system_clock::time_point>()},
+            {"7d", std::deque<std::chrono::system_clock::time_point>()},
+            {"30d", std::deque<std::chrono::system_clock::time_point>()}
+        };
+    }
+
+    // Add event to appropriate time windows
+    if (event.timestamp > one_hour_ago) {
+        stats.time_window_events["1h"].push_back(event.timestamp);
+        stats.activities_last_hour = stats.time_window_events["1h"].size();
+    }
+
+    if (event.timestamp > six_hours_ago) {
+        stats.time_window_events["6h"].push_back(event.timestamp);
+        stats.activities_last_6h = stats.time_window_events["6h"].size();
+    }
+
+    if (event.timestamp > one_day_ago) {
+        stats.time_window_events["24h"].push_back(event.timestamp);
+        stats.activities_last_24h = stats.time_window_events["24h"].size();
+    }
+
+    if (event.timestamp > seven_days_ago) {
+        stats.time_window_events["7d"].push_back(event.timestamp);
+        stats.activities_last_7d = stats.time_window_events["7d"].size();
+    }
+
+    if (event.timestamp > thirty_days_ago) {
+        stats.time_window_events["30d"].push_back(event.timestamp);
+        stats.activities_last_30d = stats.time_window_events["30d"].size();
+    }
+
+    // Clean up expired events from time windows (run periodically, not on every event)
+    // This is a simplified approach - in production, this would be optimized
+    static auto last_cleanup = std::chrono::system_clock::time_point{};
+    auto time_since_cleanup = now - last_cleanup;
+
+    if (time_since_cleanup > std::chrono::minutes(5)) { // Clean up every 5 minutes
+        cleanup_expired_time_windows(stats, now);
+        last_cleanup = now;
+    }
+}
+
+void AgentActivityFeed::cleanup_expired_time_windows(AgentActivityStats& stats,
+                                                   std::chrono::system_clock::time_point now) {
+    // Define cutoff times for each window
+    std::unordered_map<std::string, std::chrono::system_clock::time_point> cutoffs = {
+        {"1h", now - std::chrono::hours(1)},
+        {"6h", now - std::chrono::hours(6)},
+        {"24h", now - std::chrono::hours(24)},
+        {"7d", now - std::chrono::hours(24 * 7)},
+        {"30d", now - std::chrono::hours(24 * 30)}
+    };
+
+    // Clean up each time window
+    for (auto& [window, events] : stats.time_window_events) {
+        auto cutoff_it = cutoffs.find(window);
+        if (cutoff_it != cutoffs.end()) {
+            auto cutoff = cutoff_it->second;
+
+            // Remove events older than the cutoff
+            while (!events.empty() && events.front() < cutoff) {
+                events.pop_front();
+            }
+        }
+    }
+
+    // Update counts after cleanup
+    stats.activities_last_hour = stats.time_window_events["1h"].size();
+    stats.activities_last_6h = stats.time_window_events["6h"].size();
+    stats.activities_last_24h = stats.time_window_events["24h"].size();
+    stats.activities_last_7d = stats.time_window_events["7d"].size();
+    stats.activities_last_30d = stats.time_window_events["30d"].size();
 }
 
 } // namespace regulens

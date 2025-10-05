@@ -21,6 +21,8 @@
 #include <chrono>
 #include <optional>
 #include <deque>
+#include <mutex>
+#include <shared_mutex>
 #include <nlohmann/json.hpp>
 
 #include "../config/configuration_manager.hpp"
@@ -109,6 +111,12 @@ struct AgentLearningProfile {
     // Learning history
     std::vector<LearnedPattern> learned_patterns;
     std::deque<LearningSignal> recent_feedback;  // Rolling window of feedback
+
+    // Q-learning table: state -> action -> Q-value
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> q_table;
+    mutable std::shared_mutex q_table_mutex;  // For thread-safe Q-table access
+
+    // Legacy context performance (for backward compatibility)
     std::unordered_map<std::string, double> context_performance;
 
     // Adaptation state

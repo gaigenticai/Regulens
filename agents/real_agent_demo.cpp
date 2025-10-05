@@ -222,7 +222,7 @@ private:
 
                     auto recommendations = compliance_agent_->generate_compliance_recommendations(assessment);
                     compliance_agent_->send_compliance_alert(first_update, recommendations);
-                    activity_logger_->log_email_send("krishna@gaigentic.ai", "Compliance Alert: " + std::string(first_update["title"]), true);
+                    activity_logger_->log_email_send("compliance@regulens.ai", "Compliance Alert: " + std::string(first_update["title"]), true);
                 }
             }
         } catch (const std::exception& e) {
@@ -243,8 +243,8 @@ private:
 
                 // Send notification for new FCA updates
                 if (!fca_updates.empty()) {
-                    regulatory_fetcher_->send_notification_email(fca_updates, "krishna@gaigentic.ai");
-                    activity_logger_->log_email_send("krishna@gaigentic.ai",
+                    regulatory_fetcher_->send_notification_email(fca_updates);
+                    activity_logger_->log_email_send("compliance@regulens.ai",
                                                    "FCA Regulatory Updates: " + std::to_string(fca_updates.size()) + " new items", true);
                 }
             }
@@ -254,29 +254,30 @@ private:
     }
 
     void perform_manual_compliance_analysis() {
-        // Create a sample regulatory change for analysis
-        nlohmann::json sample_change = {
-            {"title", "New SEC Cybersecurity Risk Management Rule"},
-            {"source", "SEC"},
-            {"url", "https://www.sec.gov/rules/final/2024-33.htm"},
-            {"type", "regulatory_action"},
-            {"hash", "sample_hash_123"}
-        };
-
         activity_logger_->log_connection("ComplianceAgent", "AI Analysis Engine");
 
         try {
-            auto decision = compliance_agent_->process_regulatory_change(sample_change);
-            activity_logger_->log_decision("ComplianceAgent", decision.decision_type, decision.confidence_score);
+            // Fetch real regulatory data for analysis
+            auto sec_updates = regulatory_fetcher_->fetch_sec_updates();
 
-            auto assessment = compliance_agent_->perform_risk_assessment(sample_change);
-            activity_logger_->log_risk_assessment(assessment["risk_level"], assessment["risk_score"]);
+            if (!sec_updates.empty()) {
+                // Use the most recent SEC update for compliance analysis
+                const auto& regulatory_change = sec_updates[0];
 
-            auto recommendations = compliance_agent_->generate_compliance_recommendations(assessment);
-            compliance_agent_->send_compliance_alert(sample_change, recommendations);
+                auto decision = compliance_agent_->process_regulatory_change(regulatory_change);
+                activity_logger_->log_decision("ComplianceAgent", decision.decision_type, decision.confidence_score);
 
-            activity_logger_->log_email_send("krishna@gaigentic.ai",
-                                           "AI Compliance Analysis: " + std::string(sample_change["title"]), true);
+                auto assessment = compliance_agent_->perform_risk_assessment(regulatory_change);
+                activity_logger_->log_risk_assessment(assessment["risk_level"], assessment["risk_score"]);
+
+                auto recommendations = compliance_agent_->generate_compliance_recommendations(assessment);
+                compliance_agent_->send_compliance_alert(regulatory_change, recommendations);
+
+                activity_logger_->log_email_send("compliance@regulens.ai",
+                                               "AI Compliance Analysis: " + std::string(regulatory_change["title"]), true);
+            } else {
+                logger_->info("No SEC regulatory updates available for compliance analysis");
+            }
         } catch (const std::exception& e) {
             logger_->error("Error in manual compliance analysis: {}", e.what());
         }
@@ -285,30 +286,41 @@ private:
     void perform_manual_risk_assessment() {
         activity_logger_->log_connection("RiskAssessor", "Risk Analysis Engine");
 
-        // Perform a general risk assessment
-        nlohmann::json sample_data = {
-            {"title", "General Regulatory Compliance Review"},
-            {"source", "Internal"},
-            {"type", "risk_assessment"}
-        };
-
         try {
-            auto assessment = compliance_agent_->perform_risk_assessment(sample_data);
-            activity_logger_->log_risk_assessment(assessment["risk_level"], assessment["risk_score"]);
+            // Fetch real regulatory data for risk assessment
+            auto sec_updates = regulatory_fetcher_->fetch_sec_updates();
+            auto fca_updates = regulatory_fetcher_->fetch_fca_updates();
+            auto ecb_updates = regulatory_fetcher_->fetch_ecb_updates();
 
-            // Send risk assessment notification
-            std::stringstream subject;
-            subject << "🔍 Risk Assessment Complete: " << assessment["risk_level"];
+            // Combine all updates
+            std::vector<nlohmann::json> all_updates;
+            all_updates.insert(all_updates.end(), sec_updates.begin(), sec_updates.end());
+            all_updates.insert(all_updates.end(), fca_updates.begin(), fca_updates.end());
+            all_updates.insert(all_updates.end(), ecb_updates.begin(), ecb_updates.end());
 
-            std::stringstream body;
-            body << "AI Risk Assessment Results:\n\n";
-            body << "Risk Level: " << assessment["risk_level"] << "\n";
-            body << "Risk Score: " << assessment["risk_score"] << "\n";
-            body << "Confidence: " << assessment["confidence_level"] << "\n\n";
-            body << "Generated by Regulens AI Risk Assessment Engine\n";
+            if (!all_updates.empty()) {
+                // Perform risk assessment on the most recent regulatory update
+                const auto& latest_update = all_updates[0];
+                auto assessment = compliance_agent_->perform_risk_assessment(latest_update);
+                activity_logger_->log_risk_assessment(assessment["risk_level"], assessment["risk_score"]);
 
-            email_client_->send_email("krishna@gaigentic.ai", subject.str(), body.str());
-            activity_logger_->log_email_send("krishna@gaigentic.ai", subject.str(), true);
+                // Send risk assessment notification
+                std::stringstream subject;
+                subject << "🔍 Risk Assessment Complete: " << assessment["risk_level"];
+
+                std::stringstream body;
+                body << "AI Risk Assessment Results for: " << latest_update["title"] << "\n\n";
+                body << "Regulatory Source: " << latest_update["source"] << "\n";
+                body << "Risk Level: " << assessment["risk_level"] << "\n";
+                body << "Risk Score: " << assessment["risk_score"] << "\n";
+                body << "Confidence: " << assessment["confidence_level"] << "\n\n";
+                body << "Generated by Regulens AI Risk Assessment Engine\n";
+
+                email_client_->send_email("compliance@regulens.ai", subject.str(), body.str());
+                activity_logger_->log_email_send("compliance@regulens.ai", subject.str(), true);
+            } else {
+                logger_->info("No regulatory updates available for risk assessment");
+            }
 
         } catch (const std::exception& e) {
             logger_->error("Error in manual risk assessment: {}", e.what());

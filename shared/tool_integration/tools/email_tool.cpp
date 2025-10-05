@@ -201,11 +201,9 @@ std::vector<std::string> EmailTool::get_available_templates() const {
 }
 
 bool EmailTool::validate_email_address(const std::string& email) const {
-    if (email.empty()) return false;
+    if (email.empty() || email.length() > 254) return false;
 
-    // Basic email validation regex
-    const std::regex email_regex(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
-    return std::regex_match(email, email_regex);
+    return is_valid_email_format(email);
 }
 
 ToolResult EmailTool::send_email_via_smtp(const EmailMessage& message) {
@@ -446,11 +444,208 @@ std::string EmailTool::process_template(const std::string& template_str,
 }
 
 bool EmailTool::is_valid_email_format(const std::string& email) const {
-    // RFC 5322 compliant email regex (simplified)
-    const std::regex email_regex(
-        R"([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)"
-    );
-    return std::regex_match(email, email_regex);
+    // Comprehensive RFC 5322 email validation
+    if (email.empty() || email.length() > 254) return false;
+
+    // Find the @ symbol
+    size_t at_pos = email.find('@');
+    if (at_pos == std::string::npos || at_pos == 0 || at_pos == email.length() - 1) {
+        return false;
+    }
+
+    std::string local_part = email.substr(0, at_pos);
+    std::string domain_part = email.substr(at_pos + 1);
+
+    // Validate local part (RFC 5322)
+    if (!validate_local_part(local_part)) return false;
+
+    // Validate domain part (RFC 5322)
+    if (!validate_domain_part(domain_part)) return false;
+
+    return true;
+}
+
+bool EmailTool::validate_local_part(const std::string& local) const {
+    if (local.empty() || local.length() > 64) return false;
+
+    // RFC 5322 local-part can be:
+    // 1. Dot-atom (most common)
+    // 2. Quoted string
+    // 3. Obs-local-part (obsolete but still valid)
+
+    // Check for quoted string first
+    if (local[0] == '"' && local.back() == '"') {
+        return validate_quoted_string(local);
+    }
+
+    // Check for dot-atom
+    return validate_dot_atom(local);
+}
+
+bool EmailTool::validate_domain_part(const std::string& domain) const {
+    if (domain.empty() || domain.length() > 253) return false;
+
+    // RFC 5322 domain can be:
+    // 1. Dot-atom
+    // 2. Domain literal (IPv4/IPv6 in brackets)
+    // 3. Obs-domain (obsolete)
+
+    // Check for domain literal (IP addresses in brackets)
+    if (domain[0] == '[' && domain.back() == ']') {
+        std::string ip_part = domain.substr(1, domain.length() - 2);
+        return validate_domain_literal(ip_part);
+    }
+
+    // Check for dot-atom domain
+    return validate_domain_dot_atom(domain);
+}
+
+bool EmailTool::validate_dot_atom(const std::string& atom) const {
+    // RFC 5322 dot-atom: one or more atoms separated by dots
+    // atom = 1*atext
+    // atext = ALPHA / DIGIT / "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "/" / "=" / "?" / "^" / "_" / "`" / "{" / "|" / "}" / "~"
+
+    if (atom.empty()) return false;
+
+    // Split by dots
+    std::vector<std::string> atoms;
+    std::stringstream ss(atom);
+    std::string part;
+    while (std::getline(ss, part, '.')) {
+        atoms.push_back(part);
+    }
+
+    if (atoms.empty()) return false;
+
+    for (const auto& a : atoms) {
+        if (a.empty() || a.length() > 63) return false;
+
+        for (char c : a) {
+            if (!is_atext(c)) return false;
+        }
+    }
+
+    return true;
+}
+
+bool EmailTool::validate_domain_dot_atom(const std::string& domain) const {
+    // Domain dot-atom: similar to local dot-atom but more restrictive
+    if (domain.empty()) return false;
+
+    // Split by dots
+    std::vector<std::string> labels;
+    std::stringstream ss(domain);
+    std::string label;
+    while (std::getline(ss, label, '.')) {
+        labels.push_back(label);
+    }
+
+    if (labels.size() < 2) return false; // Must have at least 2 labels (name + TLD)
+
+    for (size_t i = 0; i < labels.size(); ++i) {
+        const auto& l = labels[i];
+        if (l.empty() || l.length() > 63) return false;
+
+        // First character must be letter or digit
+        if (!std::isalnum(l[0])) return false;
+
+        // Last character must be letter or digit
+        if (!std::isalnum(l.back())) return false;
+
+        // Middle characters can be letters, digits, or hyphens
+        for (size_t j = 1; j < l.length() - 1; ++j) {
+            char c = l[j];
+            if (!std::isalnum(c) && c != '-') return false;
+        }
+
+        // TLD (last label) must be at least 2 characters and contain only letters
+        if (i == labels.size() - 1) {
+            if (l.length() < 2) return false;
+            for (char c : l) {
+                if (!std::isalpha(c)) return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool EmailTool::validate_quoted_string(const std::string& quoted) const {
+    // RFC 5322 quoted-string: "qtext*"
+    // qtext = %d32-33 / %d35-91 / %d93-126 (printable ASCII except " and \)
+    if (quoted.length() < 2 || quoted[0] != '"' || quoted.back() != '"') return false;
+
+    std::string content = quoted.substr(1, quoted.length() - 2);
+    bool escaped = false;
+
+    for (char c : content) {
+        if (escaped) {
+            // After backslash, any character is allowed
+            escaped = false;
+        } else if (c == '\\') {
+            escaped = true;
+        } else if (c == '"') {
+            // Unescaped quote not allowed
+            return false;
+        } else if (!is_qtext(c)) {
+            return false;
+        }
+    }
+
+    return !escaped; // Can't end with escape
+}
+
+bool EmailTool::validate_domain_literal(const std::string& literal) const {
+    // RFC 5322 domain-literal: IPv4 or IPv6 address
+    if (literal.empty()) return false;
+
+    // Check for IPv6 (starts with IPv6:)
+    if (literal.substr(0, 5) == "IPv6:") {
+        std::string ipv6 = literal.substr(5);
+        return validate_ipv6_address(ipv6);
+    }
+
+    // Assume IPv4 address
+    return validate_ipv4_address(literal);
+}
+
+bool EmailTool::validate_ipv4_address(const std::string& ip) const {
+    // Basic IPv4 validation
+    std::regex ipv4_regex(R"(^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$)");
+    if (!std::regex_match(ip, ipv4_regex)) return false;
+
+    // Validate each octet
+    std::stringstream ss(ip);
+    std::string octet;
+    while (std::getline(ss, octet, '.')) {
+        int value = std::stoi(octet);
+        if (value < 0 || value > 255) return false;
+    }
+
+    return true;
+}
+
+bool EmailTool::validate_ipv6_address(const std::string& ip) const {
+    // Basic IPv6 validation (simplified)
+    if (ip.empty() || ip.length() > 39) return false;
+
+    // IPv6 regex (simplified)
+    std::regex ipv6_regex(R"(^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,7}:$|^([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}$|^([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}$|^([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}$|^([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})$|^:((:[0-9a-fA-F]{1,4}){1,7}|:)$|^fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}$|^::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])$|^([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])$)");
+
+    return std::regex_match(ip, ipv6_regex);
+}
+
+bool EmailTool::is_atext(char c) const {
+    // RFC 5322 atext characters
+    return std::isalnum(c) ||
+           c == '!' || c == '#' || c == '$' || c == '%' || c == '&' || c == '\'' ||
+           c == '*' || c == '+' || c == '-' || c == '/' || c == '=' || c == '?' ||
+           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' || c == '}' || c == '~';
+}
+
+bool EmailTool::is_qtext(char c) const {
+    // RFC 5322 qtext: printable ASCII except " and \
+    return (c >= 32 && c <= 126) && c != '"' && c != '\\';
 }
 
 std::string EmailTool::get_current_rfc2822_time() const {

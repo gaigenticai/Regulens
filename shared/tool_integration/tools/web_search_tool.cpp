@@ -7,7 +7,7 @@
 
 #include "web_search_tool.hpp"
 #include "../tool_interface.hpp"
-#include <curl/curl.h>
+#include "../../network/http_client.hpp"
 #include <sstream>
 #include <regex>
 #include <algorithm>
@@ -197,6 +197,10 @@ std::vector<SearchResult> WebSearchTool::search_google(const std::string& query,
     std::vector<SearchResult> results;
 
     try {
+        HttpClient http_client;
+        http_client.set_timeout(10);
+        http_client.set_user_agent("Regulens-WebSearch/1.0");
+
         std::string url = "https://www.googleapis.com/customsearch/v1";
         url += "?key=" + search_config_.api_key;
         url += "&cx=" + search_config_.cse_id;
@@ -206,24 +210,13 @@ std::vector<SearchResult> WebSearchTool::search_google(const std::string& query,
             url += "&safe=active";
         }
 
-        // Perform HTTP request (simplified - would use HttpClient in production)
-        CURL* curl = curl_easy_init();
-        if (!curl) return results;
+        HttpResponse response = http_client.get(url);
 
-        std::string response_body;
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        if (response.success && response.status_code == 200) {
+            nlohmann::json json_response = nlohmann::json::parse(response.body);
 
-        CURLcode res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-
-        if (res == CURLE_OK) {
-            nlohmann::json response = nlohmann::json::parse(response_body);
-
-            if (response.contains("items")) {
-                for (const auto& item : response["items"]) {
+            if (json_response.contains("items")) {
+                for (const auto& item : json_response["items"]) {
                     SearchResult result;
                     result.title = item.value("title", "");
                     result.url = item.value("link", "");
@@ -237,6 +230,9 @@ std::vector<SearchResult> WebSearchTool::search_google(const std::string& query,
                     }
                 }
             }
+        } else {
+            logger_->log(LogLevel::ERROR, "Google search HTTP error: " +
+                        std::to_string(response.status_code) + " - " + response.error_message);
         }
 
     } catch (const std::exception& e) {
@@ -250,6 +246,10 @@ std::vector<SearchResult> WebSearchTool::search_bing(const std::string& query, i
     std::vector<SearchResult> results;
 
     try {
+        HttpClient http_client;
+        http_client.set_timeout(10);
+        http_client.set_user_agent("Regulens-WebSearch/1.0");
+
         std::string url = "https://api.bing.microsoft.com/v7.0/search";
         url += "?q=" + url_encode(query);
         url += "&count=" + std::to_string(std::min(max_results, 50));
@@ -257,29 +257,17 @@ std::vector<SearchResult> WebSearchTool::search_bing(const std::string& query, i
             url += "&safeSearch=Strict";
         }
 
-        // Perform HTTP request with Bing API key
-        CURL* curl = curl_easy_init();
-        if (!curl) return results;
+        std::unordered_map<std::string, std::string> headers = {
+            {"Ocp-Apim-Subscription-Key", search_config_.api_key}
+        };
 
-        std::string response_body;
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, ("Ocp-Apim-Subscription-Key: " + search_config_.api_key).c_str());
+        HttpResponse response = http_client.get(url, headers);
 
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        if (response.success && response.status_code == 200) {
+            nlohmann::json json_response = nlohmann::json::parse(response.body);
 
-        CURLcode res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-        curl_slist_free_all(headers);
-
-        if (res == CURLE_OK) {
-            nlohmann::json response = nlohmann::json::parse(response_body);
-
-            if (response.contains("webPages") && response["webPages"].contains("value")) {
-                for (const auto& item : response["webPages"]["value"]) {
+            if (json_response.contains("webPages") && json_response["webPages"].contains("value")) {
+                for (const auto& item : json_response["webPages"]["value"]) {
                     SearchResult result;
                     result.title = item.value("name", "");
                     result.url = item.value("url", "");
@@ -293,6 +281,9 @@ std::vector<SearchResult> WebSearchTool::search_bing(const std::string& query, i
                     }
                 }
             }
+        } else {
+            logger_->log(LogLevel::ERROR, "Bing search HTTP error: " +
+                        std::to_string(response.status_code) + " - " + response.error_message);
         }
 
     } catch (const std::exception& e) {
@@ -306,32 +297,25 @@ std::vector<SearchResult> WebSearchTool::search_duckduckgo(const std::string& qu
     std::vector<SearchResult> results;
 
     try {
+        HttpClient http_client;
+        http_client.set_timeout(10);
+        http_client.set_user_agent("Regulens-WebSearch/1.0");
+
         std::string url = "https://api.duckduckgo.com/";
         url += "?q=" + url_encode(query);
         url += "&format=json";
         url += "&no_html=1";
         url += "&skip_disambig=1";
 
-        // DuckDuckGo Instant Answer API
-        CURL* curl = curl_easy_init();
-        if (!curl) return results;
+        HttpResponse response = http_client.get(url);
 
-        std::string response_body;
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-
-        CURLcode res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-
-        if (res == CURLE_OK) {
-            nlohmann::json response = nlohmann::json::parse(response_body);
+        if (response.success && response.status_code == 200) {
+            nlohmann::json json_response = nlohmann::json::parse(response.body);
 
             // DuckDuckGo provides instant answer and related topics
-            if (response.contains("RelatedTopics")) {
+            if (json_response.contains("RelatedTopics")) {
                 int count = 0;
-                for (const auto& topic : response["RelatedTopics"]) {
+                for (const auto& topic : json_response["RelatedTopics"]) {
                     if (count >= max_results) break;
 
                     if (topic.contains("Text") && topic.contains("FirstURL")) {
@@ -350,6 +334,9 @@ std::vector<SearchResult> WebSearchTool::search_duckduckgo(const std::string& qu
                     }
                 }
             }
+        } else {
+            logger_->log(LogLevel::ERROR, "DuckDuckGo search HTTP error: " +
+                        std::to_string(response.status_code) + " - " + response.error_message);
         }
 
     } catch (const std::exception& e) {
@@ -492,10 +479,6 @@ nlohmann::json WebSearchTool::search_results_to_json(const std::vector<SearchRes
     return json_results;
 }
 
-size_t WebSearchTool::write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
-    ((std::string*)userp)->append((char*)contents, size * nmemb);
-    return size * nmemb;
-}
 
 // Factory function
 std::unique_ptr<Tool> create_web_search_tool(const ToolConfig& config, StructuredLogger* logger) {

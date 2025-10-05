@@ -12,6 +12,7 @@
 
 #include "../shared/network/http_client.hpp"
 #include "../shared/logging/structured_logger.hpp"
+#include "../shared/config/configuration_manager.hpp"
 #include "../shared/models/compliance_event.hpp"
 #include "../shared/models/agent_decision.hpp"
 #include "../shared/resilience/circuit_breaker.hpp"
@@ -26,6 +27,20 @@ namespace regulens {
  * real regulatory bulletins, press releases, and compliance updates.
  */
 class RealRegulatoryFetcher {
+private:
+    // HTML parsing helper structures
+    struct HtmlLink {
+        std::string url;
+        std::string title;
+    };
+
+    struct HtmlContent {
+        std::string title;
+        std::string url;
+        std::string date;
+        std::string summary;
+    };
+
 public:
     RealRegulatoryFetcher(std::shared_ptr<HttpClient> http_client,
                          std::shared_ptr<EmailClient> email_client,
@@ -62,12 +77,10 @@ public:
     std::vector<nlohmann::json> fetch_ecb_updates();
 
     /**
-     * @brief Send notification email about regulatory changes
+     * @brief Send notification email about regulatory changes to configured recipients
      * @param changes Vector of regulatory changes
-     * @param recipient Email recipient
      */
-    void send_notification_email(const std::vector<nlohmann::json>& changes,
-                               const std::string& recipient = "krishna@gaigentic.ai");
+    void send_notification_email(const std::vector<nlohmann::json>& changes);
 
     /**
      * @brief Get last fetch timestamp
@@ -114,20 +127,38 @@ private:
     bool is_new_content(const std::string& content_hash);
 
     /**
-     * @brief Generate simple hash for content deduplication
+     * @brief Generate production-grade hash for content deduplication
      * @param content Content to hash
-     * @return Hash string
+     * @return Cryptographically-enhanced hash string
      */
     std::string generate_content_hash(const std::string& content);
+
+    // HTML parsing helper methods
+    std::vector<HtmlLink> extract_structured_links(const std::string& html);
+    std::vector<HtmlContent> extract_fca_content_blocks(const std::string& html);
+    std::vector<HtmlLink> extract_ecb_press_releases(const std::string& html);
+
+    bool is_sec_regulatory_content(const std::string& title, const std::string& url);
+    bool is_fca_regulatory_content(const std::string& title);
+    bool is_ecb_regulatory_content(const std::string& title);
+
+    std::string normalize_sec_url(const std::string& url);
+    std::string normalize_fca_url(const std::string& url);
+    std::string normalize_ecb_url(const std::string& url);
+
+    std::string sanitize_html_text(const std::string& text);
+    nlohmann::json extract_content_metadata(const std::string& title);
 
     std::shared_ptr<HttpClient> http_client_;
     std::shared_ptr<EmailClient> email_client_;
     std::shared_ptr<StructuredLogger> logger_;
+    std::shared_ptr<ConfigurationManager> config_manager_;
     std::thread fetching_thread_;
     std::atomic<bool> running_;
     std::atomic<size_t> total_fetches_;
     std::chrono::system_clock::time_point last_fetch_time_;
     std::unordered_set<std::string> seen_content_hashes_;
+    std::vector<std::string> notification_recipients_;
 
     // Circuit breakers for regulatory API resilience
     std::shared_ptr<CircuitBreaker> sec_circuit_breaker_;
@@ -203,9 +234,48 @@ private:
      */
     std::vector<std::string> determine_affected_units(const nlohmann::json& regulatory_data);
 
+    /**
+     * @brief Calculate deterministic risk score based on regulatory content
+     * @param title Regulatory change title
+     * @param source Regulatory source (SEC, FCA, ECB)
+     * @param content_type Type of regulatory content
+     * @return Risk score between 0.1 and 0.95
+     */
+    double calculate_deterministic_risk_score(const std::string& title,
+                                             const std::string& source,
+                                             const std::string& content_type);
+
+    /**
+     * @brief Determine risk level from risk score
+     * @param risk_score Numerical risk score
+     * @return Risk level string (Critical, High, Medium, Low)
+     */
+    std::string determine_risk_level(double risk_score);
+
+    /**
+     * @brief Analyze contributing factors based on regulatory content
+     * @param title Regulatory change title
+     * @param source Regulatory source
+     * @param content_type Type of regulatory content
+     * @return Vector of contributing factors
+     */
+    std::vector<std::string> analyze_contributing_factors(const std::string& title,
+                                                         const std::string& source,
+                                                         const std::string& content_type);
+
+    /**
+     * @brief Determine mitigation strategy based on risk level and factors
+     * @param risk_level Risk level (Critical, High, Medium, Low)
+     * @param factors Contributing factors
+     * @return Mitigation strategy description
+     */
+    std::string determine_mitigation_strategy(const std::string& risk_level,
+                                             const std::vector<std::string>& factors);
+
     std::shared_ptr<HttpClient> http_client_;
     std::shared_ptr<EmailClient> email_client_;
     std::shared_ptr<StructuredLogger> logger_;
+    std::vector<std::string> notification_recipients_;
 };
 
 /**

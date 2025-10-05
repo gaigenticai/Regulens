@@ -10,6 +10,7 @@
 #include <sstream>
 #include <cstring>
 #include <stdexcept>
+#include <condition_variable>
 #include <libpq-fe.h>
 
 namespace regulens {
@@ -92,7 +93,7 @@ std::optional<nlohmann::json> PostgreSQLConnection::execute_query_single(
 
     auto json_result = result_to_json(result, 0);
     PQclear(result);
-    return json_result;
+    return std::optional<nlohmann::json>(json_result);
 }
 
 std::vector<nlohmann::json> PostgreSQLConnection::execute_query_multi(
@@ -333,7 +334,33 @@ std::shared_ptr<PostgreSQLConnection> ConnectionPool::get_connection() {
         }
     }
 
-    // Wait for a connection to become available (simplified - in production you'd use condition variables)
+    // Wait for a connection to become available with timeout
+    auto timeout = std::chrono::seconds(30); // 30 second timeout
+    if (pool_cv_.wait_for(lock, timeout, [this]() {
+        return shutdown_ || !available_connections_.empty() ||
+               static_cast<int>(connections_.size()) < config_.max_connections;
+    })) {
+        // Try again after waking up
+        if (!available_connections_.empty()) {
+            auto conn = available_connections_.back();
+            available_connections_.pop_back();
+            active_connections_++;
+            return conn;
+        }
+
+        // Create a new connection if possible
+        if (static_cast<int>(connections_.size()) < config_.max_connections) {
+            auto conn = create_connection();
+            if (conn) {
+                connections_.push_back(conn);
+                active_connections_++;
+                total_connections_created_++;
+                return conn;
+            }
+        }
+    }
+
+    // Timeout or shutdown occurred
     return nullptr;
 }
 
@@ -343,6 +370,8 @@ void ConnectionPool::return_connection(std::shared_ptr<PostgreSQLConnection> con
     if (!shutdown_ && conn && conn->is_connected()) {
         available_connections_.push_back(conn);
         active_connections_--;
+        // Notify waiting threads that a connection is available
+        pool_cv_.notify_one();
     }
 }
 

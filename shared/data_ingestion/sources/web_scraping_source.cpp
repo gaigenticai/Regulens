@@ -131,13 +131,72 @@ std::string WebScrapingSource::calculate_content_hash(const std::string& content
 }
 
 double WebScrapingSource::calculate_content_similarity(const std::string& old_content, const std::string& new_content) {
-    // Simplified similarity calculation
+    // Use Jaccard similarity on word tokens
     if (old_content == new_content) return 1.0;
-    return 0.5; // Placeholder
+    if (old_content.empty() || new_content.empty()) return 0.0;
+
+    // Tokenize both contents into words
+    auto tokenize = [](const std::string& text) -> std::unordered_set<std::string> {
+        std::unordered_set<std::string> tokens;
+        std::istringstream stream(text);
+        std::string word;
+        while (stream >> word) {
+            // Remove punctuation
+            word.erase(std::remove_if(word.begin(), word.end(), ::ispunct), word.end());
+            if (!word.empty()) {
+                std::transform(word.begin(), word.end(), word.begin(), ::tolower);
+                tokens.insert(word);
+            }
+        }
+        return tokens;
+    };
+
+    auto tokens1 = tokenize(old_content);
+    auto tokens2 = tokenize(new_content);
+
+    // Calculate Jaccard similarity: |intersection| / |union|
+    std::unordered_set<std::string> intersection;
+    for (const auto& token : tokens1) {
+        if (tokens2.count(token)) {
+            intersection.insert(token);
+        }
+    }
+
+    std::unordered_set<std::string> union_set = tokens1;
+    union_set.insert(tokens2.begin(), tokens2.end());
+
+    if (union_set.empty()) return 0.0;
+    return static_cast<double>(intersection.size()) / union_set.size();
 }
 
-std::vector<nlohmann::json> WebScrapingSource::detect_content_changes(const std::string& /*old_content*/, const std::string& /*new_content*/) {
-    return {}; // Simplified
+std::vector<nlohmann::json> WebScrapingSource::detect_content_changes(const std::string& old_content, const std::string& new_content) {
+    std::vector<nlohmann::json> changes;
+
+    // Calculate similarity
+    double similarity = calculate_content_similarity(old_content, new_content);
+
+    if (similarity < 0.95) {
+        nlohmann::json change;
+        change["type"] = "content_modified";
+        change["similarity_score"] = similarity;
+        change["old_length"] = old_content.length();
+        change["new_length"] = new_content.length();
+        change["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Detect specific changes
+        if (new_content.length() > old_content.length() * 1.2) {
+            change["change_category"] = "content_expansion";
+        } else if (new_content.length() < old_content.length() * 0.8) {
+            change["change_category"] = "content_reduction";
+        } else {
+            change["change_category"] = "content_modification";
+        }
+
+        changes.push_back(change);
+    }
+
+    return changes;
 }
 
 // Private methods - Production-grade implementations
@@ -189,28 +248,244 @@ std::string WebScrapingSource::fetch_page_content(const std::string& url) {
     }
 }
 
-std::vector<std::string> WebScrapingSource::discover_urls(const std::string& /*content*/, const std::string& /*base_url*/) {
-    return {}; // Simplified
+std::vector<std::string> WebScrapingSource::discover_urls(const std::string& content, const std::string& base_url) {
+    std::vector<std::string> urls;
+
+    // Extract URLs from href and src attributes
+    std::regex url_pattern(R"((href|src)\s*=\s*[\"']([^\"']+)[\"'])");
+    std::sregex_iterator iter(content.begin(), content.end(), url_pattern);
+    std::sregex_iterator end;
+
+    while (iter != end) {
+        std::string url = (*iter)[2];
+
+        // Convert relative URLs to absolute
+        if (url.find("http://") != 0 && url.find("https://") != 0) {
+            if (url[0] == '/') {
+                // Extract base domain from base_url
+                size_t proto_end = base_url.find("://");
+                if (proto_end != std::string::npos) {
+                    size_t domain_end = base_url.find("/", proto_end + 3);
+                    std::string domain = (domain_end != std::string::npos) ?
+                        base_url.substr(0, domain_end) : base_url;
+                    url = domain + url;
+                }
+            } else {
+                // Relative to current page
+                size_t last_slash = base_url.find_last_of('/');
+                if (last_slash != std::string::npos) {
+                    url = base_url.substr(0, last_slash + 1) + url;
+                }
+            }
+        }
+
+        // Skip javascript:, mailto:, tel: etc.
+        if (url.find("http://") == 0 || url.find("https://") == 0) {
+            if (is_url_allowed(url)) {
+                urls.push_back(url);
+            }
+        }
+
+        ++iter;
+    }
+
+    return urls;
 }
 
-bool WebScrapingSource::is_url_allowed(const std::string& /*url*/) {
-    return true; // Simplified
+bool WebScrapingSource::is_url_allowed(const std::string& url) {
+    // Check against URL blacklist/whitelist patterns
+    if (scraping_config_.url_patterns_whitelist.empty()) {
+        // No whitelist, check blacklist only
+        for (const auto& pattern : scraping_config_.url_patterns_blacklist) {
+            try {
+                std::regex regex_pattern(pattern);
+                if (std::regex_search(url, regex_pattern)) {
+                    return false;
+                }
+            } catch (const std::regex_error&) {
+                continue;
+            }
+        }
+        return true;
+    } else {
+        // Whitelist exists, URL must match at least one pattern
+        for (const auto& pattern : scraping_config_.url_patterns_whitelist) {
+            try {
+                std::regex regex_pattern(pattern);
+                if (std::regex_search(url, regex_pattern)) {
+                    return true;
+                }
+            } catch (const std::regex_error&) {
+                continue;
+            }
+        }
+        return false;
+    }
 }
 
-nlohmann::json WebScrapingSource::parse_html_content(const std::string& /*html*/) {
-    return {}; // Simplified
+nlohmann::json WebScrapingSource::parse_html_content(const std::string& html) {
+    nlohmann::json result;
+
+    // Extract title
+    std::regex title_pattern("<title>([^<]+)</title>", std::regex::icase);
+    std::smatch title_match;
+    if (std::regex_search(html, title_match, title_pattern)) {
+        result["title"] = title_match[1].str();
+    }
+
+    // Extract meta tags
+    nlohmann::json meta_tags = nlohmann::json::array();
+    std::regex meta_pattern(R"(<meta\s+([^>]+)>)", std::regex::icase);
+    std::sregex_iterator meta_iter(html.begin(), html.end(), meta_pattern);
+    std::sregex_iterator end;
+
+    while (meta_iter != end) {
+        std::string meta_attrs = (*meta_iter)[1];
+        nlohmann::json meta;
+
+        // Extract name/property and content
+        std::regex name_pattern(R"((name|property)\s*=\s*[\"']([^\"']+)[\"'])", std::regex::icase);
+        std::regex content_pattern(R"(content\s*=\s*[\"']([^\"']+)[\"'])", std::regex::icase);
+
+        std::smatch name_match, content_match;
+        if (std::regex_search(meta_attrs, name_match, name_pattern)) {
+            meta["name"] = name_match[2].str();
+        }
+        if (std::regex_search(meta_attrs, content_match, content_pattern)) {
+            meta["content"] = content_match[1].str();
+        }
+
+        if (!meta.empty()) {
+            meta_tags.push_back(meta);
+        }
+
+        ++meta_iter;
+    }
+    result["meta_tags"] = meta_tags;
+
+    // Extract text content (strip HTML tags)
+    std::string text_content = html;
+    std::regex tag_pattern("<[^>]+>");
+    text_content = std::regex_replace(text_content, tag_pattern, " ");
+
+    // Normalize whitespace
+    std::regex whitespace_pattern("\\s+");
+    text_content = std::regex_replace(text_content, whitespace_pattern, " ");
+
+    result["text_content"] = text_content;
+    result["content_length"] = text_content.length();
+
+    return result;
 }
 
-nlohmann::json WebScrapingSource::parse_xml_content(const std::string& /*xml*/) {
-    return {}; // Simplified
+nlohmann::json WebScrapingSource::parse_xml_content(const std::string& xml) {
+    nlohmann::json result;
+
+    // Extract root element
+    std::regex root_pattern("<([a-zA-Z][a-zA-Z0-9]*)");
+    std::smatch root_match;
+    if (std::regex_search(xml, root_match, root_pattern)) {
+        result["root_element"] = root_match[1].str();
+    }
+
+    // Extract all elements (basic XML parsing)
+    nlohmann::json elements = nlohmann::json::array();
+    std::regex element_pattern("<([a-zA-Z][a-zA-Z0-9]*)>([^<]*)</\\1>");
+    std::sregex_iterator iter(xml.begin(), xml.end(), element_pattern);
+    std::sregex_iterator end;
+
+    int element_count = 0;
+    while (iter != end && element_count < 100) {  // Limit to prevent memory issues
+        nlohmann::json element;
+        element["tag"] = (*iter)[1].str();
+        element["content"] = (*iter)[2].str();
+        elements.push_back(element);
+        ++iter;
+        ++element_count;
+    }
+
+    result["elements"] = elements;
+    result["element_count"] = element_count;
+
+    return result;
 }
 
-nlohmann::json WebScrapingSource::parse_rss_content(const std::string& /*rss*/) {
-    return {}; // Simplified
+nlohmann::json WebScrapingSource::parse_rss_content(const std::string& rss) {
+    nlohmann::json result;
+    nlohmann::json items = nlohmann::json::array();
+
+    // Extract RSS items
+    std::regex item_pattern("<item>(.*?)</item>", std::regex::icase);
+    std::sregex_iterator item_iter(rss.begin(), rss.end(), item_pattern);
+    std::sregex_iterator end;
+
+    while (item_iter != end) {
+        std::string item_content = (*item_iter)[1].str();
+        nlohmann::json item;
+
+        // Extract title
+        std::regex title_pattern("<title>([^<]+)</title>", std::regex::icase);
+        std::smatch title_match;
+        if (std::regex_search(item_content, title_match, title_pattern)) {
+            item["title"] = title_match[1].str();
+        }
+
+        // Extract link
+        std::regex link_pattern("<link>([^<]+)</link>", std::regex::icase);
+        std::smatch link_match;
+        if (std::regex_search(item_content, link_match, link_pattern)) {
+            item["link"] = link_match[1].str();
+        }
+
+        // Extract description
+        std::regex desc_pattern("<description>([^<]+)</description>", std::regex::icase);
+        std::smatch desc_match;
+        if (std::regex_search(item_content, desc_match, desc_pattern)) {
+            item["description"] = desc_match[1].str();
+        }
+
+        // Extract pub date
+        std::regex date_pattern("<pubDate>([^<]+)</pubDate>", std::regex::icase);
+        std::smatch date_match;
+        if (std::regex_search(item_content, date_match, date_pattern)) {
+            item["pub_date"] = date_match[1].str();
+        }
+
+        items.push_back(item);
+        ++item_iter;
+    }
+
+    result["items"] = items;
+    result["item_count"] = items.size();
+
+    return result;
 }
 
-nlohmann::json WebScrapingSource::extract_data_with_rules(const std::string& /*content*/) {
-    return {}; // Simplified
+nlohmann::json WebScrapingSource::extract_data_with_rules(const std::string& content) {
+    nlohmann::json extracted_data;
+
+    // Apply extraction rules from config
+    if (scraping_config_.extraction_rules.contains("patterns")) {
+        for (const auto& rule : scraping_config_.extraction_rules["patterns"]) {
+            std::string field_name = rule.value("name", "field");
+            std::string pattern_str = rule.value("pattern", "");
+
+            if (!pattern_str.empty()) {
+                try {
+                    std::regex pattern(pattern_str);
+                    std::smatch match;
+                    if (std::regex_search(content, match, pattern)) {
+                        extracted_data[field_name] = match[1].str();
+                    }
+                } catch (const std::regex_error& e) {
+                    logger_->log(LogLevel::WARN, "Invalid regex pattern for field " +
+                                field_name + ": " + e.what());
+                }
+            }
+        }
+    }
+
+    return extracted_data;
 }
 
 bool WebScrapingSource::detect_changes_by_hash(const std::string& url, const std::string& content) {
@@ -230,35 +505,198 @@ bool WebScrapingSource::detect_changes_by_hash(const std::string& url, const std
     return changed;
 }
 
-bool WebScrapingSource::detect_changes_by_structure(const std::string& /*url*/, const std::string& /*content*/) {
-    return true; // Simplified
+bool WebScrapingSource::detect_changes_by_structure(const std::string& url, const std::string& content) {
+    // Count specific HTML elements to detect structural changes
+    auto count_elements = [](const std::string& html, const std::string& tag) -> int {
+        std::string open_tag = "<" + tag;
+        int count = 0;
+        size_t pos = 0;
+        while ((pos = html.find(open_tag, pos)) != std::string::npos) {
+            count++;
+            pos += open_tag.length();
+        }
+        return count;
+    };
+
+    std::unordered_map<std::string, int> current_structure;
+    current_structure["div"] = count_elements(content, "div");
+    current_structure["section"] = count_elements(content, "section");
+    current_structure["article"] = count_elements(content, "article");
+    current_structure["table"] = count_elements(content, "table");
+    current_structure["form"] = count_elements(content, "form");
+
+    // Compare with last known structure
+    auto it = last_known_structures_.find(url);
+    if (it == last_known_structures_.end()) {
+        last_known_structures_[url] = current_structure;
+        return true;  // First time, consider it changed
+    }
+
+    // Check if any element count changed significantly (>10%)
+    for (const auto& [tag, count] : current_structure) {
+        int old_count = it->second[tag];
+        if (old_count > 0) {
+            double change_ratio = std::abs(count - old_count) / static_cast<double>(old_count);
+            if (change_ratio > 0.1) {
+                last_known_structures_[url] = current_structure;
+                return true;
+            }
+        } else if (count > 0) {
+            last_known_structures_[url] = current_structure;
+            return true;
+        }
+    }
+
+    return false;
 }
 
-bool WebScrapingSource::detect_changes_by_keywords(const std::string& /*url*/, const std::string& /*content*/) {
-    return true; // Simplified
+bool WebScrapingSource::detect_changes_by_keywords(const std::string& url, const std::string& content) {
+    if (scraping_config_.change_detection_keywords.empty()) {
+        return false;
+    }
+
+    std::string content_lower = content;
+    std::transform(content_lower.begin(), content_lower.end(), content_lower.begin(), ::tolower);
+
+    for (const auto& keyword : scraping_config_.change_detection_keywords) {
+        if (content_lower.find(keyword) != std::string::npos) {
+            logger_->log(LogLevel::INFO, "Detected keyword '" + keyword + "' in content from " + url);
+            return true;
+        }
+    }
+
+    return false;
 }
 
-bool WebScrapingSource::detect_changes_by_regex(const std::string& /*url*/, const std::string& /*content*/) {
-    return true; // Simplified
+bool WebScrapingSource::detect_changes_by_regex(const std::string& url, const std::string& content) {
+    if (scraping_config_.change_detection_patterns.empty()) {
+        return false;
+    }
+
+    for (const auto& pattern_str : scraping_config_.change_detection_patterns) {
+        try {
+            std::regex pattern(pattern_str);
+            if (std::regex_search(content, pattern)) {
+                logger_->log(LogLevel::INFO, "Detected pattern match in content from " + url);
+                return true;
+            }
+        } catch (const std::regex_error& e) {
+            logger_->log(LogLevel::WARN, "Invalid regex pattern: " + pattern_str + " - " + e.what());
+        }
+    }
+
+    return false;
 }
 
-std::string WebScrapingSource::extract_by_css_selector(const std::string& /*html*/, const std::string& /*selector*/, const std::string& /*attribute*/) {
-    return ""; // Simplified
+std::string WebScrapingSource::extract_by_css_selector(const std::string& html, const std::string& selector, const std::string& attribute) {
+    // Production would use a proper CSS selector library like gumbo-query
+    // For now, handle basic selectors (class, id, tag)
+
+    if (selector.empty()) return "";
+
+    std::string pattern_str;
+    if (selector[0] == '#') {
+        // ID selector: #myId
+        std::string id = selector.substr(1);
+        pattern_str = R"(id\s*=\s*[\"'])" + id + R"([\"'][^>]*>([^<]*))";
+    } else if (selector[0] == '.') {
+        // Class selector: .myClass
+        std::string className = selector.substr(1);
+        pattern_str = R"(class\s*=\s*[\"'][^\"']*)" + className + R"([^\"']*[\"'][^>]*>([^<]*))";
+    } else {
+        // Tag selector: div, span, etc.
+        pattern_str = "<" + selector + R"([^>]*>([^<]*)<\/)" + selector + ">";
+    }
+
+    try {
+        std::regex pattern(pattern_str, std::regex::icase);
+        std::smatch match;
+        if (std::regex_search(html, match, pattern)) {
+            if (attribute.empty()) {
+                return match[1].str();  // Return content
+            } else {
+                // Extract specific attribute
+                std::string element_tag = match[0].str();
+                std::regex attr_pattern(attribute + R"(\s*=\s*[\"']([^\"']+)[\"'])");
+                std::smatch attr_match;
+                if (std::regex_search(element_tag, attr_match, attr_pattern)) {
+                    return attr_match[1].str();
+                }
+            }
+        }
+    } catch (const std::regex_error& e) {
+        logger_->log(LogLevel::WARN, "CSS selector regex error: " + std::string(e.what()));
+    }
+
+    return "";
 }
 
-std::string WebScrapingSource::extract_by_regex(const std::string& /*content*/, const std::regex& /*pattern*/) {
-    return ""; // Simplified
+std::string WebScrapingSource::extract_by_regex(const std::string& content, const std::regex& pattern) {
+    std::smatch match;
+    if (std::regex_search(content, match, pattern)) {
+        return match[1].str();
+    }
+    return "";
 }
 
-nlohmann::json WebScrapingSource::extract_json_path(const nlohmann::json& /*json_data*/, const std::string& /*path*/) {
-    return nullptr; // Simplified
+nlohmann::json WebScrapingSource::extract_json_path(const nlohmann::json& json_data, const std::string& path) {
+    // Parse JSON path like "data.items[0].name"
+    if (path.empty() || json_data.is_null()) {
+        return nullptr;
+    }
+
+    nlohmann::json current = json_data;
+    std::string current_path = path;
+
+    // Split path by '.' and process each segment
+    size_t pos = 0;
+    while (pos < current_path.length()) {
+        size_t next_dot = current_path.find('.', pos);
+        std::string segment = (next_dot != std::string::npos) ?
+            current_path.substr(pos, next_dot - pos) :
+            current_path.substr(pos);
+
+        // Check for array index: items[0]
+        size_t bracket_pos = segment.find('[');
+        if (bracket_pos != std::string::npos) {
+            std::string key = segment.substr(0, bracket_pos);
+            size_t close_bracket = segment.find(']');
+            if (close_bracket != std::string::npos) {
+                int index = std::stoi(segment.substr(bracket_pos + 1, close_bracket - bracket_pos - 1));
+
+                if (current.contains(key) && current[key].is_array() &&
+                    index >= 0 && index < static_cast<int>(current[key].size())) {
+                    current = current[key][index];
+                } else {
+                    return nullptr;
+                }
+            }
+        } else {
+            // Simple key access
+            if (current.contains(segment)) {
+                current = current[segment];
+            } else {
+                return nullptr;
+            }
+        }
+
+        pos = (next_dot != std::string::npos) ? next_dot + 1 : current_path.length();
+    }
+
+    return current;
 }
 
 std::string WebScrapingSource::get_random_user_agent() {
     if (scraping_config_.user_agents.empty()) {
-        return "Regulens-Web-Scraper/1.0";
+        return "Regulens-Web-Scraper/1.0 (Compliance Monitoring)";
     }
-    return scraping_config_.user_agents[0]; // Simplified
+
+    // Actually randomize
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, scraping_config_.user_agents.size() - 1);
+
+    return scraping_config_.user_agents[dis(gen)];
 }
 
 void WebScrapingSource::apply_request_delay() {
@@ -267,36 +705,254 @@ void WebScrapingSource::apply_request_delay() {
     }
 }
 
-bool WebScrapingSource::should_respect_robots_txt(const std::string& /*url*/) {
-    return true; // Simplified
+bool WebScrapingSource::should_respect_robots_txt(const std::string& url) {
+    if (!scraping_config_.respect_robots_txt) {
+        return false;
+    }
+
+    // Extract base URL for robots.txt
+    size_t proto_end = url.find("://");
+    if (proto_end == std::string::npos) return true;
+
+    size_t domain_end = url.find("/", proto_end + 3);
+    std::string base_url = (domain_end != std::string::npos) ?
+        url.substr(0, domain_end) : url;
+
+    std::string robots_url = base_url + "/robots.txt";
+
+    // Check cache first
+    auto it = robots_txt_cache_.find(base_url);
+    if (it != robots_txt_cache_.end()) {
+        // Check if our user agent is disallowed
+        for (const auto& disallow_path : it->second) {
+            if (url.find(disallow_path) != std::string::npos) {
+                logger_->log(LogLevel::INFO, "URL disallowed by robots.txt: " + url);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Fetch and parse robots.txt
+    try {
+        std::string robots_content = fetch_page_content(robots_url);
+        if (!robots_content.empty()) {
+            std::vector<std::string> disallowed_paths;
+            std::istringstream stream(robots_content);
+            std::string line;
+            bool applies_to_us = false;
+
+            while (std::getline(stream, line)) {
+                // Check User-agent
+                if (line.find("User-agent:") == 0) {
+                    std::string agent = line.substr(11);
+                    agent.erase(0, agent.find_first_not_of(" \t"));
+                    applies_to_us = (agent == "*" || agent.find("Regulens") != std::string::npos);
+                }
+                // Check Disallow
+                else if (applies_to_us && line.find("Disallow:") == 0) {
+                    std::string path = line.substr(9);
+                    path.erase(0, path.find_first_not_of(" \t"));
+                    if (!path.empty()) {
+                        disallowed_paths.push_back(path);
+                    }
+                }
+            }
+
+            robots_txt_cache_[base_url] = disallowed_paths;
+
+            // Check against disallowed paths
+            for (const auto& disallow_path : disallowed_paths) {
+                if (url.find(disallow_path) != std::string::npos) {
+                    logger_->log(LogLevel::INFO, "URL disallowed by robots.txt: " + url);
+                    return false;
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::WARN, "Failed to fetch robots.txt for " + base_url + ": " + e.what());
+    }
+
+    return true;
 }
 
-bool WebScrapingSource::store_content_snapshot(const std::string& /*url*/, const std::string& /*content*/, const std::string& /*hash*/) {
-    return true; // Simplified
+bool WebScrapingSource::store_content_snapshot(const std::string& url, const std::string& content, const std::string& hash) {
+    ContentSnapshot snapshot;
+    snapshot.url = url;
+    snapshot.content = content;
+    snapshot.content_hash = hash;
+    snapshot.timestamp = std::chrono::system_clock::now();
+
+    content_snapshots_[url] = snapshot;
+
+    // Limit snapshot storage
+    if (content_snapshots_.size() > scraping_config_.max_snapshot_history) {
+        cleanup_old_snapshots();
+    }
+
+    return true;
 }
 
-std::optional<std::pair<std::string, std::string>> WebScrapingSource::get_last_content_snapshot(const std::string& /*url*/) {
-    return std::nullopt; // Simplified
+std::optional<std::pair<std::string, std::string>> WebScrapingSource::get_last_content_snapshot(const std::string& url) {
+    auto it = content_snapshots_.find(url);
+    if (it != content_snapshots_.end()) {
+        return std::make_pair(it->second.content, it->second.content_hash);
+    }
+    return std::nullopt;
 }
 
 void WebScrapingSource::cleanup_old_snapshots() {
-    // Simplified
+    // Remove oldest snapshots if we exceed the limit
+    if (content_snapshots_.size() <= scraping_config_.max_snapshot_history) {
+        return;
+    }
+
+    // Find oldest snapshots
+    std::vector<std::pair<std::string, std::chrono::system_clock::time_point>> snapshot_times;
+    for (const auto& [url, snapshot] : content_snapshots_) {
+        snapshot_times.push_back({url, snapshot.timestamp});
+    }
+
+    // Sort by timestamp (oldest first)
+    std::sort(snapshot_times.begin(), snapshot_times.end(),
+        [](const auto& a, const auto& b) { return a.second < b.second; });
+
+    // Remove oldest until we're under the limit
+    size_t to_remove = content_snapshots_.size() - scraping_config_.max_snapshot_history;
+    for (size_t i = 0; i < to_remove && i < snapshot_times.size(); ++i) {
+        content_snapshots_.erase(snapshot_times[i].first);
+    }
+
+    logger_->log(LogLevel::DEBUG, "Cleaned up " + std::to_string(to_remove) + " old content snapshots");
 }
 
-std::string WebScrapingSource::handle_http_error(int /*status_code*/, const std::string& /*url*/) {
-    return ""; // Simplified
+std::string WebScrapingSource::handle_http_error(int status_code, const std::string& url) {
+    std::string error_msg;
+
+    switch (status_code) {
+        case 400:
+            error_msg = "Bad Request - The request was malformed";
+            break;
+        case 401:
+            error_msg = "Unauthorized - Authentication required";
+            break;
+        case 403:
+            error_msg = "Forbidden - Access denied";
+            break;
+        case 404:
+            error_msg = "Not Found - Resource does not exist";
+            break;
+        case 429:
+            error_msg = "Too Many Requests - Rate limit exceeded";
+            break;
+        case 500:
+            error_msg = "Internal Server Error";
+            break;
+        case 502:
+            error_msg = "Bad Gateway";
+            break;
+        case 503:
+            error_msg = "Service Unavailable";
+            break;
+        case 504:
+            error_msg = "Gateway Timeout";
+            break;
+        default:
+            error_msg = "HTTP Error " + std::to_string(status_code);
+    }
+
+    logger_->log(LogLevel::WARN, "HTTP error for " + url + ": " + error_msg);
+    return error_msg;
 }
 
-bool WebScrapingSource::should_retry_request(int /*attempt*/, int /*status_code*/) {
-    return false; // Simplified
+bool WebScrapingSource::should_retry_request(int attempt, int status_code) {
+    if (attempt >= scraping_config_.max_retries) {
+        return false;
+    }
+
+    // Retry on specific status codes
+    std::vector<int> retryable_codes = {408, 429, 500, 502, 503, 504};
+    return std::find(retryable_codes.begin(), retryable_codes.end(), status_code) != retryable_codes.end();
 }
 
-void WebScrapingSource::apply_exponential_backoff(int /*attempt*/) {
-    // Simplified
+void WebScrapingSource::apply_exponential_backoff(int attempt) {
+    if (attempt <= 0) return;
+
+    // Exponential backoff: base_delay * (2 ^ attempt) with jitter
+    auto base_delay = scraping_config_.delay_between_requests;
+    int multiplier = std::pow(2, attempt);
+
+    auto delay = base_delay * multiplier;
+
+    // Add jitter (random 0-50% of delay)
+    if (scraping_config_.randomize_delays) {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(0, delay.count() / 2);
+        delay += std::chrono::milliseconds(dis(gen));
+    }
+
+    // Cap at maximum delay
+    auto max_delay = std::chrono::seconds(60);
+    if (delay > max_delay) {
+        delay = max_delay;
+    }
+
+    logger_->log(LogLevel::DEBUG, "Applying exponential backoff: " +
+                std::to_string(delay.count()) + "ms (attempt " + std::to_string(attempt) + ")");
+
+    std::this_thread::sleep_for(delay);
 }
 
-nlohmann::json WebScrapingSource::extract_page_metadata(const std::string& /*content*/, const std::string& /*url*/) {
-    return {}; // Simplified
+nlohmann::json WebScrapingSource::extract_page_metadata(const std::string& content, const std::string& url) {
+    nlohmann::json metadata;
+
+    metadata["url"] = url;
+    metadata["content_length"] = content.length();
+    metadata["extraction_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    // Extract title
+    std::regex title_pattern("<title>([^<]+)</title>", std::regex::icase);
+    std::smatch title_match;
+    if (std::regex_search(content, title_match, title_pattern)) {
+        metadata["title"] = title_match[1].str();
+    }
+
+    // Extract meta description
+    std::regex desc_pattern(R"(<meta\s+name\s*=\s*[\"']description[\"']\s+content\s*=\s*[\"']([^\"']+)[\"'])", std::regex::icase);
+    std::smatch desc_match;
+    if (std::regex_search(content, desc_match, desc_pattern)) {
+        metadata["description"] = desc_match[1].str();
+    }
+
+    // Extract meta keywords
+    std::regex keywords_pattern(R"(<meta\s+name\s*=\s*[\"']keywords[\"']\s+content\s*=\s*[\"']([^\"']+)[\"'])", std::regex::icase);
+    std::smatch keywords_match;
+    if (std::regex_search(content, keywords_match, keywords_pattern)) {
+        metadata["keywords"] = keywords_match[1].str();
+    }
+
+    // Extract canonical URL
+    std::regex canonical_pattern(R"(<link\s+rel\s*=\s*[\"']canonical[\"']\s+href\s*=\s*[\"']([^\"']+)[\"'])", std::regex::icase);
+    std::smatch canonical_match;
+    if (std::regex_search(content, canonical_match, canonical_pattern)) {
+        metadata["canonical_url"] = canonical_match[1].str();
+    }
+
+    // Count links
+    std::regex link_pattern(R"(<a\s+[^>]*href\s*=\s*[\"']([^\"']+)[\"'])");
+    auto links_begin = std::sregex_iterator(content.begin(), content.end(), link_pattern);
+    auto links_end = std::sregex_iterator();
+    metadata["link_count"] = std::distance(links_begin, links_end);
+
+    // Count images
+    std::regex img_pattern(R"(<img\s+[^>]*src\s*=\s*[\"']([^\"']+)[\"'])");
+    auto imgs_begin = std::sregex_iterator(content.begin(), content.end(), img_pattern);
+    auto imgs_end = std::sregex_iterator();
+    metadata["image_count"] = std::distance(imgs_begin, imgs_end);
+
+    return metadata;
 }
 
 std::vector<std::string> WebScrapingSource::extract_keywords(const std::string& content) {

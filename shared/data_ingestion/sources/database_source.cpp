@@ -806,7 +806,168 @@ nlohmann::json DatabaseSource::get_query_performance_stats() {
 }
 
 std::vector<std::string> DatabaseSource::identify_slow_queries() {
-    return {}; // Simplified
+    std::vector<std::string> slow_queries;
+
+    if (!db_pool_) {
+        logger_->log(LogLevel::ERROR, "Database connection pool not available");
+        return slow_queries;
+    }
+
+    try {
+        auto conn = db_pool_->acquire_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to acquire database connection");
+            return slow_queries;
+        }
+
+        pqxx::work txn(*conn);
+
+        // Query PostgreSQL's pg_stat_statements for slow queries
+        // This requires pg_stat_statements extension to be enabled
+        auto result = txn.exec(R"(
+            SELECT query,
+                   calls,
+                   total_exec_time,
+                   mean_exec_time,
+                   max_exec_time,
+                   stddev_exec_time
+            FROM pg_stat_statements
+            WHERE mean_exec_time > 1000  -- Queries taking more than 1 second on average
+            ORDER BY mean_exec_time DESC
+            LIMIT 50
+        )");
+
+        for (const auto& row : result) {
+            std::string query = row["query"].c_str();
+            double mean_time = row["mean_exec_time"].as<double>();
+            double max_time = row["max_exec_time"].as<double>();
+            int64_t calls = row["calls"].as<int64_t>();
+
+            std::string slow_query_info = "Query: " + query.substr(0, 100) +
+                                         (query.length() > 100 ? "..." : "") +
+                                         " | Mean: " + std::to_string(mean_time) + "ms" +
+                                         " | Max: " + std::to_string(max_time) + "ms" +
+                                         " | Calls: " + std::to_string(calls);
+
+            slow_queries.push_back(slow_query_info);
+
+            logger_->log(LogLevel::WARN, "Slow query detected: " + slow_query_info);
+        }
+
+        // Also check for currently running long queries
+        auto long_running = txn.exec(R"(
+            SELECT pid,
+                   now() - query_start AS duration,
+                   query,
+                   state
+            FROM pg_stat_activity
+            WHERE state = 'active'
+              AND now() - query_start > interval '5 seconds'
+              AND query NOT LIKE '%pg_stat_activity%'
+            ORDER BY duration DESC
+        )");
+
+        for (const auto& row : long_running) {
+            int pid = row["pid"].as<int>();
+            std::string duration = row["duration"].c_str();
+            std::string query = row["query"].c_str();
+            std::string state = row["state"].c_str();
+
+            std::string running_query_info = "Long-running (PID: " + std::to_string(pid) +
+                                            "): " + query.substr(0, 100) +
+                                            (query.length() > 100 ? "..." : "") +
+                                            " | Duration: " + duration +
+                                            " | State: " + state;
+
+            slow_queries.push_back(running_query_info);
+
+            logger_->log(LogLevel::WARN, "Long-running query: " + running_query_info);
+        }
+
+        // Check for queries with high I/O
+        auto io_intensive = txn.exec(R"(
+            SELECT query,
+                   calls,
+                   shared_blks_read + shared_blks_written AS total_io,
+                   (shared_blks_read + shared_blks_written) / GREATEST(calls, 1) AS io_per_call
+            FROM pg_stat_statements
+            WHERE shared_blks_read + shared_blks_written > 100000
+            ORDER BY total_io DESC
+            LIMIT 20
+        )");
+
+        for (const auto& row : io_intensive) {
+            std::string query = row["query"].c_str();
+            int64_t total_io = row["total_io"].as<int64_t>();
+            int64_t io_per_call = row["io_per_call"].as<int64_t>();
+            int64_t calls = row["calls"].as<int64_t>();
+
+            std::string io_query_info = "High I/O query: " + query.substr(0, 100) +
+                                       (query.length() > 100 ? "..." : "") +
+                                       " | Total I/O blocks: " + std::to_string(total_io) +
+                                       " | I/O per call: " + std::to_string(io_per_call) +
+                                       " | Calls: " + std::to_string(calls);
+
+            slow_queries.push_back(io_query_info);
+
+            logger_->log(LogLevel::INFO, io_query_info);
+        }
+
+        // Check for queries that might benefit from indexes
+        auto missing_indexes = txn.exec(R"(
+            SELECT schemaname,
+                   tablename,
+                   seq_scan,
+                   seq_tup_read,
+                   idx_scan,
+                   seq_tup_read / GREATEST(seq_scan, 1) AS avg_seq_tup
+            FROM pg_stat_user_tables
+            WHERE seq_scan > 100
+              AND seq_tup_read / GREATEST(seq_scan, 1) > 10000
+            ORDER BY seq_tup_read DESC
+            LIMIT 10
+        )");
+
+        for (const auto& row : missing_indexes) {
+            std::string schema = row["schemaname"].c_str();
+            std::string table = row["tablename"].c_str();
+            int64_t seq_scan = row["seq_scan"].as<int64_t>();
+            int64_t seq_tup_read = row["seq_tup_read"].as<int64_t>();
+            int64_t avg_seq_tup = row["avg_seq_tup"].as<int64_t>();
+
+            std::string index_recommendation = "Table " + schema + "." + table +
+                                              " may need index | Sequential scans: " +
+                                              std::to_string(seq_scan) +
+                                              " | Avg tuples per scan: " +
+                                              std::to_string(avg_seq_tup);
+
+            slow_queries.push_back(index_recommendation);
+
+            logger_->log(LogLevel::WARN, "Index recommendation: " + index_recommendation);
+        }
+
+        txn.commit();
+        db_pool_->release_connection(std::move(conn));
+
+        logger_->log(LogLevel::INFO, "Identified " + std::to_string(slow_queries.size()) +
+                    " slow or problematic queries");
+
+    } catch (const pqxx::sql_error& e) {
+        logger_->log(LogLevel::ERROR, "SQL error identifying slow queries: " +
+                    std::string(e.what()) + " (query: " + std::string(e.query()) + ")");
+
+        // If pg_stat_statements is not available, return basic info
+        if (std::string(e.what()).find("pg_stat_statements") != std::string::npos) {
+            slow_queries.push_back("NOTE: pg_stat_statements extension not enabled. "
+                                  "Run 'CREATE EXTENSION pg_stat_statements;' to enable query monitoring.");
+            logger_->log(LogLevel::WARN, "pg_stat_statements extension not available");
+        }
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception identifying slow queries: " + std::string(e.what()));
+    }
+
+    return slow_queries;
 }
 
 } // namespace regulens

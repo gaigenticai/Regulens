@@ -3,6 +3,7 @@
 add_library(regulens_web_ui STATIC
     web_ui_server.cpp
     web_ui_handlers.cpp
+    api_routes.cpp
     regulatory_monitor_ui.cpp
     regulatory_assessor_ui.cpp
     audit_intelligence_ui.cpp

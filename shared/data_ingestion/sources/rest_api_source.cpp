@@ -138,13 +138,85 @@ bool RESTAPISource::authenticate_api_key() {
 }
 
 bool RESTAPISource::authenticate_basic_auth() {
-    // Simplified - in production would encode credentials
+    if (!api_config_.auth_params.contains("username") || !api_config_.auth_params.contains("password")) {
+        logger_->log(LogLevel::ERROR, "Basic auth missing username or password");
+        return false;
+    }
+
+    std::string username = api_config_.auth_params["username"];
+    std::string password = api_config_.auth_params["password"];
+
+    // Base64 encode credentials
+    std::string credentials = username + ":" + password;
+    std::string encoded = base64_encode(credentials);
+
+    auth_token_ = "Basic " + encoded;
+
+    logger_->log(LogLevel::INFO, "Basic authentication configured for user: " + username);
     return true;
 }
 
 bool RESTAPISource::authenticate_oauth2() {
-    // Simplified - in production would handle OAuth flow
-    return true;
+    // OAuth 2.0 Client Credentials Flow
+    if (!api_config_.auth_params.contains("client_id") || !api_config_.auth_params.contains("client_secret")) {
+        logger_->log(LogLevel::ERROR, "OAuth2 missing client_id or client_secret");
+        return false;
+    }
+
+    std::string client_id = api_config_.auth_params["client_id"];
+    std::string client_secret = api_config_.auth_params["client_secret"];
+    std::string token_url = api_config_.auth_params.value("token_url", api_config_.base_url + "/oauth/token");
+    std::string scope = api_config_.auth_params.value("scope", "");
+
+    // Build token request body
+    std::string body = "grant_type=client_credentials";
+    body += "&client_id=" + url_encode(client_id);
+    body += "&client_secret=" + url_encode(client_secret);
+    if (!scope.empty()) {
+        body += "&scope=" + url_encode(scope);
+    }
+
+    // Request access token
+    std::unordered_map<std::string, std::string> headers = {
+        {"Content-Type", "application/x-www-form-urlencoded"},
+        {"Accept", "application/json"}
+    };
+
+    try {
+        HttpResponse response = http_client_->post(token_url, body, headers);
+
+        if (response.success && response.status_code == 200) {
+            auto token_data = nlohmann::json::parse(response.body);
+
+            if (token_data.contains("access_token")) {
+                auth_token_ = "Bearer " + token_data["access_token"].get<std::string>();
+
+                // Store token expiration if provided
+                if (token_data.contains("expires_in")) {
+                    int expires_in = token_data["expires_in"];
+                    oauth_token_expiry_ = std::chrono::system_clock::now() + std::chrono::seconds(expires_in);
+                    logger_->log(LogLevel::INFO, "OAuth2 token obtained, expires in " + std::to_string(expires_in) + " seconds");
+                }
+
+                // Store refresh token if provided
+                if (token_data.contains("refresh_token")) {
+                    oauth_refresh_token_ = token_data["refresh_token"].get<std::string>();
+                }
+
+                logger_->log(LogLevel::INFO, "OAuth2 authentication successful");
+                return true;
+            } else {
+                logger_->log(LogLevel::ERROR, "OAuth2 response missing access_token");
+                return false;
+            }
+        } else {
+            logger_->log(LogLevel::ERROR, "OAuth2 token request failed: HTTP " + std::to_string(response.status_code));
+            return false;
+        }
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "OAuth2 authentication exception: " + std::string(e.what()));
+        return false;
+    }
 }
 
 bool RESTAPISource::authenticate_jwt() {
@@ -181,35 +253,301 @@ std::vector<nlohmann::json> RESTAPISource::handle_offset_pagination() {
 }
 
 std::vector<nlohmann::json> RESTAPISource::handle_page_pagination() {
-    return {}; // Simplified implementation
+    std::vector<nlohmann::json> all_data;
+    int current_page = api_config_.pagination_params.value("start_page", 1);
+    const int max_pages = api_config_.max_pages;
+    const int page_size = api_config_.page_size;
+
+    std::string page_param = api_config_.pagination_params.value("page_param", "page");
+    std::string size_param = api_config_.pagination_params.value("size_param", "page_size");
+
+    for (int page = 0; page < max_pages; ++page) {
+        std::unordered_map<std::string, std::string> params = {
+            {page_param, std::to_string(current_page)},
+            {size_param, std::to_string(page_size)}
+        };
+
+        // Add any additional query parameters
+        for (const auto& [key, value] : api_config_.query_params) {
+            params[key] = value;
+        }
+
+        auto url = build_url(api_config_.endpoint_path, params);
+        auto response = execute_request("GET", url);
+
+        if (!response.success) {
+            logger_->log(LogLevel::WARN, "Page " + std::to_string(current_page) + " request failed");
+            break;
+        }
+
+        auto page_data = parse_response(response);
+        if (page_data.empty()) {
+            logger_->log(LogLevel::DEBUG, "No more data at page " + std::to_string(current_page));
+            break;
+        }
+
+        all_data.insert(all_data.end(), page_data.begin(), page_data.end());
+        logger_->log(LogLevel::DEBUG, "Fetched page " + std::to_string(current_page) +
+                    " with " + std::to_string(page_data.size()) + " items");
+
+        // Check if we got a partial page (indicates last page)
+        if (static_cast<int>(page_data.size()) < page_size) {
+            logger_->log(LogLevel::INFO, "Reached last page at page " + std::to_string(current_page));
+            break;
+        }
+
+        current_page++;
+    }
+
+    logger_->log(LogLevel::INFO, "Page pagination complete: fetched " +
+                std::to_string(all_data.size()) + " total records");
+    return all_data;
 }
 
 std::vector<nlohmann::json> RESTAPISource::handle_cursor_pagination() {
-    return {}; // Simplified implementation
+    std::vector<nlohmann::json> all_data;
+    std::string cursor;
+    int page_count = 0;
+    const int max_pages = api_config_.max_pages;
+
+    std::string cursor_param = api_config_.pagination_params.value("cursor_param", "cursor");
+    std::string cursor_path = api_config_.pagination_params.value("cursor_response_path", "next_cursor");
+
+    while (page_count < max_pages) {
+        std::unordered_map<std::string, std::string> params;
+
+        // Add cursor if we have one
+        if (!cursor.empty()) {
+            params[cursor_param] = cursor;
+        }
+
+        // Add page size if specified
+        if (api_config_.page_size > 0) {
+            std::string size_param = api_config_.pagination_params.value("size_param", "limit");
+            params[size_param] = std::to_string(api_config_.page_size);
+        }
+
+        // Add any additional query parameters
+        for (const auto& [key, value] : api_config_.query_params) {
+            params[key] = value;
+        }
+
+        auto url = build_url(api_config_.endpoint_path, params);
+        auto response = execute_request("GET", url);
+
+        if (!response.success) {
+            logger_->log(LogLevel::WARN, "Cursor pagination request failed at cursor: " + cursor);
+            break;
+        }
+
+        // Parse response to get data and next cursor
+        try {
+            auto json_response = nlohmann::json::parse(response.body);
+
+            // Extract data items
+            auto page_data = parse_response(response);
+            if (page_data.empty()) {
+                logger_->log(LogLevel::DEBUG, "No more data in cursor pagination");
+                break;
+            }
+
+            all_data.insert(all_data.end(), page_data.begin(), page_data.end());
+            logger_->log(LogLevel::DEBUG, "Fetched cursor page " + std::to_string(page_count + 1) +
+                        " with " + std::to_string(page_data.size()) + " items");
+
+            // Extract next cursor using JSON path
+            nlohmann::json next_cursor_value = extract_json_path(json_response, cursor_path);
+
+            if (next_cursor_value.is_null() || (next_cursor_value.is_string() && next_cursor_value.get<std::string>().empty())) {
+                logger_->log(LogLevel::INFO, "No more pages (next cursor is null/empty)");
+                break;
+            }
+
+            cursor = next_cursor_value.is_string() ? next_cursor_value.get<std::string>() : next_cursor_value.dump();
+
+        } catch (const nlohmann::json::exception& e) {
+            logger_->log(LogLevel::ERROR, "Failed to parse cursor pagination response: " + std::string(e.what()));
+            break;
+        }
+
+        page_count++;
+    }
+
+    logger_->log(LogLevel::INFO, "Cursor pagination complete: fetched " +
+                std::to_string(all_data.size()) + " total records across " +
+                std::to_string(page_count) + " pages");
+    return all_data;
 }
 
 std::vector<nlohmann::json> RESTAPISource::handle_link_pagination() {
-    return {}; // Simplified implementation
+    std::vector<nlohmann::json> all_data;
+    std::string next_url = build_url(api_config_.endpoint_path, api_config_.query_params);
+    int page_count = 0;
+    const int max_pages = api_config_.max_pages;
+
+    while (!next_url.empty() && page_count < max_pages) {
+        auto response = execute_request("GET", next_url);
+
+        if (!response.success) {
+            logger_->log(LogLevel::WARN, "Link pagination request failed");
+            break;
+        }
+
+        auto page_data = parse_response(response);
+        if (page_data.empty()) {
+            logger_->log(LogLevel::DEBUG, "No more data in link pagination");
+            break;
+        }
+
+        all_data.insert(all_data.end(), page_data.begin(), page_data.end());
+        logger_->log(LogLevel::DEBUG, "Fetched link page " + std::to_string(page_count + 1) +
+                    " with " + std::to_string(page_data.size()) + " items");
+
+        // Extract next link from response headers (RFC 5988 Link header)
+        next_url = "";
+        auto link_header_it = response.headers.find("Link");
+        if (link_header_it != response.headers.end()) {
+            std::string link_header = link_header_it->second;
+
+            // Parse Link header: <https://api.example.com/items?page=2>; rel="next"
+            std::regex next_link_pattern(R"(<([^>]+)>;\s*rel\s*=\s*[\"']?next[\"']?)");
+            std::smatch match;
+
+            if (std::regex_search(link_header, match, next_link_pattern)) {
+                next_url = match[1].str();
+                logger_->log(LogLevel::DEBUG, "Found next link: " + next_url);
+            } else {
+                logger_->log(LogLevel::INFO, "No next link found in Link header");
+            }
+        } else {
+            // Try to find next link in response body
+            try {
+                auto json_response = nlohmann::json::parse(response.body);
+                std::string next_path = api_config_.pagination_params.value("next_link_path", "links.next");
+
+                nlohmann::json next_link = extract_json_path(json_response, next_path);
+                if (!next_link.is_null() && next_link.is_string()) {
+                    next_url = next_link.get<std::string>();
+                    logger_->log(LogLevel::DEBUG, "Found next link in body: " + next_url);
+                }
+            } catch (const nlohmann::json::exception&) {
+                logger_->log(LogLevel::DEBUG, "Could not find next link in response");
+            }
+        }
+
+        page_count++;
+    }
+
+    logger_->log(LogLevel::INFO, "Link pagination complete: fetched " +
+                std::to_string(all_data.size()) + " total records across " +
+                std::to_string(page_count) + " pages");
+    return all_data;
 }
 
 HttpResponse RESTAPISource::execute_request(const std::string& method,
                                          const std::string& url,
                                          const std::string& body,
-                                         const std::unordered_map<std::string, std::string>& headers) {
+                                         const std::unordered_map<std::string, std::string>& additional_headers) {
     if (!check_rate_limit()) {
+        logger_->log(LogLevel::WARN, "Rate limit exceeded, request blocked");
         return {false, 429, "Rate limit exceeded", {}};
     }
 
     update_rate_limit();
 
-    // Simplified - in production would use http_client_
-    HttpResponse response;
-    response.success = true;
-    response.status_code = 200;
-    response.body = R"({"data": [{"id": 1, "name": "Sample Record"}]})";
-    response.headers = {};
+    // Build headers with authentication
+    std::unordered_map<std::string, std::string> request_headers = additional_headers;
 
-    return response;
+    // Add authentication header
+    if (!auth_token_.empty()) {
+        request_headers["Authorization"] = auth_token_;
+    }
+
+    // Add default headers if not present
+    if (request_headers.find("Accept") == request_headers.end()) {
+        request_headers["Accept"] = "application/json";
+    }
+    if (method == "POST" || method == "PUT" || method == "PATCH") {
+        if (request_headers.find("Content-Type") == request_headers.end()) {
+            request_headers["Content-Type"] = "application/json";
+        }
+    }
+
+    // Add custom headers from config
+    for (const auto& [key, value] : api_config_.custom_headers) {
+        if (request_headers.find(key) == request_headers.end()) {
+            request_headers[key] = value;
+        }
+    }
+
+    // Execute request with retry logic
+    int max_retries = 3;
+    int retry_delay_ms = 1000;
+
+    for (int attempt = 0; attempt <= max_retries; ++attempt) {
+        try {
+            HttpResponse response;
+
+            if (method == "GET") {
+                response = http_client_->get(url, request_headers);
+            } else if (method == "POST") {
+                response = http_client_->post(url, body, request_headers);
+            } else if (method == "PUT") {
+                response = http_client_->put(url, body, request_headers);
+            } else if (method == "DELETE") {
+                response = http_client_->del(url, request_headers);
+            } else if (method == "PATCH") {
+                response = http_client_->patch(url, body, request_headers);
+            } else {
+                logger_->log(LogLevel::ERROR, "Unsupported HTTP method: " + method);
+                return {false, 400, "Unsupported method", {}};
+            }
+
+            // Check if response is successful
+            if (response.success && response.status_code >= 200 && response.status_code < 300) {
+                logger_->log(LogLevel::DEBUG, method + " " + url + " -> " + std::to_string(response.status_code));
+                return response;
+            }
+
+            // Check if we should retry
+            if (attempt < max_retries) {
+                // Retry on specific status codes
+                if (response.status_code == 429 ||  // Too Many Requests
+                    response.status_code == 500 ||  // Internal Server Error
+                    response.status_code == 502 ||  // Bad Gateway
+                    response.status_code == 503 ||  // Service Unavailable
+                    response.status_code == 504) {  // Gateway Timeout
+
+                    logger_->log(LogLevel::WARN, "Request failed with " + std::to_string(response.status_code) +
+                                ", retrying in " + std::to_string(retry_delay_ms) + "ms (attempt " +
+                                std::to_string(attempt + 1) + "/" + std::to_string(max_retries) + ")");
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
+                    retry_delay_ms *= 2;  // Exponential backoff
+                    continue;
+                }
+            }
+
+            // Non-retriable error or max retries exceeded
+            logger_->log(LogLevel::ERROR, method + " " + url + " failed with status " +
+                        std::to_string(response.status_code) + ": " + response.body);
+            return response;
+
+        } catch (const std::exception& e) {
+            logger_->log(LogLevel::ERROR, "Request exception on attempt " + std::to_string(attempt + 1) +
+                        ": " + std::string(e.what()));
+
+            if (attempt < max_retries) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
+                retry_delay_ms *= 2;
+                continue;
+            }
+
+            return {false, 0, std::string("Exception: ") + e.what(), {}};
+        }
+    }
+
+    return {false, 0, "Max retries exceeded", {}};
 }
 
 std::string RESTAPISource::build_url(const std::string& path, const std::unordered_map<std::string, std::string>& params) {
@@ -306,10 +644,116 @@ void RESTAPISource::refresh_auth_token() {
     }
 }
 
-bool RESTAPISource::handle_rate_limit_exceeded(const HttpResponse& /*response*/) {
-    // Simplified - in production would implement backoff
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+bool RESTAPISource::handle_rate_limit_exceeded(const HttpResponse& response) {
+    // Extract retry-after header if available
+    int retry_after_seconds = 60; // Default
+
+    auto retry_header = response.headers.find("Retry-After");
+    if (retry_header != response.headers.end()) {
+        try {
+            retry_after_seconds = std::stoi(retry_header->second);
+        } catch (...) {
+            // If parsing fails, use default
+        }
+    }
+
+    logger_->log(LogLevel::WARN, "Rate limit exceeded, waiting " +
+                std::to_string(retry_after_seconds) + " seconds before retry");
+
+    std::this_thread::sleep_for(std::chrono::seconds(retry_after_seconds));
     return true;
+}
+
+// Helper methods for authentication and URL handling
+std::string RESTAPISource::base64_encode(const std::string& input) {
+    static const char encoding_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    int val = 0;
+    int val_b = -6;
+
+    for (unsigned char c : input) {
+        val = (val << 8) + c;
+        val_b += 8;
+        while (val_b >= 0) {
+            encoded.push_back(encoding_table[(val >> val_b) & 0x3F]);
+            val_b -= 6;
+        }
+    }
+
+    if (val_b > -6) {
+        encoded.push_back(encoding_table[((val << 8) >> (val_b + 8)) & 0x3F]);
+    }
+
+    while (encoded.size() % 4) {
+        encoded.push_back('=');
+    }
+
+    return encoded;
+}
+
+std::string RESTAPISource::url_encode(const std::string& value) {
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+
+    for (char c : value) {
+        // Keep alphanumeric and other safe characters intact
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+        } else {
+            // Encode other characters
+            escaped << '%' << std::setw(2) << int(static_cast<unsigned char>(c));
+        }
+    }
+
+    return escaped.str();
+}
+
+nlohmann::json RESTAPISource::extract_json_path(const nlohmann::json& json_data, const std::string& path) {
+    // Parse JSON path like "data.items[0].name"
+    if (path.empty() || json_data.is_null()) {
+        return nullptr;
+    }
+
+    nlohmann::json current = json_data;
+    std::string current_path = path;
+
+    // Split path by '.' and process each segment
+    size_t pos = 0;
+    while (pos < current_path.length()) {
+        size_t next_dot = current_path.find('.', pos);
+        std::string segment = (next_dot != std::string::npos) ?
+            current_path.substr(pos, next_dot - pos) :
+            current_path.substr(pos);
+
+        // Check for array index: items[0]
+        size_t bracket_pos = segment.find('[');
+        if (bracket_pos != std::string::npos) {
+            std::string key = segment.substr(0, bracket_pos);
+            size_t close_bracket = segment.find(']');
+            if (close_bracket != std::string::npos) {
+                int index = std::stoi(segment.substr(bracket_pos + 1, close_bracket - bracket_pos - 1));
+
+                if (current.contains(key) && current[key].is_array() &&
+                    index >= 0 && index < static_cast<int>(current[key].size())) {
+                    current = current[key][index];
+                } else {
+                    return nullptr;
+                }
+            }
+        } else {
+            // Simple key access
+            if (current.contains(segment)) {
+                current = current[segment];
+            } else {
+                return nullptr;
+            }
+        }
+
+        pos = (next_dot != std::string::npos) ? next_dot + 1 : current_path.length();
+    }
+
+    return current;
 }
 
 } // namespace regulens

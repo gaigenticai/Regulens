@@ -15,7 +15,8 @@
       "Bash(mv:*)",
       "Bash(tee:*)",
       "Bash(git checkout:*)",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(cloc:*)"
     ],
     "deny": [],
     "ask": []

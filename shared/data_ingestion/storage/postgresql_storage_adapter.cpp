@@ -15,16 +15,89 @@ PostgreSQLStorageAdapter::~PostgreSQLStorageAdapter() = default;
 bool PostgreSQLStorageAdapter::store_batch(const IngestionBatch& batch) {
     ++total_operations_executed_;
 
+    if (!db_pool_) {
+        logger_->log(LogLevel::ERROR, "Database connection pool not available");
+        ++failed_operations_;
+        return false;
+    }
+
     try {
-        // Simplified - in production would use actual database operations
+        auto conn = db_pool_->acquire_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to acquire database connection");
+            ++failed_operations_;
+            return false;
+        }
+
+        pqxx::work txn(*conn);
+
+        // Insert batch metadata
+        txn.exec_params(
+            "INSERT INTO ingestion_batches (batch_id, source_id, pipeline_id, batch_start_time, "
+            "batch_end_time, records_processed, records_succeeded, records_failed, status, metadata) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+            "ON CONFLICT (batch_id) DO UPDATE SET "
+            "records_processed = EXCLUDED.records_processed, "
+            "records_succeeded = EXCLUDED.records_succeeded, "
+            "records_failed = EXCLUDED.records_failed, "
+            "status = EXCLUDED.status, "
+            "metadata = EXCLUDED.metadata",
+            batch.batch_id,
+            batch.source_id,
+            batch.pipeline_id,
+            std::chrono::system_clock::to_time_t(batch.batch_start_time),
+            std::chrono::system_clock::to_time_t(batch.batch_end_time),
+            batch.records_processed,
+            batch.records_succeeded,
+            batch.records_failed,
+            batch.status,
+            batch.metadata.dump()
+        );
+
+        // Insert individual records if available
+        for (const auto& record : batch.data_records) {
+            txn.exec_params(
+                "INSERT INTO data_records (record_id, source_id, quality_score, data_content, "
+                "ingested_at, last_updated, pipeline_id, metadata, tags) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
+                "ON CONFLICT (record_id) DO UPDATE SET "
+                "quality_score = EXCLUDED.quality_score, "
+                "data_content = EXCLUDED.data_content, "
+                "last_updated = EXCLUDED.last_updated, "
+                "metadata = EXCLUDED.metadata, "
+                "tags = EXCLUDED.tags",
+                record.record_id,
+                record.source_id,
+                static_cast<int>(record.quality),
+                record.data.dump(),
+                std::chrono::system_clock::to_time_t(record.ingested_at),
+                std::chrono::system_clock::to_time_t(record.last_updated),
+                record.pipeline_id,
+                record.metadata.dump(),
+                pqxx::to_string(record.tags)
+            );
+        }
+
+        txn.commit();
+        db_pool_->release_connection(std::move(conn));
+
         ++successful_operations_;
 
         logger_->log(LogLevel::DEBUG,
                     "Stored batch " + batch.batch_id + " with " +
-                    std::to_string(batch.records_processed) + " records");
+                    std::to_string(batch.records_processed) + " records to PostgreSQL");
 
         return true;
-    } catch (const std::exception&) {
+
+    } catch (const pqxx::sql_error& e) {
+        logger_->log(LogLevel::ERROR,
+                    "PostgreSQL error storing batch " + batch.batch_id + ": " +
+                    std::string(e.what()) + " (query: " + std::string(e.query()) + ")");
+        ++failed_operations_;
+        return false;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception storing batch " + batch.batch_id + ": " + std::string(e.what()));
         ++failed_operations_;
         return false;
     }
@@ -35,35 +108,234 @@ std::vector<DataRecord> PostgreSQLStorageAdapter::retrieve_records(
     const std::chrono::system_clock::time_point& start_time,
     const std::chrono::system_clock::time_point& end_time
 ) {
-    // Simplified - return sample records
-    return {
-        DataRecord{
-            "sample_record_1",
-            source_id,
-            DataQuality::VALIDATED,
-            {{"sample", "data"}},
-            start_time,
-            std::chrono::system_clock::now(),
-            "sample_pipeline",
-            {{"metadata", "sample"}},
-            {"tag1", "tag2"}
+    std::vector<DataRecord> records;
+
+    if (!db_pool_) {
+        logger_->log(LogLevel::ERROR, "Database connection pool not available");
+        return records;
+    }
+
+    try {
+        auto conn = db_pool_->acquire_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to acquire database connection");
+            return records;
         }
-    };
+
+        pqxx::work txn(*conn);
+
+        auto result = txn.exec_params(
+            "SELECT record_id, source_id, quality_score, data_content, ingested_at, "
+            "last_updated, pipeline_id, metadata, tags "
+            "FROM data_records "
+            "WHERE source_id = $1 AND ingested_at BETWEEN $2 AND $3 "
+            "ORDER BY ingested_at DESC",
+            source_id,
+            std::chrono::system_clock::to_time_t(start_time),
+            std::chrono::system_clock::to_time_t(end_time)
+        );
+
+        for (const auto& row : result) {
+            DataRecord record;
+            record.record_id = row["record_id"].c_str();
+            record.source_id = row["source_id"].c_str();
+            record.quality = static_cast<DataQuality>(row["quality_score"].as<int>());
+
+            // Parse JSONB data
+            try {
+                record.data = nlohmann::json::parse(row["data_content"].c_str());
+            } catch (const nlohmann::json::exception& e) {
+                logger_->log(LogLevel::WARN,
+                            "Failed to parse data_content for record " + record.record_id +
+                            ": " + std::string(e.what()));
+                record.data = nlohmann::json::object();
+            }
+
+            record.ingested_at = std::chrono::system_clock::from_time_t(row["ingested_at"].as<time_t>());
+            record.last_updated = std::chrono::system_clock::from_time_t(row["last_updated"].as<time_t>());
+            record.pipeline_id = row["pipeline_id"].c_str();
+
+            // Parse metadata
+            try {
+                record.metadata = nlohmann::json::parse(row["metadata"].c_str());
+            } catch (const nlohmann::json::exception&) {
+                record.metadata = nlohmann::json::object();
+            }
+
+            // Parse tags (PostgreSQL array to vector)
+            std::string tags_str = row["tags"].c_str();
+            // Parse PostgreSQL array format: {tag1,tag2,tag3}
+            if (!tags_str.empty() && tags_str.front() == '{' && tags_str.back() == '}') {
+                std::string tags_content = tags_str.substr(1, tags_str.length() - 2);
+                size_t pos = 0;
+                while (pos < tags_content.length()) {
+                    size_t comma_pos = tags_content.find(',', pos);
+                    if (comma_pos == std::string::npos) {
+                        record.tags.push_back(tags_content.substr(pos));
+                        break;
+                    }
+                    record.tags.push_back(tags_content.substr(pos, comma_pos - pos));
+                    pos = comma_pos + 1;
+                }
+            }
+
+            records.push_back(record);
+        }
+
+        txn.commit();
+        db_pool_->release_connection(std::move(conn));
+
+        logger_->log(LogLevel::DEBUG,
+                    "Retrieved " + std::to_string(records.size()) + " records for source " + source_id);
+
+    } catch (const pqxx::sql_error& e) {
+        logger_->log(LogLevel::ERROR,
+                    "PostgreSQL error retrieving records: " + std::string(e.what()) +
+                    " (query: " + std::string(e.query()) + ")");
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception retrieving records: " + std::string(e.what()));
+    }
+
+    return records;
 }
 
 bool PostgreSQLStorageAdapter::update_record_quality(const std::string& record_id, DataQuality quality) {
-    // Simplified - in production would update database
-    logger_->log(LogLevel::DEBUG,
-                "Updated quality for record " + record_id + " to " + std::to_string(static_cast<int>(quality)));
-    return true;
+    if (!db_pool_) {
+        logger_->log(LogLevel::ERROR, "Database connection pool not available");
+        return false;
+    }
+
+    try {
+        auto conn = db_pool_->acquire_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to acquire database connection");
+            return false;
+        }
+
+        pqxx::work txn(*conn);
+
+        auto result = txn.exec_params(
+            "UPDATE data_records SET quality_score = $1, last_updated = $2 WHERE record_id = $3",
+            static_cast<int>(quality),
+            std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()),
+            record_id
+        );
+
+        txn.commit();
+        db_pool_->release_connection(std::move(conn));
+
+        if (result.affected_rows() > 0) {
+            logger_->log(LogLevel::DEBUG,
+                        "Updated quality for record " + record_id + " to " +
+                        std::to_string(static_cast<int>(quality)));
+            return true;
+        } else {
+            logger_->log(LogLevel::WARN,
+                        "No record found with ID " + record_id);
+            return false;
+        }
+
+    } catch (const pqxx::sql_error& e) {
+        logger_->log(LogLevel::ERROR,
+                    "PostgreSQL error updating record quality: " + std::string(e.what()) +
+                    " (query: " + std::string(e.query()) + ")");
+        return false;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception updating record quality: " + std::string(e.what()));
+        return false;
+    }
 }
 
-// Table management (simplified)
+// Table management - Create tables with proper DDL
 bool PostgreSQLStorageAdapter::create_table_if_not_exists(const std::string& table_name, const nlohmann::json& schema) {
-    // Simplified - in production would create actual table
-    table_schemas_[table_name] = schema;
-    logger_->log(LogLevel::INFO, "Created table schema for: " + table_name);
-    return true;
+    if (!db_pool_) {
+        logger_->log(LogLevel::ERROR, "Database connection pool not available");
+        return false;
+    }
+
+    try {
+        auto conn = db_pool_->acquire_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to acquire database connection");
+            return false;
+        }
+
+        pqxx::work txn(*conn);
+
+        // Build CREATE TABLE statement from schema
+        std::string create_sql = "CREATE TABLE IF NOT EXISTS " + table_name + " (";
+
+        if (schema.contains("columns") && schema["columns"].is_array()) {
+            bool first = true;
+            for (const auto& column : schema["columns"]) {
+                if (!first) create_sql += ", ";
+                first = false;
+
+                std::string col_name = column.value("name", "");
+                std::string col_type = column.value("type", "TEXT");
+                bool nullable = column.value("nullable", true);
+                bool primary_key = column.value("primary_key", false);
+                bool unique = column.value("unique", false);
+
+                create_sql += col_name + " " + col_type;
+
+                if (primary_key) create_sql += " PRIMARY KEY";
+                if (!nullable && !primary_key) create_sql += " NOT NULL";
+                if (unique && !primary_key) create_sql += " UNIQUE";
+
+                if (column.contains("default")) {
+                    create_sql += " DEFAULT " + column["default"].get<std::string>();
+                }
+            }
+        } else {
+            // Default schema if not provided
+            create_sql += "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                         "data JSONB NOT NULL, "
+                         "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                         "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP";
+        }
+
+        create_sql += ")";
+
+        txn.exec(create_sql);
+
+        // Create indexes if specified
+        if (schema.contains("indexes") && schema["indexes"].is_array()) {
+            for (const auto& index : schema["indexes"]) {
+                std::string index_name = index.value("name", table_name + "_idx");
+                std::string index_type = index.value("type", "btree");
+                std::string columns = index.value("columns", "");
+
+                if (!columns.empty()) {
+                    std::string index_sql = "CREATE INDEX IF NOT EXISTS " + index_name +
+                                           " ON " + table_name + " USING " + index_type +
+                                           " (" + columns + ")";
+                    txn.exec(index_sql);
+                }
+            }
+        }
+
+        txn.commit();
+        db_pool_->release_connection(std::move(conn));
+
+        // Cache schema for future reference
+        table_schemas_[table_name] = schema;
+
+        logger_->log(LogLevel::INFO, "Created/verified table: " + table_name);
+        return true;
+
+    } catch (const pqxx::sql_error& e) {
+        logger_->log(LogLevel::ERROR,
+                    "PostgreSQL error creating table " + table_name + ": " +
+                    std::string(e.what()) + " (query: " + std::string(e.query()) + ")");
+        return false;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception creating table " + table_name + ": " + std::string(e.what()));
+        return false;
+    }
 }
 
 bool PostgreSQLStorageAdapter::alter_table_schema(const std::string& table_name, const nlohmann::json& changes) {

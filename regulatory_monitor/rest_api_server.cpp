@@ -973,13 +973,29 @@ bool RESTAPIServer::validate_refresh_token(const std::string& token) {
 }
 
 std::string RESTAPIServer::generate_hmac_signature(const std::string& message) {
-    // Production HMAC-SHA256 signature generation
-    // Get JWT secret from environment or configuration
+    // Production HMAC-SHA256 signature generation - JWT secret MUST be configured
     const char* jwt_secret_env = std::getenv("JWT_SECRET_KEY");
-    std::string jwt_secret = jwt_secret_env ? jwt_secret_env : "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION";
-    
-    if (jwt_secret == "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION" && std::getenv("REGULENS_ENVIRONMENT") == std::string("production")) {
-        throw std::runtime_error("JWT_SECRET_KEY must be configured in production environment");
+
+    if (!jwt_secret_env || strlen(jwt_secret_env) == 0) {
+        logger_->error("CRITICAL SECURITY: JWT_SECRET_KEY environment variable is not set");
+        throw std::runtime_error("JWT_SECRET_KEY must be configured - refusing to start without it");
+    }
+
+    std::string jwt_secret(jwt_secret_env);
+
+    // Enforce minimum secret length for security
+    if (jwt_secret.length() < 32) {
+        logger_->error("CRITICAL SECURITY: JWT_SECRET_KEY is too short (minimum 32 characters)");
+        throw std::runtime_error("JWT_SECRET_KEY must be at least 32 characters long");
+    }
+
+    // Warn if secret appears to be a default/example value
+    if (jwt_secret.find("CHANGE") != std::string::npos ||
+        jwt_secret.find("EXAMPLE") != std::string::npos ||
+        jwt_secret.find("DEFAULT") != std::string::npos ||
+        jwt_secret == "your-secret-key-here") {
+        logger_->error("CRITICAL SECURITY: JWT_SECRET_KEY appears to be a default/example value");
+        throw std::runtime_error("JWT_SECRET_KEY must be changed from default value");
     }
     
     // Create HMAC-SHA256 using OpenSSL
@@ -1136,9 +1152,119 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
 }
 
 std::string RESTAPIServer::compute_password_hash(const std::string& password) {
-    // Use bcrypt-compatible hashing
-    // For now, use SHA256 (in real production, use bcrypt library)
-    return compute_sha256_hash(password);
+    // Production password hashing using PBKDF2-HMAC-SHA256
+    // This is cryptographically secure for password storage
+
+    // Generate a random salt (16 bytes)
+    unsigned char salt[16];
+    #ifdef __APPLE__
+    arc4random_buf(salt, sizeof(salt));
+    #else
+    // Linux: use /dev/urandom
+    std::ifstream urandom("/dev/urandom", std::ios::in | std::ios::binary);
+    if (urandom) {
+        urandom.read(reinterpret_cast<char*>(salt), sizeof(salt));
+        urandom.close();
+    } else {
+        throw std::runtime_error("Failed to generate random salt");
+    }
+    #endif
+
+    // Derive key using PBKDF2 with 100,000 iterations (OWASP recommendation)
+    constexpr int iterations = 100000;
+    constexpr int key_length = 32; // 256 bits
+    unsigned char derived_key[key_length];
+
+    #ifdef __APPLE__
+    // macOS: Use CommonCrypto
+    CCKeyDerivationPBKDF(kCCPBKDF2,
+                        password.c_str(), password.length(),
+                        salt, sizeof(salt),
+                        kCCPRFHmacAlgSHA256,
+                        iterations,
+                        derived_key, key_length);
+    #else
+    // Linux: Use OpenSSL PKCS5_PBKDF2_HMAC
+    PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
+                     salt, sizeof(salt),
+                     iterations,
+                     EVP_sha256(),
+                     key_length, derived_key);
+    #endif
+
+    // Encode salt + derived_key as Base64 for storage
+    // Format: "pbkdf2_sha256$iterations$salt$hash"
+    std::string salt_b64 = base64_encode(std::string(reinterpret_cast<char*>(salt), sizeof(salt)));
+    std::string hash_b64 = base64_encode(std::string(reinterpret_cast<char*>(derived_key), key_length));
+
+    return "pbkdf2_sha256$" + std::to_string(iterations) + "$" + salt_b64 + "$" + hash_b64;
+}
+
+bool RESTAPIServer::verify_password_hash(const std::string& password, const std::string& stored_hash) {
+    // Parse stored hash format: "pbkdf2_sha256$iterations$salt$hash"
+    std::vector<std::string> parts;
+    std::stringstream ss(stored_hash);
+    std::string part;
+
+    while (std::getline(ss, part, '$')) {
+        parts.push_back(part);
+    }
+
+    if (parts.size() != 4 || parts[0] != "pbkdf2_sha256") {
+        logger_->error("Invalid password hash format");
+        return false;
+    }
+
+    try {
+        int iterations = std::stoi(parts[1]);
+        std::string salt_b64 = parts[2];
+        std::string expected_hash_b64 = parts[3];
+
+        // Decode salt
+        std::string salt = base64_decode(salt_b64);
+
+        // Derive key with same parameters
+        constexpr int key_length = 32;
+        unsigned char derived_key[key_length];
+
+        #ifdef __APPLE__
+        CCKeyDerivationPBKDF(kCCPBKDF2,
+                            password.c_str(), password.length(),
+                            reinterpret_cast<const uint8_t*>(salt.c_str()), salt.length(),
+                            kCCPRFHmacAlgSHA256,
+                            iterations,
+                            derived_key, key_length);
+        #else
+        PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
+                         reinterpret_cast<const unsigned char*>(salt.c_str()), salt.length(),
+                         iterations,
+                         EVP_sha256(),
+                         key_length, derived_key);
+        #endif
+
+        std::string computed_hash_b64 = base64_encode(std::string(reinterpret_cast<char*>(derived_key), key_length));
+
+        // Constant-time comparison to prevent timing attacks
+        return constant_time_compare(computed_hash_b64, expected_hash_b64);
+
+    } catch (const std::exception& e) {
+        logger_->error("Password verification error: {}", e.what());
+        return false;
+    }
+}
+
+bool RESTAPIServer::constant_time_compare(const std::string& a, const std::string& b) {
+    // Constant-time string comparison to prevent timing attacks
+    if (a.length() != b.length()) {
+        return false;
+    }
+
+    unsigned char result = 0;
+    for (size_t i = 0; i < a.length(); ++i) {
+        result |= a[i] ^ b[i];
+    }
+
+    return result == 0;
 }
 
 } // namespace regulens

@@ -16,27 +16,27 @@ add_library(regulens_shared STATIC
     pattern_recognition.cpp
     feedback_incorporation.cpp
     error_handler.cpp
-    # llm/openai_client.cpp  # Temporarily disabled due to compilation issues
+    llm/openai_client.cpp
     llm/anthropic_client.cpp
     llm/function_calling.cpp
-    # llm/compliance_functions.cpp  # Temporarily disabled due to compilation issues
-    # llm/embeddings_client.cpp  # Temporarily disabled due to compilation issues
-    # llm/streaming_handler.cpp  # Temporarily disabled due to compilation issues
+    llm/compliance_functions.cpp
+    llm/embeddings_client.cpp
+    llm/streaming_handler.cpp
     risk_assessment.cpp
     decision_tree_optimizer.cpp
     ../core/agent/agent_communication.cpp
     ../core/agent/message_translator.cpp
     ../core/agent/consensus_engine.cpp
-    # tool_integration/tools/mcp_tool.cpp  # Core MCP integration complete - implementation details need fixes
-    # tool_integration/tools/email_tool.cpp  # Temporarily disabled - API compatibility issues
-    # tool_integration/tools/web_search_tool.cpp  # Temporarily disabled - API compatibility issues
-    # data_ingestion/data_ingestion_framework.cpp  # Temporarily disabled - needs implementation fixes
-    # data_ingestion/sources/rest_api_source.cpp
-    # data_ingestion/sources/web_scraping_source.cpp
-    # data_ingestion/sources/database_source.cpp
-    # data_ingestion/pipelines/standard_ingestion_pipeline.cpp
-    # data_ingestion/storage/postgresql_storage_adapter.cpp
-    # data_ingestion/ingestion_metrics.cpp
+    tool_integration/tools/mcp_tool.cpp
+    tool_integration/tools/email_tool.cpp
+    tool_integration/tools/web_search_tool.cpp
+    data_ingestion/data_ingestion_framework.cpp
+    data_ingestion/sources/rest_api_source.cpp
+    data_ingestion/sources/web_scraping_source.cpp
+    data_ingestion/sources/database_source.cpp
+    data_ingestion/pipelines/standard_ingestion_pipeline.cpp
+    data_ingestion/storage/postgresql_storage_adapter.cpp
+    data_ingestion/ingestion_metrics.cpp
 )
 
 # Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)

@@ -211,7 +211,6 @@ add_executable(regulens
 target_link_libraries(regulens
     PRIVATE
         regulens_shared
-        regulens_web_ui
         Threads::Threads
         CURL::libcurl
         ${Boost_LIBRARIES}

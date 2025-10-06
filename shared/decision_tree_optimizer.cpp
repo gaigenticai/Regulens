@@ -617,20 +617,118 @@ std::unordered_map<std::string, double> DecisionTreeOptimizer::topsis_method(
 std::unordered_map<std::string, double> DecisionTreeOptimizer::electre_method(
     const std::vector<DecisionAlternative>& alternatives) {
 
-    // Simplified ELECTRE implementation
-    // In production, this would include concordance/discordance matrices
-
+    // Production ELECTRE III implementation with concordance and discordance matrices
     std::unordered_map<std::string, double> scores;
 
-    for (const auto& alt : alternatives) {
-        // Simple scoring based on threshold comparisons
-        double score = 0.0;
-        for (const auto& [criterion, criterion_score] : alt.criteria_scores) {
-            if (criterion_score >= config_.mcda_params.electre_threshold) {
-                score += alt.criteria_weights.at(criterion);
+    if (alternatives.size() < 2) {
+        for (const auto& alt : alternatives) {
+            scores[alt.id] = 1.0;
+        }
+        return scores;
+    }
+
+    size_t n = alternatives.size();
+
+    // Build concordance matrix C[i][j] - how much i outranks j
+    std::vector<std::vector<double>> concordance(n, std::vector<double>(n, 0.0));
+
+    // Build discordance matrix D[i][j] - how much i does NOT outrank j
+    std::vector<std::vector<double>> discordance(n, std::vector<double>(n, 0.0));
+
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            if (i == j) continue;
+
+            const auto& alt_i = alternatives[i];
+            const auto& alt_j = alternatives[j];
+
+            double concordance_sum = 0.0;
+            double total_weight = 0.0;
+            double max_discordance = 0.0;
+
+            // For each criterion, calculate concordance and discordance
+            for (const auto& [criterion, score_i] : alt_i.criteria_scores) {
+                auto it_j = alt_j.criteria_scores.find(criterion);
+                if (it_j == alt_j.criteria_scores.end()) continue;
+
+                double score_j = it_j->second;
+                double weight = alt_i.criteria_weights.at(criterion);
+                total_weight += weight;
+
+                // Concordance: i outranks j on this criterion
+                if (score_i >= score_j - config_.mcda_params.electre_indifference_threshold) {
+                    concordance_sum += weight;
+                } else if (score_i >= score_j - config_.mcda_params.electre_preference_threshold) {
+                    // Partial concordance (linear interpolation)
+                    double diff = score_j - score_i;
+                    double range = config_.mcda_params.electre_preference_threshold -
+                                  config_.mcda_params.electre_indifference_threshold;
+                    concordance_sum += weight * (1.0 - (diff - config_.mcda_params.electre_indifference_threshold) / range);
+                }
+
+                // Discordance: how much j is preferred over i
+                if (score_j > score_i + config_.mcda_params.electre_preference_threshold) {
+                    double diff = score_j - score_i;
+                    double veto = config_.mcda_params.electre_veto_threshold;
+                    double pref = config_.mcda_params.electre_preference_threshold;
+
+                    double disc_value = 0.0;
+                    if (diff >= veto) {
+                        disc_value = 1.0;  // Complete veto
+                    } else if (diff > pref) {
+                        // Partial discordance
+                        disc_value = (diff - pref) / (veto - pref);
+                    }
+
+                    max_discordance = std::max(max_discordance, disc_value);
+                }
+            }
+
+            concordance[i][j] = (total_weight > 0) ? (concordance_sum / total_weight) : 0.0;
+            discordance[i][j] = max_discordance;
+        }
+    }
+
+    // Calculate outranking degrees using credibility index
+    std::vector<std::vector<double>> credibility(n, std::vector<double>(n, 0.0));
+
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            if (i == j) continue;
+
+            // Credibility = Concordance attenuated by discordance
+            double c = concordance[i][j];
+            double d = discordance[i][j];
+
+            if (d < c) {
+                credibility[i][j] = c;
+            } else {
+                credibility[i][j] = c * ((1.0 - d) / (1.0 - c));
             }
         }
-        scores[alt.id] = score;
+    }
+
+    // Calculate qualification scores (how many alternatives each one outranks)
+    for (size_t i = 0; i < n; ++i) {
+        double outranking_score = 0.0;
+        double being_outranked_score = 0.0;
+
+        for (size_t j = 0; j < n; ++j) {
+            if (i != j) {
+                // How much i outranks j
+                if (credibility[i][j] >= config_.mcda_params.electre_threshold) {
+                    outranking_score += credibility[i][j];
+                }
+
+                // How much j outranks i
+                if (credibility[j][i] >= config_.mcda_params.electre_threshold) {
+                    being_outranked_score += credibility[j][i];
+                }
+            }
+        }
+
+        // Net outranking score
+        scores[alternatives[i].id] = outranking_score - being_outranked_score;
     }
 
     return scores;
@@ -639,34 +737,121 @@ std::unordered_map<std::string, double> DecisionTreeOptimizer::electre_method(
 std::unordered_map<std::string, double> DecisionTreeOptimizer::promethee_method(
     const std::vector<DecisionAlternative>& alternatives) {
 
-    // Simplified PROMETHEE implementation
+    // Production PROMETHEE II implementation with preference functions
     std::unordered_map<std::string, double> scores;
 
-    for (const auto& alt : alternatives) {
-        double positive_flow = 0.0;
-        double negative_flow = 0.0;
+    if (alternatives.empty()) return scores;
 
-        // Compare with each other alternative
-        for (const auto& other : alternatives) {
-            if (alt.id == other.id) continue;
+    size_t n = alternatives.size();
 
-            double preference = 0.0;
-            for (const auto& [criterion, score] : alt.criteria_scores) {
-                auto other_it = other.criteria_scores.find(criterion);
-                if (other_it != other.criteria_scores.end()) {
-                    double diff = score - other_it->second;
-                    if (diff > config_.mcda_params.promethee_preference_threshold) {
-                        preference += alt.criteria_weights.at(criterion);
-                    }
-                }
-            }
+    // Calculate preference degrees using different preference functions
+    auto calculate_preference = [this](double diff, const std::string& function_type) -> double {
+        if (diff <= 0) return 0.0;
 
-            if (preference > 0) positive_flow += preference;
-            else negative_flow += std::abs(preference);
+        // Type I: Usual criterion (step function)
+        if (function_type == "usual") {
+            return 1.0;
         }
 
-        // Net flow as score
-        scores[alt.id] = positive_flow - negative_flow;
+        // Type II: U-shape (quasi-criterion)
+        if (function_type == "u-shape") {
+            double q = config_.mcda_params.promethee_indifference_threshold;
+            return (diff > q) ? 1.0 : 0.0;
+        }
+
+        // Type III: V-shape (linear preference)
+        if (function_type == "v-shape") {
+            double p = config_.mcda_params.promethee_preference_threshold;
+            if (diff >= p) return 1.0;
+            return diff / p;
+        }
+
+        // Type IV: Level criterion
+        if (function_type == "level") {
+            double q = config_.mcda_params.promethee_indifference_threshold;
+            double p = config_.mcda_params.promethee_preference_threshold;
+            if (diff <= q) return 0.0;
+            if (diff >= p) return 1.0;
+            return 0.5;
+        }
+
+        // Type V: V-shape with indifference (most common)
+        if (function_type == "v-shape-ind") {
+            double q = config_.mcda_params.promethee_indifference_threshold;
+            double p = config_.mcda_params.promethee_preference_threshold;
+            if (diff <= q) return 0.0;
+            if (diff >= p) return 1.0;
+            return (diff - q) / (p - q);
+        }
+
+        // Type VI: Gaussian
+        if (function_type == "gaussian") {
+            double sigma = config_.mcda_params.promethee_preference_threshold / 2.0;
+            return 1.0 - std::exp(-(diff * diff) / (2.0 * sigma * sigma));
+        }
+
+        // Default: V-shape with indifference
+        double q = config_.mcda_params.promethee_indifference_threshold;
+        double p = config_.mcda_params.promethee_preference_threshold;
+        if (diff <= q) return 0.0;
+        if (diff >= p) return 1.0;
+        return (diff - q) / (p - q);
+    };
+
+    // Calculate multicriteria preference indices
+    std::vector<std::vector<double>> preference_indices(n, std::vector<double>(n, 0.0));
+
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            if (i == j) continue;
+
+            const auto& alt_i = alternatives[i];
+            const auto& alt_j = alternatives[j];
+
+            double weighted_preference_sum = 0.0;
+            double total_weight = 0.0;
+
+            for (const auto& [criterion, score_i] : alt_i.criteria_scores) {
+                auto it_j = alt_j.criteria_scores.find(criterion);
+                if (it_j == alt_j.criteria_scores.end()) continue;
+
+                double score_j = it_j->second;
+                double diff = score_i - score_j;
+                double weight = alt_i.criteria_weights.at(criterion);
+
+                // Use V-shape with indifference as default preference function
+                double pref = calculate_preference(diff, "v-shape-ind");
+
+                weighted_preference_sum += weight * pref;
+                total_weight += weight;
+            }
+
+            preference_indices[i][j] = (total_weight > 0) ? (weighted_preference_sum / total_weight) : 0.0;
+        }
+    }
+
+    // Calculate positive and negative flows
+    std::vector<double> positive_flows(n, 0.0);
+    std::vector<double> negative_flows(n, 0.0);
+
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            if (i != j) {
+                positive_flows[i] += preference_indices[i][j];
+                negative_flows[i] += preference_indices[j][i];
+            }
+        }
+
+        // Normalize by n-1
+        if (n > 1) {
+            positive_flows[i] /= (n - 1);
+            negative_flows[i] /= (n - 1);
+        }
+    }
+
+    // Calculate net flows (PROMETHEE II)
+    for (size_t i = 0; i < n; ++i) {
+        scores[alternatives[i].id] = positive_flows[i] - negative_flows[i];
     }
 
     return scores;
@@ -675,9 +860,128 @@ std::unordered_map<std::string, double> DecisionTreeOptimizer::promethee_method(
 std::unordered_map<std::string, double> DecisionTreeOptimizer::ahp_method(
     const std::vector<DecisionAlternative>& alternatives) {
 
-    // Simplified AHP implementation - would need full pairwise comparisons in production
-    // For now, use weighted sum as approximation
-    return weighted_sum_model(alternatives);
+    // Production AHP (Analytic Hierarchy Process) implementation
+    std::unordered_map<std::string, double> scores;
+
+    if (alternatives.empty()) return scores;
+
+    size_t n = alternatives.size();
+
+    // Build pairwise comparison matrix from criteria scores
+    // A[i][j] = how much alternative i is preferred over alternative j
+    std::vector<std::vector<double>> pairwise_matrix(n, std::vector<double>(n, 1.0));
+
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            if (i == j) {
+                pairwise_matrix[i][j] = 1.0;
+                continue;
+            }
+
+            const auto& alt_i = alternatives[i];
+            const auto& alt_j = alternatives[j];
+
+            double ratio_sum = 0.0;
+            int count = 0;
+
+            // Compare alternatives based on all criteria
+            for (const auto& [criterion, score_i] : alt_i.criteria_scores) {
+                auto it_j = alt_j.criteria_scores.find(criterion);
+                if (it_j == alt_j.criteria_scores.end()) continue;
+
+                double score_j = it_j->second;
+
+                // Avoid division by zero
+                if (score_j > 0.001) {
+                    double ratio = score_i / score_j;
+                    double weight = alt_i.criteria_weights.at(criterion);
+
+                    ratio_sum += ratio * weight;
+                    count++;
+                }
+            }
+
+            pairwise_matrix[i][j] = (count > 0) ? ratio_sum / count : 1.0;
+
+            // Ensure reciprocal property: A[j][i] = 1/A[i][j]
+            pairwise_matrix[j][i] = 1.0 / pairwise_matrix[i][j];
+        }
+    }
+
+    // Calculate priority vector using eigenvector method (power iteration)
+    std::vector<double> priority_vector(n, 1.0 / n);  // Initial guess
+    const int max_iterations = 100;
+    const double tolerance = 1e-6;
+
+    for (int iter = 0; iter < max_iterations; ++iter) {
+        std::vector<double> new_priority(n, 0.0);
+
+        // Matrix-vector multiplication
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                new_priority[i] += pairwise_matrix[i][j] * priority_vector[j];
+            }
+        }
+
+        // Normalize
+        double sum = 0.0;
+        for (double val : new_priority) {
+            sum += val;
+        }
+
+        for (size_t i = 0; i < n; ++i) {
+            new_priority[i] /= sum;
+        }
+
+        // Check convergence
+        double max_diff = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            max_diff = std::max(max_diff, std::abs(new_priority[i] - priority_vector[i]));
+        }
+
+        priority_vector = new_priority;
+
+        if (max_diff < tolerance) {
+            break;
+        }
+    }
+
+    // Calculate consistency ratio to verify the quality of judgments
+    // Calculate lambda_max (principal eigenvalue)
+    double lambda_max = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double sum = 0.0;
+        for (size_t j = 0; j < n; ++j) {
+            sum += pairwise_matrix[i][j] * priority_vector[j];
+        }
+        lambda_max += sum / priority_vector[i];
+    }
+    lambda_max /= n;
+
+    // Consistency Index
+    double CI = (lambda_max - n) / (n - 1);
+
+    // Random Index (for n alternatives)
+    const double RI_values[] = {0, 0, 0.58, 0.90, 1.12, 1.24, 1.32, 1.41, 1.45, 1.49};
+    double RI = (n < 10) ? RI_values[n] : 1.49;
+
+    // Consistency Ratio
+    double CR = (RI > 0) ? CI / RI : 0.0;
+
+    // Log warning if consistency ratio is high
+    if (CR > 0.1) {
+        // Judgments are inconsistent (CR should be < 0.1)
+        // In production, this might trigger a re-evaluation request
+        logger_->warn("AHP consistency ratio is high (" + std::to_string(CR) +
+                     "), results may be unreliable");
+    }
+
+    // Assign scores based on priority vector
+    for (size_t i = 0; i < n; ++i) {
+        scores[alternatives[i].id] = priority_vector[i];
+    }
+
+    return scores;
 }
 
 std::unordered_map<std::string, double> DecisionTreeOptimizer::vikor_method(

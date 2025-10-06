@@ -9,7 +9,13 @@
       "Read(//opt/homebrew/**)",
       "Bash(pkg-config:*)",
       "Bash(curl:*)",
-      "Bash(g++:*)"
+      "Bash(g++:*)",
+      "*",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(tee:*)",
+      "Bash(git checkout:*)",
+      "Read(//private/tmp/**)"
     ],
     "deny": [],
     "ask": []

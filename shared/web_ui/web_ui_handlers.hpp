@@ -34,14 +34,23 @@
 #include "health_handlers.hpp"
 #include "../llm/openai_client.hpp"
 #include "../llm/anthropic_client.hpp"
+#include "../llm/embeddings_client.hpp"
+#include "../memory/conversation_memory.hpp"
+#include "../memory/learning_engine.hpp"
+#include "../memory/case_based_reasoning.hpp"
+#include "../memory/memory_manager.hpp"
 #include "../risk_assessment.hpp"
 #include "../decision_tree_optimizer.hpp"
 #include "../../core/agent/agent_communication.hpp"
 #include "../../core/agent/message_translator.hpp"
 #include "../../core/agent/consensus_engine.hpp"
 #include "../../agents/real_agent.hpp"
+#include "../knowledge_base.hpp"
 
 namespace regulens {
+
+// Forward declarations
+class AgentOrchestrator;
 
 /**
  * @brief Web UI handlers for feature testing
@@ -86,6 +95,8 @@ public:
     HTTPResponse handle_activity_stream(const HTTPRequest& request);
     HTTPResponse handle_activity_query(const HTTPRequest& request);
     HTTPResponse handle_activity_stats(const HTTPRequest& request);
+    HTTPResponse handle_activity_recent(const HTTPRequest& request);
+    HTTPResponse handle_decisions_recent(const HTTPRequest& request);
 
     // Human-AI collaboration handlers
     HTTPResponse handle_collaboration_sessions(const HTTPRequest& request);
@@ -270,9 +281,11 @@ private:
     // Memory System components
     std::shared_ptr<ConversationMemory> conversation_memory_;
     std::shared_ptr<LearningEngine> learning_engine_;
-    std::shared_ptr<CaseBasedReasoning> case_based_reasoning_;
+    std::shared_ptr<CaseBasedReasoner> case_based_reasoning_;
     std::shared_ptr<MemoryManager> memory_manager_;
-    std::shared_ptr<SemanticSearchEngine> semantic_search_engine_;
+
+    // Knowledge base
+    std::shared_ptr<KnowledgeBase> knowledge_base_;
 
     // Database connection for testing
     std::shared_ptr<PostgreSQLConnection> db_connection_;
@@ -350,6 +363,7 @@ private:
 
     // Utility methods
     HTTPResponse create_json_response(const std::string& json_data);
+    HTTPResponse create_json_response(int status_code, const nlohmann::json& json_data);
     HTTPResponse create_html_response(const std::string& html_content);
     HTTPResponse create_error_response(int code, const std::string& message);
     bool validate_request(const HTTPRequest& request);

@@ -35,6 +35,9 @@
 
 namespace regulens {
 
+// Forward declarations
+class PrometheusMetricsCollector;
+
 // Forward declarations for Redis types (would be from hiredis or similar)
 struct RedisConnection;
 struct RedisReply;
@@ -532,7 +535,7 @@ public:
      * @brief Perform health check
      * @return JSON with health status
      */
-    nlohmann::json perform_health_check();
+    nlohmann::json perform_health_check() const;
 
 private:
     std::shared_ptr<ConfigurationManager> config_;
@@ -545,12 +548,12 @@ private:
     std::atomic<bool> initialized_;
 
     // Metrics tracking
-    std::atomic<size_t> total_commands_;
-    std::atomic<size_t> successful_commands_;
-    std::atomic<size_t> failed_commands_;
-    std::atomic<size_t> cache_hits_;
-    std::atomic<size_t> cache_misses_;
-    std::atomic<long> total_command_time_ms_;
+    mutable std::atomic<size_t> total_commands_;
+    mutable std::atomic<size_t> successful_commands_;
+    mutable std::atomic<size_t> failed_commands_;
+    mutable std::atomic<size_t> cache_hits_;
+    mutable std::atomic<size_t> cache_misses_;
+    mutable std::atomic<long> total_command_time_ms_;
 
     /**
      * @brief Load Redis configuration from config manager
@@ -581,14 +584,14 @@ private:
      * @param operation Function that takes connection and returns RedisResult
      * @return RedisResult from operation
      */
-    RedisResult execute_with_connection(std::function<RedisResult(std::shared_ptr<RedisConnectionWrapper>)> operation);
+    RedisResult execute_with_connection(std::function<RedisResult(std::shared_ptr<RedisConnectionWrapper>)> operation) const;
 
     /**
      * @brief Update command metrics
      * @param success Whether command succeeded
      * @param execution_time_ms Time taken to execute
      */
-    void update_command_metrics(bool success, long execution_time_ms);
+    void update_command_metrics(bool success, long execution_time_ms) const;
 };
 
 /**

@@ -1,4 +1,16 @@
+
 #pragma once
+#include <nlohmann/json.hpp>
+// Forward declaration for ClaudeMessage
+namespace regulens {
+    struct ClaudeMessage;
+    struct ClaudeResponse;
+}
+// JSON serialization for ClaudeResponse (after struct definitions)
+namespace regulens {
+inline void to_json(nlohmann::json& j, const ClaudeResponse& r);
+inline void from_json(const nlohmann::json& j, ClaudeResponse& r);
+}
 
 #include <string>
 #include <vector>
@@ -20,6 +32,28 @@ namespace regulens {
  * @brief Anthropic Claude message structures
  */
 struct ClaudeMessage {
+
+    // JSON serialization for ClaudeMessage
+    friend void to_json(nlohmann::json& j, const ClaudeMessage& m) {
+        j = m.to_json();
+    }
+    friend void from_json(const nlohmann::json& j, ClaudeMessage& m) {
+        m.role = j.value("role", "");
+        m.content = j.value("content", "");
+        if (j.contains("content_blocks") && j["content_blocks"].is_array()) {
+            std::vector<std::unordered_map<std::string, std::string>> blocks;
+            for (const auto& block : j["content_blocks"]) {
+                std::unordered_map<std::string, std::string> map_block;
+                for (auto it = block.begin(); it != block.end(); ++it) {
+                    map_block[it.key()] = it.value();
+                }
+                blocks.push_back(map_block);
+            }
+            m.content_blocks = blocks;
+        } else {
+            m.content_blocks = std::nullopt;
+        }
+    }
     std::string role;    // "user", "assistant"
     std::string content;
     std::optional<std::vector<std::unordered_map<std::string, std::string>>> content_blocks; // For complex content
@@ -55,6 +89,32 @@ struct ClaudeUsage {
 };
 
 struct ClaudeResponse {
+
+// JSON serialization for ClaudeResponse
+inline void to_json(nlohmann::json& j, const ClaudeResponse& r) {
+    j = r.to_json();
+}
+
+inline void from_json(const nlohmann::json& j, ClaudeResponse& r) {
+    r.id = j.value("id", "");
+    r.type = j.value("type", "");
+    r.role = j.value("role", "");
+    r.model = j.value("model", "");
+    r.stop_reason = j.value("stop_reason", "");
+    if (j.contains("stop_sequence")) r.stop_sequence = j["stop_sequence"].get<std::string>();
+    if (j.contains("usage")) {
+        r.usage.input_tokens = j["usage"].value("input_tokens", 0);
+        r.usage.output_tokens = j["usage"].value("output_tokens", 0);
+    }
+    // content
+    r.content.clear();
+    if (j.contains("content") && j["content"].is_array()) {
+        for (const auto& item : j["content"]) {
+            r.content.push_back(item.get<ClaudeMessage>());
+        }
+    }
+    // created_at is not deserialized here
+}
     std::string id;
     std::string type;  // "message"
     std::string role;  // "assistant"

@@ -148,6 +148,19 @@ private:
     std::vector<std::string> find_frequent_sequences(
         const std::vector<std::string>& events, size_t min_occurrences);
 
+    void extend_sequence(std::vector<std::string> current_sequences,
+                        const std::vector<std::string>& events,
+                        const std::vector<size_t>& positions,
+                        size_t min_occurrences,
+                        std::vector<std::string>& frequent_sequences);
+
+    bool matches_sequence(const std::vector<std::string>& events,
+                         size_t start_pos,
+                         const std::vector<std::string>& sequence);
+
+    size_t count_sequence_occurrences(const std::vector<std::string>& events,
+                                     const std::vector<std::string>& sequence);
+
     // Utility functions
     std::string generate_pattern_id(PatternType type, const std::string& entity_id);
     bool is_pattern_significant(const std::shared_ptr<Pattern>& pattern) const;

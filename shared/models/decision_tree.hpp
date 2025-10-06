@@ -10,24 +10,15 @@
 
 namespace regulens {
 
-/**
- * @brief Decision tree node types
- */
-enum class DecisionNodeType {
-    ROOT,           // Root of decision tree
-    CONDITION,      // Conditional evaluation node
-    ACTION,         // Action/recommendation node
-    FACTOR,         // Contributing factor node
-    EVIDENCE,       // Evidence supporting decision
-    OUTCOME         // Final decision outcome
-};
+
+#include "decision_tree_types.hpp"
 
 /**
  * @brief Decision tree node
  */
 struct DecisionTreeNode {
     std::string node_id;
-    DecisionNodeType node_type;
+    regulens::DecisionNodeType node_type;
     std::string label;
     std::string description;
     double weight = 1.0;  // Importance/relevance weight
@@ -41,11 +32,11 @@ struct DecisionTreeNode {
     std::unordered_map<std::string, std::string> metadata;
     std::chrono::system_clock::time_point timestamp;
 
-    DecisionTreeNode(std::string id, DecisionNodeType type, std::string lbl,
-                    std::string desc = "", double w = 1.0)
-        : node_id(std::move(id)), node_type(type), label(std::move(lbl)),
-          description(std::move(desc)), weight(w),
-          timestamp(std::chrono::system_clock::now()) {}
+    DecisionTreeNode(std::string id, regulens::DecisionNodeType type, std::string lbl,
+                                        std::string desc = "", double w = 1.0)
+                : node_id(std::move(id)), node_type(type), label(std::move(lbl)),
+                    description(std::move(desc)), weight(w),
+                    timestamp(std::chrono::system_clock::now()) {}
 
     nlohmann::json to_json() const {
         nlohmann::json metadata_json;

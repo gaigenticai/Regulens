@@ -116,7 +116,7 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
                     response.id = "cached-" + prompt_hash.substr(0, 8);
                     response.type = "message";
                     response.role = "assistant";
-                    response.content.push_back({{"type", "text"}, {"text", response_text}});
+                    response.content.push_back(ClaudeMessage{"assistant", response_text, std::nullopt});
                     response.model = request.model;
                     response.stop_reason = "end_turn";
 
@@ -146,37 +146,29 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
     if (use_advanced_circuit_breaker_) {
         // Use advanced circuit breaker with detailed error handling
         auto breaker_result = error_handler_->execute_with_advanced_circuit_breaker(
-            [this, &request]() -> regulens::CircuitBreakerResult {
+            [this, &request]() -> nlohmann::json {
                 // Make the API request
                 auto http_response = make_api_request(request.to_json());
                 if (!http_response) {
-                    return regulens::CircuitBreakerResult(false, std::nullopt,
-                        "HTTP request failed", std::chrono::milliseconds(0),
-                        regulens::CircuitState::CLOSED);
+                    throw std::runtime_error("HTTP request failed");
                 }
 
                 // Parse the response
                 auto parsed_response = parse_api_response(*http_response);
                 if (!parsed_response) {
-                    return regulens::CircuitBreakerResult(false, std::nullopt,
-                        "API response parsing failed", std::chrono::milliseconds(0),
-                        regulens::CircuitState::CLOSED);
+                    throw std::runtime_error("API response parsing failed");
                 }
 
                 // Validate response
                 if (!validate_response(*parsed_response)) {
                     handle_api_error("validation", "Invalid API response structure");
-                    return regulens::CircuitBreakerResult(false, std::nullopt,
-                        "API response validation failed", std::chrono::milliseconds(0),
-                        regulens::CircuitState::CLOSED);
+                    throw std::runtime_error("API response validation failed");
                 }
 
                 // Update usage statistics
                 update_usage_stats(*parsed_response);
 
-                return regulens::CircuitBreakerResult(true, parsed_response,
-                    "Success", std::chrono::milliseconds(0),
-                    regulens::CircuitState::CLOSED);
+                return nlohmann::json(*parsed_response);
             },
             CIRCUIT_BREAKER_SERVICE, "AnthropicClient", "create_message"
         );
@@ -184,7 +176,9 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
         if (breaker_result.success && breaker_result.data) {
             // Extract the ClaudeResponse from the circuit breaker result
             try {
-                result = breaker_result.data->get<ClaudeResponse>();
+                if (breaker_result.data && breaker_result.data->is_object()) {
+                    result = breaker_result.data->get<ClaudeResponse>();
+                }
             } catch (const std::exception& e) {
                 logger_->error("Failed to extract Claude response from circuit breaker result: " + std::string(e.what()));
                 result = std::nullopt;
@@ -192,36 +186,41 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
         }
     } else {
         // Use basic circuit breaker for backward compatibility
-        result = error_handler_->execute_with_circuit_breaker<std::optional<ClaudeResponse>>(
-            [this, &request]() -> std::optional<ClaudeResponse> {
+        auto cb_result = error_handler_->execute_with_circuit_breaker<ClaudeResponse>(
+            [this, &request]() -> ClaudeResponse {
                 // Make the API request
                 auto http_response = make_api_request(request.to_json());
                 if (!http_response) {
-                    return std::nullopt;
+                    throw std::runtime_error("API request failed");
                 }
 
                 // Parse the response
                 auto parsed_response = parse_api_response(*http_response);
                 if (!parsed_response) {
-                    return std::nullopt;
+                    throw std::runtime_error("Failed to parse API response");
                 }
 
                 // Validate response
                 if (!validate_response(*parsed_response)) {
                     handle_api_error("validation", "Invalid API response structure");
-                    return std::nullopt;
+                    throw std::runtime_error("Invalid API response structure");
                 }
 
                 // Update usage statistics
                 update_usage_stats(*parsed_response);
 
-                return parsed_response;
+                return *parsed_response;
             },
             CIRCUIT_BREAKER_SERVICE, "AnthropicClient", "create_message"
         );
+
+        // Convert back to std::optional<ClaudeResponse>
+        if (cb_result) {
+            result = *cb_result;
+        }
     }
 
-    if (result && *result) {
+    if (result) {
         successful_requests_++;
 
         // Cache the successful response if caching is enabled
@@ -232,8 +231,8 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
 
                 // Extract text from content (Claude format)
                 for (const auto& content_block : result->content) {
-                    if (content_block.contains("text")) {
-                        response_text += content_block["text"];
+                    if (!content_block.content.empty()) {
+                        response_text += content_block.content;
                     }
                 }
 
@@ -267,9 +266,7 @@ std::optional<ClaudeResponse> AnthropicClient::create_message(const ClaudeComple
         failed_requests_++;
         return std::nullopt;
     }
-
-    // Should not reach here, but add for safety
-    return std::nullopt;
+}
 
 std::optional<std::string> AnthropicClient::advanced_reasoning_analysis(
     const std::string& prompt, const std::string& context, const std::string& analysis_type) {
@@ -505,7 +502,7 @@ nlohmann::json AnthropicClient::get_health_status() {
         {"status", "operational"}, // Could be enhanced with actual health checks
         {"last_request", std::chrono::duration_cast<std::chrono::milliseconds>(
             last_request_time_.time_since_epoch()).count()},
-        {"circuit_breaker", circuit_breaker ? circuit_breaker->to_json() : nullptr},
+    {"circuit_breaker", circuit_breaker ? nlohmann::json{{"status", circuit_breaker->get_current_state() == regulens::CircuitState::OPEN ? "open" : "closed"}} : nullptr},
         {"usage_stats", get_usage_statistics()}
     };
 }

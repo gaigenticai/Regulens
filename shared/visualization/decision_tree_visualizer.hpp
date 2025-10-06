@@ -14,6 +14,8 @@
 
 namespace regulens {
 
+using regulens::DecisionNodeType;
+
 /**
  * @brief Output formats for decision tree visualization
  */

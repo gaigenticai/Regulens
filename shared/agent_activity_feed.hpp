@@ -96,6 +96,14 @@ public:
     std::string export_activities(const ActivityFeedFilter& filter, const std::string& format = "json");
 
     /**
+     * @brief Get recent activities for an agent
+     * @param agent_id Agent identifier (empty for all agents)
+     * @param limit Maximum number of activities to return
+     * @return Vector of recent activity events
+     */
+    std::vector<AgentActivityEvent> get_recent_activities(const std::string& agent_id = "", size_t limit = 50);
+
+    /**
      * @brief Force cleanup of old activities
      * @return Number of activities cleaned up
      */
@@ -142,6 +150,8 @@ private:
     // Statistics helpers
     void update_activity_counts();
     std::chrono::system_clock::time_point get_cutoff_time() const;
+    void update_time_based_counts(AgentActivityStats& stats, const AgentActivityEvent& event);
+    void cleanup_expired_time_windows(AgentActivityStats& stats, std::chrono::system_clock::time_point now);
 };
 
 // Convenience functions for creating common activity events

@@ -137,25 +137,8 @@ struct RecommendedAction {
     }
 };
 
-/**
- * @brief Compliance risk assessment
- */
-struct RiskAssessment {
-    double risk_score;         // 0.0 (no risk) to 1.0 (maximum risk)
-    std::string risk_level;    // "low", "medium", "high", "critical"
-    std::vector<std::string> risk_factors;  // Contributing risk factors
-    std::chrono::system_clock::time_point assessment_time;
 
-    nlohmann::json to_json() const {
-        return {
-            {"risk_score", risk_score},
-            {"risk_level", risk_level},
-            {"risk_factors", risk_factors},
-            {"assessment_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-                assessment_time.time_since_epoch()).count()}
-        };
-    }
-};
+#include "risk_assessment_types.hpp"
 
 /**
  * @brief Agent decision structure
@@ -183,7 +166,7 @@ public:
     // Decision details
     const std::vector<DecisionReasoning>& get_reasoning() const { return reasoning_; }
     const std::vector<RecommendedAction>& get_actions() const { return actions_; }
-    const std::optional<RiskAssessment>& get_risk_assessment() const { return risk_assessment_; }
+    const std::optional<regulens::RiskAssessment>& get_risk_assessment() const { return risk_assessment_; }
 
     // Setters
     void add_reasoning(const DecisionReasoning& reasoning) {
@@ -194,7 +177,7 @@ public:
         actions_.push_back(action);
     }
 
-    void set_risk_assessment(const RiskAssessment& assessment) {
+    void set_risk_assessment(const regulens::RiskAssessment& assessment) {
         risk_assessment_ = assessment;
     }
 
@@ -299,13 +282,21 @@ public:
             // Restore risk assessment
             if (json.contains("risk_assessment")) {
                 const auto& ra = json["risk_assessment"];
-                decision.risk_assessment_ = RiskAssessment{
-                    ra["risk_score"].get<double>(),
-                    ra["risk_level"].get<std::string>(),
-                    ra["risk_factors"].get<std::vector<std::string>>(),
-                    std::chrono::system_clock::time_point(
-                        std::chrono::milliseconds(ra["assessment_time"].get<int64_t>()))
-                };
+                regulens::RiskAssessment ra_obj;
+                ra_obj.assessment_id = ra.value("assessment_id", "");
+                ra_obj.entity_id = ra.value("entity_id", "");
+                ra_obj.transaction_id = ra.value("transaction_id", "");
+                ra_obj.assessed_by = ra.value("assessed_by", "");
+                ra_obj.assessment_time = std::chrono::system_clock::time_point(
+                    std::chrono::milliseconds(ra.value("assessment_time", int64_t{0})));
+                ra_obj.risk_score = ra.value("risk_score", 0.0);
+                ra_obj.risk_level = ra.value("risk_level", "");
+                ra_obj.overall_severity = static_cast<regulens::RiskSeverity>(ra.value("overall_severity", 0));
+                ra_obj.overall_score = ra.value("overall_score", 0.0);
+                ra_obj.risk_factors = ra.value("risk_factors", std::vector<std::string>{});
+                ra_obj.risk_indicators = ra.value("risk_indicators", std::vector<std::string>{});
+                // recommended_actions, factor_contributions, category_scores can be filled if needed
+                decision.risk_assessment_ = ra_obj;
             }
 
             return decision;
@@ -334,7 +325,7 @@ private:
 
     std::vector<DecisionReasoning> reasoning_;
     std::vector<RecommendedAction> actions_;
-    std::optional<RiskAssessment> risk_assessment_;
+    std::optional<regulens::RiskAssessment> risk_assessment_;
 };
 
 

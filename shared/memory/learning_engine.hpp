@@ -37,7 +37,7 @@ namespace regulens {
 /**
  * @brief Feedback types for learning signals
  */
-enum class FeedbackType {
+enum class LearningFeedbackType {
     CORRECTION,        // Human correction of agent decision
     APPROVAL,          // Human approval of agent decision
     ESCALATION,        // Decision escalated to human oversight
@@ -51,13 +51,13 @@ enum class FeedbackType {
  * @brief Learning signal strength and confidence
  */
 struct LearningSignal {
-    FeedbackType type;
+    LearningFeedbackType type;
     double strength;              // -1.0 to 1.0 (negative to positive)
     double confidence;            // 0.0 to 1.0
     std::chrono::system_clock::time_point timestamp;
     std::unordered_map<std::string, std::string> metadata;
 
-    LearningSignal(FeedbackType t, double s, double c = 1.0)
+    LearningSignal(LearningFeedbackType t, double s, double c = 1.0)
         : type(t), strength(s), confidence(c), timestamp(std::chrono::system_clock::now()) {}
 };
 
@@ -152,7 +152,7 @@ public:
         const std::string& agent_id,
         const nlohmann::json& original_decision,
         const nlohmann::json& human_feedback,
-        FeedbackType feedback_type,
+        LearningFeedbackType feedback_type,
         const nlohmann::json& context = nullptr);
 
     /**
@@ -386,9 +386,9 @@ public:
      * @return Learning outcome
      */
     nlohmann::json process_feedback(const std::string& agent_id,
-                                  const std::string& conversation_id,
-                                  const nlohmann::json& feedback,
-                                  FeedbackType feedback_type);
+                                   const std::string& conversation_id,
+                                   const nlohmann::json& feedback,
+                                   LearningFeedbackType feedback_type);
 
     /**
      * @brief Get learning recommendations for agent
@@ -465,8 +465,8 @@ private:
      * @param signal_strength Feedback signal strength
      */
     void update_performance_metrics(AgentLearningProfile& profile,
-                                  FeedbackType feedback_type,
-                                  double signal_strength);
+                                   LearningFeedbackType feedback_type,
+                                   double signal_strength);
 
     /**
      * @brief Persist learning data to database

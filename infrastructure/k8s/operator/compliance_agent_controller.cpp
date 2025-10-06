@@ -7,7 +7,7 @@
  */
 
 #include "compliance_agent_controller.hpp"
-#include <shared/metrics/prometheus_client.hpp>
+#include "shared/metrics/prometheus_client.hpp"
 #include <algorithm>
 #include <sstream>
 #include <chrono>

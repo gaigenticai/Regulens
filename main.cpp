@@ -3,6 +3,8 @@
 #include <csignal>
 #include <thread>
 #include <chrono>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "config/configuration_manager.hpp"
 #include "regulatory_monitor/regulatory_monitor.hpp"
@@ -10,6 +12,8 @@
 #include "shared/logging/structured_logger.hpp"
 #include "shared/metrics/metrics_collector.hpp"
 #include "shared/utils/timer.hpp"
+#include "shared/web_ui/web_ui_server.hpp"
+#include "shared/web_ui/web_ui_handlers.hpp"
 #include <pqxx/pqxx>
 
 namespace regulens {
@@ -110,11 +114,30 @@ private:
             throw std::runtime_error("Failed to start regulatory monitoring");
         }
 
+        // Initialize Web UI Server
+        web_ui_server_ = std::make_unique<WebUIServer>(8080);
+        web_ui_server_->set_config_manager(config_ptr);
+        web_ui_server_->set_logger(logger_ptr);
+
+        // Register Web UI routes
+        setup_web_ui_routes();
+
+        if (!web_ui_server_->start()) {
+            throw std::runtime_error("Failed to start web UI server");
+        }
+
         logger_.info("All components initialized successfully - regulatory monitoring active");
+        logger_.info("Web UI server started on http://localhost:8080");
     }
 
     void shutdown_components() {
         logger_.info("Shutting down system components");
+
+        // Shutdown web UI server
+        if (web_ui_server_) {
+            web_ui_server_->stop();
+            logger_.info("Web UI server stopped");
+        }
 
         // Shutdown regulatory monitor
         if (regulatory_monitor_) {
@@ -129,6 +152,83 @@ private:
         }
 
         logger_.info("All components shut down successfully");
+    }
+
+    void setup_web_ui_routes() {
+        // Serve main UI
+        web_ui_server_->add_route("GET", "/", [](const HTTPRequest& req) {
+            std::ifstream file("shared/web_ui/templates/index.html");
+            if (!file.is_open()) {
+                return HTTPResponse(404, "Not Found", "UI template not found");
+            }
+            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            return HTTPResponse(200, "OK", content, "text/html");
+        });
+
+        // API: Activity feed
+        web_ui_server_->add_route("GET", "/api/activity", [this](const HTTPRequest& req) {
+            nlohmann::json response = {
+                {"activities", nlohmann::json::array({
+                    {{"type", "primary"}, {"icon", "✅"}, {"title", "Transaction Approved"},
+                     {"description", "Transaction Guardian • TXN-789456 • Risk: LOW"}, {"time", "2 min ago"}},
+                    {{"type", "warning"}, {"icon", "📋"}, {"title", "New SEC Filing Detected"},
+                     {"description", "Regulatory Assessor • Form 10-K Analysis"}, {"time", "5 min ago"}},
+                    {{"type", "success"}, {"icon", "🔍"}, {"title", "Audit Report Generated"},
+                     {"description", "Audit Intelligence • Q4 2024 Report"}, {"time", "12 min ago"}}
+                })}
+            };
+            return HTTPResponse(200, "OK", response.dump(), "application/json");
+        });
+
+        // API: Decisions
+        web_ui_server_->add_route("GET", "/api/decisions", [this](const HTTPRequest& req) {
+            nlohmann::json response = {
+                {"decisions", nlohmann::json::array({
+                    {{"title", "Transaction Risk Assessment"}, {"confidence", 95}, {"status", "approved"},
+                     {"reasoning", "Transaction approved based on: (1) customer history clean, (2) amount within normal range, (3) geo-location verified"}},
+                    {{"title", "Compliance Policy Update Review"}, {"confidence", 78}, {"status", "review"},
+                     {"reasoning", "New FCA regulation requires human review: potential impact on 3 business processes identified"}}
+                })}
+            };
+            return HTTPResponse(200, "OK", response.dump(), "application/json");
+        });
+
+        // API: Regulatory changes
+        web_ui_server_->add_route("GET", "/api/regulatory-changes", [this](const HTTPRequest& req) {
+            nlohmann::json response = {
+                {"changes", nlohmann::json::array({
+                    {{"risk", "danger"}, {"title", "SEC: New AI disclosure requirements"}},
+                    {{"risk", "warning"}, {"title", "FCA: Updated AML guidelines"}}
+                })}
+            };
+            return HTTPResponse(200, "OK", response.dump(), "application/json");
+        });
+
+        // API: Audit trail
+        web_ui_server_->add_route("GET", "/api/audit-trail", [this](const HTTPRequest& req) {
+            nlohmann::json response = {
+                {"events", nlohmann::json::array({
+                    {{"icon", "📝"}, {"title", "Decision Engine: Risk Assessment"},
+                     {"description", "TXN-789456 approved • Risk: LOW • Confidence: 95%"}, {"time", "14:35:12"}},
+                    {{"icon", "⚙️"}, {"title", "Admin: Configuration Change"},
+                     {"description", "Updated risk thresholds • User: admin@regulens.ai"}, {"time", "14:32:08"}}
+                })}
+            };
+            return HTTPResponse(200, "OK", response.dump(), "application/json");
+        });
+
+        // API: Communication
+        web_ui_server_->add_route("GET", "/api/communication", [this](const HTTPRequest& req) {
+            nlohmann::json response = {
+                {"messages", nlohmann::json::array({
+                    {{"from", "Transaction Guardian"}, {"to", "Decision Engine"}, {"from_icon", "🛡️"},
+                     {"message", "Request: Risk assessment for TXN-789456 ($45,000)"}, {"time", "14:35:10"}},
+                    {{"from", "Decision Engine"}, {"to", "Transaction Guardian"}, {"from_icon", "⚖️"},
+                     {"message", "Response: APPROVED (95% confidence)"}, {"time", "14:35:12"}}
+                })}
+            };
+            return HTTPResponse(200, "OK", response.dump(), "application/json");
+        });
     }
 
     bool perform_health_checks() {
@@ -265,6 +365,7 @@ private:
     StructuredLogger& logger_;
     std::unique_ptr<RegulatoryMonitor> regulatory_monitor_;
     std::shared_ptr<RegulatoryKnowledgeBase> knowledge_base_;
+    std::unique_ptr<WebUIServer> web_ui_server_;
     Timer health_check_timer_;
 };
 

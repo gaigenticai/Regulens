@@ -352,16 +352,14 @@ std::string KubernetesAPIClientImpl::buildAPIURL(const std::string& group, const
 nlohmann::json KubernetesAPIClientImpl::makeAPIRequest(const std::string& method, const std::string& url,
                                                      const nlohmann::json& body) const {
     try {
-        HttpRequest request;
-        request.method = method;
-        request.url = url;
-        request.headers = default_headers_;
-
-        if (!body.is_null()) {
-            request.body = body.dump();
+        HttpResponse response;
+        if (method == "GET") {
+            response = http_client_->get(url, default_headers_);
+        } else if (method == "POST") {
+            response = http_client_->post(url, body.is_null() ? "" : body.dump(), default_headers_);
+        } else {
+            throw std::invalid_argument("Unsupported HTTP method: " + method);
         }
-
-        auto response = http_client_->makeRequest(request);
 
         if (response.status_code >= 200 && response.status_code < 300) {
             if (!response.body.empty()) {

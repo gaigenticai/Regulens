@@ -27,10 +27,10 @@
 #include <condition_variable>
 #include <nlohmann/json.hpp>
 
-#include "../../shared/config/configuration_manager.hpp"
-#include "../../shared/logging/structured_logger.hpp"
-#include "../../shared/error_handler.hpp"
-#include "../../shared/metrics/prometheus_metrics.hpp"
+#include "../../../shared/config/configuration_manager.hpp"
+#include "../../../shared/logging/structured_logger.hpp"
+#include "../../../shared/error_handler.hpp"
+#include "../../../shared/metrics/prometheus_metrics.hpp"
 
 namespace regulens {
 namespace k8s {
@@ -303,6 +303,10 @@ struct OperatorConfig {
  * @brief Base Kubernetes operator class
  */
 class KubernetesOperator {
+    /**
+     * @brief Worker thread for processing resource events
+     */
+    virtual void workerThread();
 public:
     KubernetesOperator(std::shared_ptr<ConfigurationManager> config,
                      std::shared_ptr<StructuredLogger> logger,

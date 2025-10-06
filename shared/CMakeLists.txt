@@ -40,16 +40,13 @@ add_library(regulens_shared STATIC
 )
 
 # Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)
-# Temporarily disabled - circular dependency issues between error_handler and circuit_breaker
-# add_subdirectory(resilience)
+add_subdirectory(resilience)
 
 # Metrics module for monitoring and observability (Rule 1 compliance - enterprise monitoring)
-# Temporarily disabled - requires circuit_breaker types to be resolved first
-# add_subdirectory(metrics)
+add_subdirectory(metrics)
 
 # Cache module for Redis-based distributed caching (Rule 1 compliance - enterprise performance)
-# Temporarily disabled - Redis requires proper hiredis integration and has compilation issues
-# add_subdirectory(cache)
+add_subdirectory(cache)
 
 # Web UI library for testing (Rule 6 compliance)
 add_subdirectory(web_ui)

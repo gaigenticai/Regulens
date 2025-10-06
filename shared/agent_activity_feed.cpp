@@ -301,6 +301,49 @@ std::string AgentActivityFeed::export_activities(const ActivityFeedFilter& filte
     }
 }
 
+std::vector<AgentActivityEvent> AgentActivityFeed::get_recent_activities(const std::string& agent_id, size_t limit) {
+    std::vector<AgentActivityEvent> results;
+    std::lock_guard<std::mutex> lock(activities_mutex_);
+
+    if (!agent_id.empty()) {
+        // Get activities for specific agent
+        auto it = agent_activities_.find(agent_id);
+        if (it != agent_activities_.end()) {
+            const auto& queue = it->second;
+            size_t count = 0;
+            // Deque stores oldest first, so we need to iterate from the end
+            for (auto rit = queue.rbegin(); rit != queue.rend() && count < limit; ++rit) {
+                results.push_back(*rit);
+                count++;
+            }
+        }
+    } else {
+        // Get activities from all agents
+        std::vector<std::pair<std::string, AgentActivityEvent>> all_events;
+
+        for (const auto& [aid, queue] : agent_activities_) {
+            for (const auto& event : queue) {
+                all_events.emplace_back(aid, event);
+            }
+        }
+
+        // Sort by timestamp (newest first)
+        std::sort(all_events.begin(), all_events.end(),
+            [](const auto& a, const auto& b) {
+                return a.second.timestamp > b.second.timestamp;
+            });
+
+        // Take the most recent 'limit' events
+        for (size_t i = 0; i < std::min(limit, all_events.size()); ++i) {
+            results.push_back(all_events[i].second);
+        }
+    }
+
+    logger_->debug("Retrieved " + std::to_string(results.size()) + " recent activities" +
+                  (agent_id.empty() ? "" : " for agent " + agent_id));
+    return results;
+}
+
 size_t AgentActivityFeed::cleanup_old_activities() {
     std::lock_guard<std::mutex> lock(activities_mutex_);
 
@@ -457,18 +500,18 @@ bool AgentActivityFeed::persist_activity(const AgentActivityEvent& event) {
 
         nlohmann::json metadata_json = event.metadata;
 
-        pqxx::work txn(*db_connection_->get_connection());
-        txn.exec_params(query,
+        std::vector<std::string> params = {
             event.event_id,
             event.agent_id,
-            static_cast<int>(event.activity_type),
-            static_cast<int>(event.severity),
+            std::to_string(static_cast<int>(event.activity_type)),
+            std::to_string(static_cast<int>(event.severity)),
             event.title,
             event.description,
-            timestamp_ms,
+            std::to_string(timestamp_ms),
             metadata_json.dump()
-        );
-        txn.commit();
+        };
+
+        db_connection_->execute_command(query, params);
 
         logger_->debug("Persisted activity: {}", event.event_id);
         return true;
@@ -512,31 +555,30 @@ std::vector<AgentActivityEvent> AgentActivityFeed::load_activities_from_persiste
         query << " ORDER BY timestamp " << (filter.ascending_order ? "ASC" : "DESC");
         query << " LIMIT " << filter.max_results;
 
-        pqxx::work txn(*db_connection_->get_connection());
-        pqxx::result result = txn.exec(query.str());
+        auto results = db_connection_->execute_query_multi(query.str(), {});
 
-        for (const auto& row : result) {
+        for (const auto& row_json : results) {
             AgentActivityEvent event;
-            event.event_id = row["event_id"].as<std::string>();
-            event.agent_id = row["agent_id"].as<std::string>();
-            event.activity_type = static_cast<ActivityType>(row["activity_type"].as<int>());
-            event.severity = static_cast<ActivitySeverity>(row["severity"].as<int>());
-            event.title = row["title"].as<std::string>();
-            event.description = row["description"].as<std::string>();
+            event.event_id = row_json["event_id"].get<std::string>();
+            event.agent_id = row_json["agent_id"].get<std::string>();
+            event.activity_type = static_cast<AgentActivityType>(row_json["activity_type"].get<int>());
+            event.severity = static_cast<ActivitySeverity>(row_json["severity"].get<int>());
+            event.title = row_json["title"].get<std::string>();
+            event.description = row_json["description"].get<std::string>();
 
-            auto timestamp_ms = row["timestamp"].as<long long>();
+            auto timestamp_ms = row_json["timestamp"].get<long long>();
             event.timestamp = std::chrono::system_clock::time_point(
                 std::chrono::milliseconds(timestamp_ms));
 
-            if (!row["metadata"].is_null()) {
-                std::string metadata_str = row["metadata"].as<std::string>();
+            if (row_json.contains("metadata") && !row_json["metadata"].is_null()) {
+                std::string metadata_str = row_json["metadata"].get<std::string>();
                 event.metadata = nlohmann::json::parse(metadata_str);
             }
 
             activities.push_back(event);
         }
 
-        logger_->debug("Loaded {} activities from persistence", activities.size());
+        logger_->debug("Loaded activities from persistence", "", "", {{"count", std::to_string(activities.size())}});
 
     } catch (const std::exception& e) {
         logger_->error("Failed to load activities from persistence: {}", e.what());

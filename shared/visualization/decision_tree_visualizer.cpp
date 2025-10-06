@@ -8,6 +8,8 @@
 
 namespace regulens {
 
+using regulens::DecisionNodeType;
+
 DecisionTreeVisualizer::DecisionTreeVisualizer(std::shared_ptr<ConfigurationManager> config,
                                              std::shared_ptr<StructuredLogger> logger)
     : config_(config), logger_(logger) {

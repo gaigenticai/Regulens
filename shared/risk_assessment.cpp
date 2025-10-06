@@ -67,7 +67,7 @@ RiskAssessment RiskAssessmentEngine::assess_transaction_risk(const TransactionDa
 
     // Add historical transactions if available (loaded from database in production)
     // Generate synthetic historical patterns only when real data is unavailable and explicitly enabled
-    bool enable_synthetic_history = config_->get_bool("RISK_ENABLE_SYNTHETIC_HISTORY").value_or(false);
+    bool enable_synthetic_history = config_manager_ ? config_manager_->get_bool("RISK_ENABLE_SYNTHETIC_HISTORY").value_or(false) : false;
     if (!entity.historical_risk_scores.empty() && enable_synthetic_history) {
         // Create synthetic historical transactions based on patterns
         double avg_historical_amount = 0.0;
@@ -122,10 +122,10 @@ RiskAssessment RiskAssessmentEngine::assess_transaction_risk(const TransactionDa
 
     // Store context data
     assessment.context_data = {
-        {"transaction", transaction.to_json()},
-        {"entity", entity.to_json()},
-        {"assessment_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
+        {"transaction", transaction.to_json().dump()},
+        {"entity", entity.to_json().dump()},
+        {"assessment_time", std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count())}
     };
 
     // Perform AI analysis if enabled
@@ -206,10 +206,10 @@ RiskAssessment RiskAssessmentEngine::assess_entity_risk(const EntityProfile& ent
 
     // Store context
     assessment.context_data = {
-        {"entity", entity.to_json()},
-        {"recent_transactions_count", recent_transactions.size()},
-        {"assessment_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
+        {"entity", entity.to_json().dump()},
+        {"recent_transactions_count", std::to_string(recent_transactions.size())},
+        {"assessment_time", std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count())}
     };
 
     // Store in history
@@ -253,9 +253,9 @@ RiskAssessment RiskAssessmentEngine::assess_regulatory_risk(const std::string& e
 
     assessment.context_data = {
         {"entity_id", entity_id},
-        {"regulatory_context", regulatory_context},
-        {"assessment_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
+        {"regulatory_context", regulatory_context.dump()},
+        {"assessment_time", std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count())}
     };
 
     return assessment;

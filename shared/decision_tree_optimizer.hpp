@@ -18,18 +18,9 @@
 #include "llm/openai_client.hpp"
 #include "llm/anthropic_client.hpp"
 #include "risk_assessment.hpp"
+#include "models/decision_tree_types.hpp"
 
 namespace regulens {
-
-/**
- * @brief Decision tree node types
- */
-enum class DecisionNodeType {
-    DECISION,       // Decision point with branches
-    CHANCE,         // Chance/probability node
-    TERMINAL,       // End node with outcome
-    UTILITY         // Utility assessment node
-};
 
 /**
  * @brief Decision criteria for multi-criteria analysis
@@ -277,6 +268,11 @@ struct DecisionTreeConfig {
  * using multiple MCDA methods, decision tree analysis, and AI-powered optimization.
  */
 class DecisionTreeOptimizer {
+    // --- Add missing parse methods for alternatives/advantages/disadvantages ---
+    std::vector<std::string> parse_advantages_from_description(const std::string& description) const;
+    std::vector<std::string> parse_disadvantages_from_description(const std::string& description) const;
+    DecisionAlternative parse_alternative_from_json(const nlohmann::json& alt_json) const;
+    std::vector<DecisionAlternative> parse_alternatives_from_text(const std::string& text, int max_alternatives = 5) const;
 public:
     DecisionTreeOptimizer(std::shared_ptr<ConfigurationManager> config,
                          std::shared_ptr<StructuredLogger> logger,
@@ -355,7 +351,7 @@ public:
      */
     DecisionAlternative create_decision_alternative(
         const std::string& description,
-        const std::string& context = "");
+        const std::string& context = "") const;
 
     /**
      * @brief Evaluate decision tree expected value

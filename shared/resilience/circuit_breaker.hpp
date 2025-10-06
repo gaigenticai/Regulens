@@ -28,9 +28,11 @@
 
 #include "../config/configuration_manager.hpp"
 #include "../logging/structured_logger.hpp"
-#include "../error_handler.hpp"
 
 namespace regulens {
+
+// Forward declarations
+class ErrorHandler;
 
 /**
  * @brief Circuit breaker states
@@ -282,6 +284,12 @@ public:
     nlohmann::json get_health_status() const;
 
     /**
+     * @brief Get circuit breaker as JSON
+     * @return JSON representation of circuit breaker
+     */
+    nlohmann::json to_json() const;
+
+    /**
      * @brief Get circuit breaker name
      * @return Circuit breaker identifier
      */
@@ -295,14 +303,15 @@ private:
     ErrorHandler* error_handler_;
 
     // State management
-    std::atomic<CircuitState> current_state_;
+    mutable std::atomic<CircuitState> current_state_;
     mutable std::mutex state_mutex_;
 
     // Failure tracking
-    std::atomic<size_t> consecutive_failures_;
-    std::atomic<size_t> consecutive_successes_;
-    std::chrono::system_clock::time_point last_failure_time_;
-    std::chrono::system_clock::time_point next_attempt_time_;
+    mutable std::atomic<size_t> consecutive_failures_;
+    mutable std::atomic<size_t> consecutive_successes_;
+    mutable std::chrono::system_clock::time_point last_failure_time_;
+    mutable std::chrono::system_clock::time_point next_attempt_time_;
+    mutable std::chrono::system_clock::time_point last_state_change_time_;
 
     // Concurrent request management for half-open state
     mutable std::mutex concurrent_mutex_;
@@ -310,7 +319,7 @@ private:
 
     // Metrics
     mutable std::mutex metrics_mutex_;
-    CircuitBreakerMetrics metrics_;
+    mutable CircuitBreakerMetrics metrics_;
 
     // Exponential backoff tracking
     std::chrono::milliseconds current_backoff_time_;

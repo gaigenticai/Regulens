@@ -18,6 +18,7 @@
 #include "function_calling.hpp"
 #include "../knowledge_base.hpp"
 #include "../risk_assessment.hpp"
+#include "../models/regulatory_change.hpp"
 #include <memory>
 
 namespace regulens {
@@ -147,21 +148,21 @@ private:
      * @param change Regulatory change
      * @return Summary string
      */
-    std::string generate_regulatory_summary(const SimpleRegulatoryChange& change) const;
+    std::string generate_regulatory_summary(const RegulatoryChange& change) const;
 
     /**
      * @brief Assess regulatory impact level
      * @param change Regulatory change
      * @return Impact level string
      */
-    std::string assess_regulatory_impact(const SimpleRegulatoryChange& change) const;
+    std::string assess_regulatory_impact(const RegulatoryChange& change) const;
 
     /**
      * @brief Extract affected entities from regulatory change
      * @param change Regulatory change
      * @return JSON array of affected entities
      */
-    nlohmann::json extract_affected_entities(const SimpleRegulatoryChange& change) const;
+    nlohmann::json extract_affected_entities(const RegulatoryChange& change) const;
 
     /**
      * @brief Format timestamp for API response

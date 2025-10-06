@@ -6,6 +6,7 @@
  */
 
 #include "circuit_breaker.hpp"
+#include "../error_handler.hpp"
 #include <algorithm>
 #include <random>
 #include <cmath>
@@ -143,10 +144,15 @@ CircuitState CircuitBreaker::get_current_state() const {
     // Check if we should attempt recovery from OPEN state
     if (state == CircuitState::OPEN && is_recovery_timeout_elapsed()) {
         // Atomically attempt to transition to HALF_OPEN
+        // Try to transition to HALF_OPEN using atomic operation
         CircuitState expected = CircuitState::OPEN;
         if (current_state_.compare_exchange_strong(expected, CircuitState::HALF_OPEN)) {
-            transition_to_state(CircuitState::HALF_OPEN);
+            // Update state change time and metrics atomically
+            last_state_change_time_ = std::chrono::system_clock::now();
             metrics_.recovery_attempts++;
+            if (logger_) {
+                logger_->log(LogLevel::INFO, "Circuit breaker transitioning to HALF_OPEN state for recovery attempt");
+            }
             return CircuitState::HALF_OPEN;
         }
     }
@@ -242,22 +248,61 @@ nlohmann::json CircuitBreaker::get_health_status() const {
     double success_rate = metrics.total_requests > 0 ?
         static_cast<double>(metrics.successful_requests) / static_cast<double>(metrics.total_requests) : 0.0;
 
+    std::string state_str = (state == CircuitState::CLOSED) ? "CLOSED" :
+                           (state == CircuitState::OPEN) ? "OPEN" : "HALF_OPEN";
+
+    long long next_recovery = (state == CircuitState::OPEN) ?
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            next_attempt_time_.time_since_epoch()).count() : 0;
+
+    nlohmann::json result;
+    result["circuit_name"] = config_.name;
+    result["state"] = state_str;
+    result["failure_rate"] = failure_rate;
+    result["success_rate"] = success_rate;
+    result["total_requests"] = metrics.total_requests.load();
+    result["consecutive_failures"] = consecutive_failures_.load();
+    result["consecutive_successes"] = consecutive_successes_.load();
+    result["active_requests"] = active_requests_.load();
+    result["is_healthy"] = (state == CircuitState::CLOSED && failure_rate < 0.5);
+    result["last_failure_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        metrics.last_failure_time.time_since_epoch()).count();
+    result["next_recovery_attempt"] = next_recovery;
+    return result;
+}
+
+nlohmann::json CircuitBreaker::to_json() const {
+    auto metrics = get_metrics();
+    CircuitState state = get_current_state();
+
+    std::string state_str = (state == CircuitState::CLOSED) ? "CLOSED" :
+                           (state == CircuitState::OPEN) ? "OPEN" : "HALF_OPEN";
+
     return {
-        {"circuit_name", config_.name},
-        {"state", state == CircuitState::CLOSED ? "CLOSED" :
-                 state == CircuitState::OPEN ? "OPEN" : "HALF_OPEN"},
-        {"failure_rate", failure_rate},
-        {"success_rate", success_rate},
-        {"total_requests", metrics.total_requests},
+        {"name", config_.name},
+        {"state", state_str},
+        {"config", {
+            {"failure_threshold", config_.failure_threshold},
+            {"recovery_timeout_ms", config_.recovery_timeout.count()},
+            {"success_threshold", config_.success_threshold},
+            {"timeout_duration_ms", config_.timeout_duration.count()},
+            {"slow_call_rate_threshold", config_.slow_call_rate_threshold},
+            {"slow_call_duration_ms", config_.slow_call_duration.count()},
+            {"max_concurrent_requests", config_.max_concurrent_requests},
+            {"backoff_multiplier", config_.backoff_multiplier},
+            {"max_backoff_time_ms", config_.max_backoff_time.count()},
+            {"jitter_factor", config_.jitter_factor},
+            {"enable_metrics", config_.enable_metrics},
+            {"enable_logging", config_.enable_logging}
+        }},
+        {"metrics", metrics.to_json()},
         {"consecutive_failures", consecutive_failures_.load()},
         {"consecutive_successes", consecutive_successes_.load()},
         {"active_requests", active_requests_.load()},
-        {"is_healthy", state == CircuitState::CLOSED && failure_rate < 0.5},
-        {"last_failure_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-            metrics.last_failure_time.time_since_epoch()).count()},
-        {"next_recovery_attempt", state == CircuitState::OPEN ?
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                next_attempt_time_.time_since_epoch()).count() : 0}
+        {"current_backoff_time_ms", current_backoff_time_.count()},
+        {"backoff_attempt_count", backoff_attempt_count_},
+        {"next_attempt_time", std::chrono::duration_cast<std::chrono::milliseconds>(
+            next_attempt_time_.time_since_epoch()).count()}
     };
 }
 

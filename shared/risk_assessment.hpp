@@ -13,161 +13,13 @@
 #include "error_handler.hpp"
 #include "llm/openai_client.hpp"
 #include "models/compliance_event.hpp"
+#include "models/risk_assessment_types.hpp"
 
 namespace regulens {
 
 /**
- * @brief Risk severity levels
- */
-enum class RiskSeverity {
-    LOW,        // Minimal risk, routine monitoring
-    MEDIUM,     // Moderate risk, enhanced monitoring required
-    HIGH,       // Significant risk, immediate action required
-    CRITICAL    // Severe risk, transaction blocking or escalation
-};
-
-/**
- * @brief Risk categories for classification
- */
-enum class RiskCategory {
-    FINANCIAL,          // Financial risk (money laundering, fraud)
-    REGULATORY,         // Regulatory compliance risk
-    OPERATIONAL,        // Operational risk (system failures, errors)
-    REPUTATIONAL,       // Reputational risk (brand damage, public perception)
-    STRATEGIC,          // Strategic risk (market changes, competition)
-    COMPLIANCE,         // General compliance risk
-    TRANSACTION,        // Transaction-specific risks
-    ENTITY,             // Entity or counterparty risk
-    MARKET,             // Market risk (volatility, liquidity)
-    CYBER,              // Cybersecurity risk
-    LEGAL,              // Legal risk (contracts, disputes)
-    CONCENTRATION       // Concentration risk (single points of failure)
-};
-
-/**
- * @brief Risk factors that contribute to overall risk scoring
- */
-enum class RiskFactor {
-    // Transaction factors
-    AMOUNT_SIZE,            // Transaction amount relative to norms
-    FREQUENCY_PATTERN,      // Unusual transaction frequency
-    GEOGRAPHIC_LOCATION,    // High-risk jurisdictions
-    COUNTERPARTY_RISK,      // Risk associated with transaction parties
-    PAYMENT_METHOD,         // Risk of payment method (cash, wire, crypto)
-    TIMING_PATTERN,         // Unusual timing (holidays, off-hours)
-    ROUND_NUMBERS,          // Use of round numbers (potential structuring)
-
-    // Entity factors
-    CUSTOMER_HISTORY,       // Customer transaction history
-    ACCOUNT_AGE,           // How long account has been active
-    VERIFICATION_STATUS,   // KYC/AML verification completeness
-    BUSINESS_TYPE,         // Type of business (high-risk industries)
-    OWNERSHIP_STRUCTURE,   // Complex ownership structures
-    REGULATORY_STATUS,     // Current regulatory standings
-
-    // Behavioral factors
-    DEVIATION_FROM_NORM,  // Deviation from customer's normal patterns
-    PEER_COMPARISON,       // Comparison with similar customers
-    VELOCITY_CHANGES,      // Sudden changes in transaction velocity
-    CHANNEL_MIX,           // Mix of transaction channels used
-
-    // External factors
-    REGULATORY_CHANGES,    // Recent regulatory changes affecting risk
-    MARKET_CONDITIONS,     // Current market volatility or conditions
-    ECONOMIC_INDICATORS,   // Economic factors affecting risk
-    GEOPOLITICAL_EVENTS,   // International events affecting risk
-};
-
-/**
- * @brief Risk mitigation actions
- */
-enum class RiskMitigationAction {
-    APPROVE,                // Approve transaction/activity
-    APPROVE_WITH_MONITORING,// Approve with enhanced monitoring
-    HOLD_FOR_REVIEW,        // Hold for manual review
-    ESCALATE,              // Escalate to higher authority
-    DECLINE,               // Decline transaction/activity
-    REQUIRE_ADDITIONAL_INFO,// Request additional information
-    ENHANCE_VERIFICATION,  // Require enhanced verification
-    REDUCE_LIMITS,         // Reduce transaction limits
-    INCREASE_MONITORING,   // Increase monitoring frequency
-    REPORT_TO_AUTHORITIES   // Report suspicious activity
-};
-
-/**
  * @brief Risk assessment result
  */
-struct RiskAssessment {
-    std::string assessment_id;
-    std::string entity_id;
-    std::string transaction_id;
-    RiskSeverity overall_severity;
-    double overall_score;  // 0.0 to 1.0, higher = higher risk
-
-    std::unordered_map<RiskCategory, double> category_scores;
-    std::unordered_map<RiskFactor, double> factor_contributions;
-    std::vector<std::string> risk_indicators;
-    std::vector<RiskMitigationAction> recommended_actions;
-
-    std::chrono::system_clock::time_point assessment_time;
-    std::string assessed_by;  // "automated", "human", "hybrid"
-
-    nlohmann::json context_data;  // Additional context for the assessment
-    nlohmann::json ai_analysis;   // AI-powered analysis results
-
-    RiskAssessment()
-        : overall_score(0.0), assessment_time(std::chrono::system_clock::now()),
-          assessed_by("automated") {}
-
-    nlohmann::json to_json() const {
-        nlohmann::json result = {
-            {"assessment_id", assessment_id},
-            {"entity_id", entity_id},
-            {"transaction_id", transaction_id},
-            {"overall_severity", static_cast<int>(overall_severity)},
-            {"overall_score", overall_score},
-            {"assessment_time", std::chrono::duration_cast<std::chrono::milliseconds>(
-                assessment_time.time_since_epoch()).count()},
-            {"assessed_by", assessed_by},
-            {"context_data", context_data}
-        };
-
-        // Category scores
-        nlohmann::json cat_scores;
-        for (const auto& [cat, score] : category_scores) {
-            cat_scores[std::to_string(static_cast<int>(cat))] = score;
-        }
-        result["category_scores"] = cat_scores;
-
-        // Factor contributions
-        nlohmann::json factors;
-        for (const auto& [factor, contrib] : factor_contributions) {
-            factors[std::to_string(static_cast<int>(factor))] = contrib;
-        }
-        result["factor_contributions"] = factors;
-
-        // Arrays
-        result["risk_indicators"] = risk_indicators;
-        nlohmann::json actions;
-        for (auto action : recommended_actions) {
-            actions.push_back(static_cast<int>(action));
-        }
-        result["recommended_actions"] = actions;
-
-        if (!ai_analysis.empty()) {
-            result["ai_analysis"] = ai_analysis;
-        }
-
-        return result;
-    }
-
-    static RiskSeverity score_to_severity(double score) {
-        if (score >= 0.8) return RiskSeverity::CRITICAL;
-        if (score >= 0.6) return RiskSeverity::HIGH;
-        if (score >= 0.4) return RiskSeverity::MEDIUM;
-        return RiskSeverity::LOW;
-    }
-};
 
 /**
  * @brief Risk assessment configuration
@@ -375,7 +227,7 @@ public:
      * @return Risk assessment result
      */
     RiskAssessment assess_transaction_risk(const TransactionData& transaction,
-                                         const EntityProfile& entity_profile);
+                                          const EntityProfile& entity_profile);
 
     /**
      * @brief Assess risk for an entity
@@ -384,7 +236,7 @@ public:
      * @return Risk assessment result
      */
     RiskAssessment assess_entity_risk(const EntityProfile& entity_profile,
-                                    const std::vector<TransactionData>& recent_transactions);
+                                     const std::vector<TransactionData>& recent_transactions);
 
     /**
      * @brief Assess regulatory compliance risk
@@ -393,7 +245,7 @@ public:
      * @return Risk assessment result
      */
     RiskAssessment assess_regulatory_risk(const std::string& entity_id,
-                                        const nlohmann::json& regulatory_context);
+                                         const nlohmann::json& regulatory_context);
 
     /**
      * @brief Get risk assessment history
@@ -427,6 +279,10 @@ public:
     // Configuration access
     const RiskAssessmentConfig& get_config() const { return config_; }
     void update_config(const RiskAssessmentConfig& new_config) { config_ = new_config; }
+
+    // --- Add missing declarations for risk scoring helpers ---
+    double calculate_transaction_frequency_risk(size_t transaction_count) const;
+    double calculate_amount_clustering_risk(double transaction_amount, const std::vector<double>& history) const;
 
 private:
     std::shared_ptr<ConfigurationManager> config_manager_;
@@ -479,7 +335,7 @@ private:
      * @brief Generate risk indicators based on assessment
      */
     std::vector<std::string> generate_risk_indicators(
-        const RiskAssessment& assessment);
+    const RiskAssessment& assessment);
 
     /**
      * @brief Calculate deviation from customer's normal transaction patterns
@@ -503,7 +359,7 @@ private:
      * @brief Generate recommended mitigation actions
      */
     std::vector<RiskMitigationAction> generate_mitigation_actions(
-        const RiskAssessment& assessment);
+    const RiskAssessment& assessment);
 
     /**
      * @brief Perform AI-powered risk analysis

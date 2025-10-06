@@ -14,29 +14,9 @@
 
 #include "models/error_handling.hpp"
 
-// Circuit breaker and metrics temporarily disabled - circular dependency issues
-// #include "resilience/circuit_breaker.hpp"
-// #include "metrics/prometheus_metrics.hpp"
-
-// Basic circuit breaker state enum for compatibility
-enum class CircuitState {
-    CLOSED,     // Normal operation
-    OPEN,       // Failing, requests blocked
-    HALF_OPEN   // Testing if service recovered
-};
-
-// Basic circuit breaker result for compatibility
-struct CircuitBreakerResult {
-    bool success;
-    std::optional<nlohmann::json> result;
-    std::string error_message;
-    std::chrono::milliseconds execution_time;
-    CircuitState circuit_state_at_call;
-
-    CircuitBreakerResult(bool s, std::optional<nlohmann::json> r, std::string err,
-                        std::chrono::milliseconds et, CircuitState cs)
-        : success(s), result(r), error_message(err), execution_time(et), circuit_state_at_call(cs) {}
-};
+// Circuit breaker and metrics includes
+#include "resilience/circuit_breaker.hpp"
+#include "metrics/prometheus_metrics.hpp"
 #include "logging/structured_logger.hpp"
 #include "config/configuration_manager.hpp"
 
@@ -63,6 +43,64 @@ struct CircuitBreakerStateInfo {
  * for robust operation of advanced agent capabilities.
  */
 class ErrorHandler {
+    /**
+     * @brief Set the Prometheus metrics collector for circuit breakers
+     * @param metrics_collector Shared pointer to PrometheusMetricsCollector
+     */
+    void set_metrics_collector(std::shared_ptr<PrometheusMetricsCollector> metrics_collector);
+
+    /**
+     * @brief Execute an operation with advanced circuit breaker protection
+     * @tparam Func Callable type
+     * @param operation Function to execute
+     * @param service_name Name of the external service
+     * @param component_name Name of the component
+     * @param operation_name Name of the operation
+     * @return CircuitBreakerResult with execution details
+     */
+public:
+    template<typename Func>
+    CircuitBreakerResult execute_with_advanced_circuit_breaker(
+        Func&& operation,
+        const std::string& service_name,
+        const std::string& component_name,
+        const std::string& operation_name) {
+        // Circuit breaker temporarily disabled - use basic execution
+        logger_->warn("Circuit breaker disabled - using basic execution for service: " + service_name,
+                      "ErrorHandler", "execute_with_advanced_circuit_breaker");
+
+        // Basic execution without circuit breaker protection
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        try {
+            // Execute the operation directly
+            auto result = operation();
+
+            auto end_time = std::chrono::high_resolution_clock::now();
+            auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+            // Update component health
+            update_component_health(component_name, true, "Basic execution success");
+
+            return CircuitBreakerResult(true, result, "", execution_time, CircuitState::CLOSED);
+
+        } catch (const std::exception& e) {
+            auto end_time = std::chrono::high_resolution_clock::now();
+            auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+            // Update component health
+            update_component_health(component_name, false, std::string("Execution failed: ") + e.what());
+
+            // Report error
+            ErrorInfo error(ErrorCategory::EXTERNAL_API, ErrorSeverity::HIGH,
+                           component_name, operation_name, std::string("Operation failed: ") + e.what());
+            error.context["service"] = service_name;
+            report_error(error);
+
+            return CircuitBreakerResult(false, std::nullopt, std::string("Operation failed: ") + e.what(),
+                                                 execution_time, CircuitState::CLOSED);
+        }
+    }
 public:
     ErrorHandler(std::shared_ptr<ConfigurationManager> config,
                 std::shared_ptr<StructuredLogger> logger);
@@ -143,9 +181,9 @@ public:
     HealthStatus perform_health_check(const std::string& component_name,
                                     std::function<bool()> health_check);
 
-    // Circuit breaker temporarily disabled - circular dependency issues
-    // std::shared_ptr<CircuitBreaker> get_circuit_breaker(const std::string& service_name);
-    // bool reset_circuit_breaker(const std::string& service_name);
+    // Circuit breaker management (circular dependency resolved via forward declarations)
+    std::shared_ptr<CircuitBreaker> get_circuit_breaker(const std::string& service_name);
+    bool reset_circuit_breaker(const std::string& service_name);
 
     /**
      * @brief Get fallback configuration for a component
@@ -201,10 +239,10 @@ private:
     std::mutex error_mutex_;
     std::deque<ErrorInfo> error_history_;
     std::unordered_map<std::string, ComponentHealth> component_health_;
-    // Circuit breaker and metrics temporarily disabled - circular dependency issues
-    // std::unordered_map<std::string, std::shared_ptr<CircuitBreaker>> circuit_breakers_;
-    // std::shared_ptr<PrometheusMetricsCollector> metrics_collector_;
-    // std::mutex circuit_breaker_mutex_;
+    // Circuit breaker and metrics (circular dependency resolved via forward declarations)
+    std::unordered_map<std::string, std::shared_ptr<CircuitBreaker>> circuit_breakers_;
+    std::shared_ptr<PrometheusMetricsCollector> metrics_collector_;
+    std::mutex circuit_breaker_mutex_;
     std::unordered_map<std::string, FallbackConfig> fallback_configs_;
 
     std::mutex stats_mutex_;
@@ -380,9 +418,10 @@ std::optional<T> ErrorHandler::execute_with_circuit_breaker(
     const std::string& component_name,
     const std::string& operation_name) {
 
-    auto& breaker = get_or_create_circuit_breaker(service_name);
+    auto breaker = get_or_create_circuit_breaker(service_name);
 
-    if (!breaker.can_attempt()) {
+    // Check if circuit is open - fail fast
+    if (breaker->get_current_state() == CircuitState::OPEN) {
         logger_->warn("Circuit breaker OPEN for service " + service_name + ", blocking request to " +
                     component_name + "." + operation_name, "", "", {});
 
@@ -390,23 +429,30 @@ std::optional<T> ErrorHandler::execute_with_circuit_breaker(
         return execute_fallback<T>(component_name, operation);
     }
 
-    try {
-        auto result = operation();
-        breaker.record_success();
+    // Execute through circuit breaker
+    auto cb_result = breaker->execute([&operation]() -> CircuitBreakerResult {
+        try {
+            auto result = operation();
+            return CircuitBreakerResult(true, nlohmann::json(result), "",
+                                      std::chrono::milliseconds(0), CircuitState::CLOSED);
+        } catch (const std::exception& e) {
+            return CircuitBreakerResult(false, std::nullopt, e.what(),
+                                      std::chrono::milliseconds(0), CircuitState::CLOSED);
+        }
+    });
+
+    if (cb_result.success) {
         update_component_health(component_name, true, "Circuit breaker success");
-        return result;
-
-    } catch (const std::exception& e) {
-        breaker.record_failure();
-
+        return std::any_cast<T>(cb_result.data.value());
+    } else {
         ErrorInfo error(ErrorCategory::EXTERNAL_API, ErrorSeverity::HIGH,
                       component_name, operation_name,
-                      std::string("Circuit breaker failure: ") + e.what());
+                      std::string("Circuit breaker failure: ") + cb_result.error_message);
         error.context["service"] = service_name;
-        error.context["circuit_state"] = std::to_string(static_cast<int>(breaker.state));
+        error.context["circuit_state"] = std::to_string(static_cast<int>(cb_result.circuit_state_at_call));
         report_error(error);
 
-        update_component_health(component_name, false, std::string("Circuit breaker failure: ") + e.what());
+        update_component_health(component_name, false, std::string("Circuit breaker failure: ") + cb_result.error_message);
 
         // Try fallback
         return execute_fallback<T>(component_name, operation);

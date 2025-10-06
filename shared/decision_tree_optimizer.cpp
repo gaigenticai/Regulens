@@ -389,7 +389,7 @@ DecisionAnalysisResult DecisionTreeOptimizer::generate_ai_decision_recommendatio
 }
 
 DecisionAlternative DecisionTreeOptimizer::create_decision_alternative(
-    const std::string& description, const std::string& /*context*/) {
+    const std::string& description, const std::string& /*context*/) const {
 
     DecisionAlternative alt;
     alt.id = "alt_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
@@ -1090,7 +1090,7 @@ bool DecisionTreeOptimizer::validate_decision_input(
     return true;
 }
 
-std::vector<std::string> DecisionTreeOptimizer::parse_advantages_from_description(const std::string& description) {
+std::vector<std::string> DecisionTreeOptimizer::parse_advantages_from_description(const std::string& description) const {
     std::vector<std::string> advantages;
 
     // Simple keyword-based parsing for advantages
@@ -1139,7 +1139,7 @@ std::vector<std::string> DecisionTreeOptimizer::parse_advantages_from_descriptio
     return advantages;
 }
 
-std::vector<std::string> DecisionTreeOptimizer::parse_disadvantages_from_description(const std::string& description) {
+std::vector<std::string> DecisionTreeOptimizer::parse_disadvantages_from_description(const std::string& description) const {
     std::vector<std::string> disadvantages;
 
     // Simple keyword-based parsing for disadvantages
@@ -1204,7 +1204,7 @@ DecisionCriterion string_to_decision_criterion(const std::string& str) {
     return DecisionCriterion::FINANCIAL_IMPACT; // Default fallback
 }
 
-DecisionAlternative DecisionTreeOptimizer::parse_alternative_from_json(const nlohmann::json& alt_json) {
+DecisionAlternative DecisionTreeOptimizer::parse_alternative_from_json(const nlohmann::json& alt_json) const {
     DecisionAlternative alt;
 
     try {
@@ -1305,7 +1305,7 @@ DecisionAlternative DecisionTreeOptimizer::parse_alternative_from_json(const nlo
 }
 
 std::vector<DecisionAlternative> DecisionTreeOptimizer::parse_alternatives_from_text(
-    const std::string& text, int max_alternatives) {
+    const std::string& text, int max_alternatives) const {
 
     std::vector<DecisionAlternative> alternatives;
 
@@ -1333,8 +1333,22 @@ std::vector<DecisionAlternative> DecisionTreeOptimizer::parse_alternatives_from_
 
         for (const auto& line : lines) {
             // Check if line starts a new alternative
-            if ((line.size() >= 2 && std::isdigit(line[0]) && line[1] == '.') ||
-                (line.size() >= 1 && (line[0] == '-' || line[0] == '•' || line[0] == '*'))) {
+
+            // Check for numbered alternatives (e.g., "1.")
+            bool is_numbered = (line.size() >= 2 && std::isdigit(line[0]) && line[1] == '.');
+
+            // Check for bullet points: '-', '*', or Unicode bullet ("\u2022" or "•")
+            bool is_bullet = false;
+            if (line.size() >= 1) {
+                if (line[0] == '-' || line[0] == '*') {
+                    is_bullet = true;
+                } else if ((line.size() >= 3 && line.substr(0,3) == "\xe2\x80\xa2") || line.compare(0, 3, "\u2022") == 0) {
+                    // Handles UTF-8 encoded bullet (•)
+                    is_bullet = true;
+                }
+            }
+
+            if (is_numbered || is_bullet) {
 
                 if (!current_alt.empty()) {
                     alt_texts.push_back(current_alt);

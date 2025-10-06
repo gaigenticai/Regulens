@@ -9,22 +9,23 @@
 #include "../tool_interface.hpp"
 #include <curl/curl.h>
 #include <sstream>
-#include <websocketpp/client.hpp>
-#include <websocketpp/config/asio_no_tls_client.hpp>
-#include <websocketpp/common/thread.hpp>
+// WebSocket support disabled until websocketpp is available
+// #include <websocketpp/client.hpp>
+// #include <websocketpp/config/asio_no_tls_client.hpp>
+// #include <websocketpp/common/thread.hpp>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
 
 namespace regulens {
 
-// WebSocket client type alias
-typedef websocketpp::client<websocketpp::config::asio_client> ws_client;
-typedef websocketpp::lib::shared_ptr<websocketpp::lib::thread> thread_ptr;
+// WebSocket client type aliases (disabled)
+// typedef websocketpp::client<websocketpp::config::asio_client> ws_client;
+// typedef websocketpp::lib::shared_ptr<websocketpp::lib::thread> thread_ptr;
 
 // MCP Tool Implementation
 MCPToolIntegration::MCPToolIntegration(const ToolConfig& config, StructuredLogger* logger)
-    : Tool(config, logger), server_connected_(false), ws_client_(nullptr), ws_thread_(nullptr) {
+    : Tool(config, logger), server_connected_(false), ws_connected_(false) {
 
     // Parse MCP server configuration from tool config
     if (config.metadata.contains("mcp_server_url")) {
@@ -349,79 +350,11 @@ bool MCPToolIntegration::discover_mcp_resources() {
 }
 
 bool MCPToolIntegration::initialize_websocket_connection() {
-    try {
-        ws_client_ = std::make_unique<ws_client>();
-        ws_connected_ = false;
-
-        // Set up WebSocket event handlers
-        ws_client_->set_access_channels(websocketpp::log::alevel::none);
-        ws_client_->set_error_channels(websocketpp::log::elevel::none);
-
-        ws_client_->set_open_handler([this](websocketpp::connection_hdl hdl) {
-            std::lock_guard<std::mutex> lock(ws_mutex_);
-            ws_connection_ = hdl;
-            ws_connected_ = true;
-            response_cv_.notify_all();
-            logger_->log(LogLevel::INFO, "WebSocket connection established to MCP server");
-        });
-
-        ws_client_->set_close_handler([this](websocketpp::connection_hdl hdl) {
-            std::lock_guard<std::mutex> lock(ws_mutex_);
-            ws_connected_ = false;
-            logger_->log(LogLevel::INFO, "WebSocket connection closed");
-        });
-
-        ws_client_->set_message_handler([this](websocketpp::connection_hdl hdl,
-                                              ws_client::message_ptr msg) {
-            handle_websocket_message(msg->get_payload());
-        });
-
-        ws_client_->set_fail_handler([this](websocketpp::connection_hdl hdl) {
-            std::lock_guard<std::mutex> lock(ws_mutex_);
-            ws_connected_ = false;
-            logger_->log(LogLevel::ERROR, "WebSocket connection failed");
-            response_cv_.notify_all();
-        });
-
-        // Initialize ASIO
-        ws_client_->init_asio();
-
-        // Start WebSocket thread
-        ws_thread_ = std::make_unique<websocketpp::lib::thread>(
-            &ws_client::run, ws_client_.get());
-
-        // Connect to server
-        websocketpp::lib::error_code ec;
-        ws_client::connection_ptr con = ws_client_->get_connection(mcp_config_.server_url, ec);
-        if (ec) {
-            logger_->log(LogLevel::ERROR, "WebSocket connection creation failed: " + ec.message());
-            return false;
-        }
-
-        // Add authorization header if token provided
-        if (!mcp_config_.auth_token.empty()) {
-            con->add_subprotocol("authorization");
-            con->add_header("Authorization", "Bearer " + mcp_config_.auth_token);
-        }
-
-        ws_client_->connect(con);
-
-        // Wait for connection with timeout
-        {
-            std::unique_lock<std::mutex> lock(ws_mutex_);
-            if (!response_cv_.wait_for(lock, std::chrono::seconds(mcp_config_.connection_timeout),
-                                     [this]() { return ws_connected_.load(); })) {
-                logger_->log(LogLevel::ERROR, "WebSocket connection timeout");
-                return false;
-            }
-        }
-
-        return true;
-
-    } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "WebSocket initialization failed: " + std::string(e.what()));
-        return false;
-    }
+    // WebSocket support temporarily disabled (requires websocketpp library)
+    logger_->log(LogLevel::WARN, "MCP WebSocket support not available - websocketpp library not installed");
+    logger_->log(LogLevel::INFO, "MCP tool will return stub responses until WebSocket support is enabled");
+    ws_connected_ = false;
+    return false;
 }
 
 void MCPToolIntegration::handle_websocket_message(const std::string& message) {

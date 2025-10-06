@@ -27,20 +27,17 @@
 
 #include "../config/configuration_manager.hpp"
 #include "../logging/structured_logger.hpp"
-#include "../error_handler.hpp"
-#include "../resilience/circuit_breaker.hpp"
+
+enum class CircuitState;
+
+#include "metrics_collector.hpp"
 
 namespace regulens {
 
-/**
- * @brief Metric types supported by the system
- */
-enum class MetricType {
-    COUNTER,      // Monotonically increasing counter
-    GAUGE,        // Value that can go up or down
-    HISTOGRAM,    // Distribution of values with buckets
-    SUMMARY       // Similar to histogram but with quantiles
-};
+// Forward declarations
+class ErrorHandler;
+class CircuitBreaker;
+enum class CircuitState;
 
 /**
  * @brief Metric labels for dimensional metrics
@@ -52,6 +49,9 @@ struct MetricLabels {
 
     MetricLabels(std::unordered_map<std::string, std::string> lbls)
         : labels(std::move(lbls)) {}
+
+    MetricLabels(std::initializer_list<std::pair<const std::string, std::string>> init_list)
+        : labels(init_list) {}
 
     std::string to_string() const;
 };
@@ -176,6 +176,34 @@ private:
     struct HistogramBucket {
         double upper_bound;
         std::atomic<size_t> count{0};
+
+        HistogramBucket(double ub, size_t c = 0) : upper_bound(ub), count(c) {}
+
+        // Copy constructor
+        HistogramBucket(const HistogramBucket& other)
+            : upper_bound(other.upper_bound), count(other.count.load()) {}
+
+        // Move constructor
+        HistogramBucket(HistogramBucket&& other) noexcept
+            : upper_bound(other.upper_bound), count(other.count.load()) {}
+
+        // Copy assignment
+        HistogramBucket& operator=(const HistogramBucket& other) {
+            if (this != &other) {
+                upper_bound = other.upper_bound;
+                count.store(other.count.load());
+            }
+            return *this;
+        }
+
+        // Move assignment
+        HistogramBucket& operator=(HistogramBucket&& other) noexcept {
+            if (this != &other) {
+                upper_bound = other.upper_bound;
+                count.store(other.count.load());
+            }
+            return *this;
+        }
     };
 
     struct HistogramData {

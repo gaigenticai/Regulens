@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regulens | Agentic AI Compliance Platform</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #8b5cf6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #0f172a;
+            --dark-light: #1e293b;
+            --dark-lighter: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--dark);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Header */
+        .header {
+            background: var(--dark-light);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--dark);
+            border-radius: 20px;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Main Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Navigation Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text);
+            background: var(--dark-light);
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        /* Tab Content */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Card */
+        .card {
+            background: var(--dark-light);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.1);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .card-icon.primary { background: linear-gradient(135deg, var(--primary), var(--secondary)); }
+        .card-icon.success { background: linear-gradient(135deg, #10b981, #059669); }
+        .card-icon.warning { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .card-icon.danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+
+        .metric {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--text);
+            margin: 0.5rem 0;
+        }
+
+        .metric-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* Agent Card */
+        .agent-card {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .agent-status {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-top: 0.25rem;
+        }
+
+        .agent-status.active { background: var(--success); animation: pulse 2s infinite; }
+        .agent-status.idle { background: var(--text-muted); }
+        .agent-status.error { background: var(--danger); }
+
+        .agent-info h3 {
+            font-size: 1rem;
+            color: var(--text);
+            margin-bottom: 0.25rem;
+        }
+
+        .agent-info p {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* Activity Feed */
+        .activity-feed {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            display: flex;
+            gap: 1rem;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+        }
+
+        .activity-item:hover {
+            background: var(--dark);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-title {
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.25rem;
+        }
+
+        .activity-meta {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .activity-time {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge.success { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .badge.warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .badge.danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .badge.primary { background: rgba(99, 102, 241, 0.2); color: var(--primary); }
+
+        /* Decision Tree Visualization */
+        .decision-tree {
+            padding: 1rem;
+            background: var(--dark);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .decision-node {
+            padding: 0.75rem 1rem;
+            margin: 0.5rem 0;
+            background: var(--dark-light);
+            border-left: 3px solid var(--primary);
+            border-radius: 4px;
+        }
+
+        .decision-node.approved { border-left-color: var(--success); }
+        .decision-node.rejected { border-left-color: var(--danger); }
+        .decision-node.review { border-left-color: var(--warning); }
+
+        .decision-confidence {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            background: var(--dark);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+
+        /* Loading State */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--dark);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--dark-lighter);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .tabs {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .container {
+                padding: 1rem;
+            }
+        }
+
+        /* Communication Graph */
+        .comm-graph {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 2rem;
+            min-height: 300px;
+        }
+
+        .agent-node {
+            position: relative;
+            text-align: center;
+        }
+
+        .agent-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin: 0 auto 0.5rem;
+            border: 3px solid var(--dark);
+        }
+
+        .agent-avatar.active {
+            box-shadow: 0 0 0 3px var(--success);
+            animation: pulse-ring 2s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 var(--success); }
+            50% { box-shadow: 0 0 0 6px transparent; }
+            100% { box-shadow: 0 0 0 0 transparent; }
+        }
+
+        .agent-name {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">🤖</div>
+                <span>Regulens</span>
+            </div>
+            <div class="header-status">
+                <div class="status-indicator">
+                    <span class="status-dot"></span>
+                    <span>System Active</span>
+                </div>
+                <div class="status-indicator">
+                    <span id="agent-count">4</span> Agents Running
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Navigation -->
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
+            <button class="tab" onclick="showTab('agents')">Agent Network</button>
+            <button class="tab" onclick="showTab('decisions')">Live Decisions</button>
+            <button class="tab" onclick="showTab('monitoring')">Regulatory Monitoring</button>
+            <button class="tab" onclick="showTab('audit')">Audit Trail</button>
+            <button class="tab" onclick="showTab('communication')">Agent Communication</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">System Status</div>
+                            <div class="metric" id="uptime">99.9%</div>
+                            <div class="metric-label">Uptime</div>
+                        </div>
+                        <div class="card-icon primary">⚡</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Active Agents</div>
+                            <div class="metric" id="active-agents">4</div>
+                            <div class="metric-label">Operational</div>
+                        </div>
+                        <div class="card-icon success">🤖</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Decisions Today</div>
+                            <div class="metric" id="decisions-count">156</div>
+                            <div class="metric-label">98.5% Accuracy</div>
+                        </div>
+                        <div class="card-icon warning">⚖️</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Regulatory Changes</div>
+                            <div class="metric" id="reg-changes">23</div>
+                            <div class="metric-label">This Week</div>
+                        </div>
+                        <div class="card-icon danger">📋</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3 style="margin-bottom: 1rem;">Live Activity Feed</h3>
+                <div class="activity-feed" id="activity-feed">
+                    <!-- Activity items will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Agents Tab -->
+        <div id="agents" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card agent-card">
+                    <span class="agent-status active"></span>
+                    <div class="agent-info">
+                        <h3>Transaction Guardian</h3>
+                        <p>Real-time transaction monitoring & fraud detection</p>
+                        <div style="margin-top: 0.5rem;">
+                            <span class="badge success">156 transactions/min</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card agent-card">
+                    <span class="agent-status active"></span>
+                    <div class="agent-info">
+                        <h3>Regulatory Assessor</h3>
+                        <p>Continuous regulatory compliance analysis</p>
+                        <div style="margin-top: 0.5rem;">
+                            <span class="badge primary">23 changes tracked</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card agent-card">
+                    <span class="agent-status active"></span>
+                    <div class="agent-info">
+                        <h3>Audit Intelligence</h3>
+                        <p>Automated audit trail analysis & reporting</p>
+                        <div style="margin-top: 0.5rem;">
+                            <span class="badge warning">3 findings</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card agent-card">
+                    <span class="agent-status active"></span>
+                    <div class="agent-info">
+                        <h3>Decision Engine</h3>
+                        <p>Multi-criteria decision making with explainability</p>
+                        <div style="margin-top: 0.5rem;">
+                            <span class="badge success">98.5% accuracy</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Decisions Tab -->
+        <div id="decisions" class="tab-content">
+            <div class="card">
+                <h3 style="margin-bottom: 1rem;">Recent Agent Decisions</h3>
+                <div class="decision-tree" id="decisions-list">
+                    <!-- Decisions will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitoring Tab -->
+        <div id="monitoring" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3 style="margin-bottom: 1rem;">Regulatory Sources</h3>
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span class="agent-status active"></span>
+                            <span>SEC EDGAR API</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span class="agent-status active"></span>
+                            <span>FCA Regulatory Feed</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span class="agent-status active"></span>
+                            <span>ECB Announcements</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 style="margin-bottom: 1rem;">Latest Changes</h3>
+                    <div id="regulatory-changes">
+                        <!-- Regulatory changes will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit Trail Tab -->
+        <div id="audit" class="tab-content">
+            <div class="card">
+                <h3 style="margin-bottom: 1rem;">Audit Events</h3>
+                <div class="activity-feed" id="audit-trail">
+                    <!-- Audit events will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Communication Tab -->
+        <div id="communication" class="tab-content">
+            <div class="card">
+                <h3 style="margin-bottom: 1rem;">Inter-Agent Communication Network</h3>
+                <div class="comm-graph">
+                    <div class="agent-node">
+                        <div class="agent-avatar active">🛡️</div>
+                        <div class="agent-name">Transaction<br>Guardian</div>
+                    </div>
+                    <div class="agent-node">
+                        <div class="agent-avatar active">⚖️</div>
+                        <div class="agent-name">Decision<br>Engine</div>
+                    </div>
+                    <div class="agent-node">
+                        <div class="agent-avatar active">📊</div>
+                        <div class="agent-name">Regulatory<br>Assessor</div>
+                    </div>
+                    <div class="agent-node">
+                        <div class="agent-avatar active">🔍</div>
+                        <div class="agent-name">Audit<br>Intelligence</div>
+                    </div>
+                </div>
+                <div class="activity-feed" id="comm-messages">
+                    <!-- Communication messages will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+
+            // Load data when tab is activated
+            loadTabData(tabName);
+        }
+
+        // Load data for specific tab
+        function loadTabData(tabName) {
+            switch(tabName) {
+                case 'dashboard':
+                    loadActivityFeed();
+                    break;
+                case 'decisions':
+                    loadDecisions();
+                    break;
+                case 'monitoring':
+                    loadRegulatoryChanges();
+                    break;
+                case 'audit':
+                    loadAuditTrail();
+                    break;
+                case 'communication':
+                    loadCommunication();
+                    break;
+            }
+        }
+
+        // Load activity feed
+        function loadActivityFeed() {
+            fetch('/api/activity')
+                .then(r => r.json())
+                .then(data => {
+                    const feed = document.getElementById('activity-feed');
+                    feed.innerHTML = data.activities.map(activity => `
+                        <div class="activity-item">
+                            <div class="activity-icon ${activity.type}">
+                                ${activity.icon}
+                            </div>
+                            <div class="activity-content">
+                                <div class="activity-title">${activity.title}</div>
+                                <div class="activity-meta">${activity.description}</div>
+                            </div>
+                            <div class="activity-time">${activity.time}</div>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => {
+                    // Fallback demo data
+                    document.getElementById('activity-feed').innerHTML = getDemoActivityFeed();
+                });
+        }
+
+        // Load decisions
+        function loadDecisions() {
+            fetch('/api/decisions')
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('decisions-list');
+                    list.innerHTML = data.decisions.map(d => `
+                        <div class="decision-node ${d.status}">
+                            <strong>${d.title}</strong>
+                            <span class="decision-confidence">${d.confidence}% confidence</span>
+                            <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.875rem;">
+                                ${d.reasoning}
+                            </p>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => {
+                    document.getElementById('decisions-list').innerHTML = getDemoDecisions();
+                });
+        }
+
+        // Load regulatory changes
+        function loadRegulatoryChanges() {
+            fetch('/api/regulatory-changes')
+                .then(r => r.json())
+                .then(data => {
+                    const changes = document.getElementById('regulatory-changes');
+                    changes.innerHTML = data.changes.map(c => `
+                        <div style="margin-bottom: 0.75rem;">
+                            <span class="badge ${c.risk}">${c.risk}</span>
+                            <div style="margin-top: 0.25rem; font-size: 0.875rem;">
+                                ${c.title}
+                            </div>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => {
+                    document.getElementById('regulatory-changes').innerHTML = getDemoRegChanges();
+                });
+        }
+
+        // Load audit trail
+        function loadAuditTrail() {
+            fetch('/api/audit-trail')
+                .then(r => r.json())
+                .then(data => {
+                    const trail = document.getElementById('audit-trail');
+                    trail.innerHTML = data.events.map(e => `
+                        <div class="activity-item">
+                            <div class="activity-icon primary">${e.icon}</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${e.title}</div>
+                                <div class="activity-meta">${e.description}</div>
+                            </div>
+                            <div class="activity-time">${e.time}</div>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => {
+                    document.getElementById('audit-trail').innerHTML = getDemoAuditTrail();
+                });
+        }
+
+        // Load communication
+        function loadCommunication() {
+            fetch('/api/communication')
+                .then(r => r.json())
+                .then(data => {
+                    const comm = document.getElementById('comm-messages');
+                    comm.innerHTML = data.messages.map(m => `
+                        <div class="activity-item">
+                            <div class="activity-icon primary">${m.from_icon}</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${m.from} → ${m.to}</div>
+                                <div class="activity-meta">${m.message}</div>
+                            </div>
+                            <div class="activity-time">${m.time}</div>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => {
+                    document.getElementById('comm-messages').innerHTML = getDemoCommunication();
+                });
+        }
+
+        // Demo data fallbacks
+        function getDemoActivityFeed() {
+            return `
+                <div class="activity-item">
+                    <div class="activity-icon primary">✅</div>
+                    <div class="activity-content">
+                        <div class="activity-title">Transaction Approved</div>
+                        <div class="activity-meta">Transaction Guardian • TXN-789456 • Risk: LOW</div>
+                    </div>
+                    <div class="activity-time">2 min ago</div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon warning">📋</div>
+                    <div class="activity-content">
+                        <div class="activity-title">New SEC Filing Detected</div>
+                        <div class="activity-meta">Regulatory Assessor • Form 10-K Analysis</div>
+                    </div>
+                    <div class="activity-time">5 min ago</div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon success">🔍</div>
+                    <div class="activity-content">
+                        <div class="activity-title">Audit Report Generated</div>
+                        <div class="activity-meta">Audit Intelligence • Q4 2024 Report</div>
+                    </div>
+                    <div class="activity-time">12 min ago</div>
+                </div>
+            `;
+        }
+
+        function getDemoDecisions() {
+            return `
+                <div class="decision-node approved">
+                    <strong>Transaction Risk Assessment</strong>
+                    <span class="decision-confidence">95% confidence</span>
+                    <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.875rem;">
+                        Transaction approved based on: (1) customer history clean, (2) amount within normal range, (3) geo-location verified
+                    </p>
+                </div>
+                <div class="decision-node review">
+                    <strong>Compliance Policy Update Review</strong>
+                    <span class="decision-confidence">78% confidence</span>
+                    <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.875rem;">
+                        New FCA regulation requires human review: potential impact on 3 business processes identified
+                    </p>
+                </div>
+            `;
+        }
+
+        function getDemoRegChanges() {
+            return `
+                <div style="margin-bottom: 0.75rem;">
+                    <span class="badge danger">HIGH</span>
+                    <div style="margin-top: 0.25rem; font-size: 0.875rem;">
+                        SEC: New AI disclosure requirements
+                    </div>
+                </div>
+                <div style="margin-bottom: 0.75rem;">
+                    <span class="badge warning">MEDIUM</span>
+                    <div style="margin-top: 0.25rem; font-size: 0.875rem;">
+                        FCA: Updated AML guidelines
+                    </div>
+                </div>
+            `;
+        }
+
+        function getDemoAuditTrail() {
+            return `
+                <div class="activity-item">
+                    <div class="activity-icon primary">📝</div>
+                    <div class="activity-content">
+                        <div class="activity-title">Decision Engine: Risk Assessment</div>
+                        <div class="activity-meta">TXN-789456 approved • Risk: LOW • Confidence: 95%</div>
+                    </div>
+                    <div class="activity-time">14:35:12</div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon warning">⚙️</div>
+                    <div class="activity-content">
+                        <div class="activity-title">Admin: Configuration Change</div>
+                        <div class="activity-meta">Updated risk thresholds • User: admin@regulens.ai</div>
+                    </div>
+                    <div class="activity-time">14:32:08</div>
+                </div>
+            `;
+        }
+
+        function getDemoCommunication() {
+            return `
+                <div class="activity-item">
+                    <div class="activity-icon primary">🛡️</div>
+                    <div class="activity-content">
+                        <div class="activity-title">Transaction Guardian → Decision Engine</div>
+                        <div class="activity-meta">Request: Risk assessment for TXN-789456 ($45,000)</div>
+                    </div>
+                    <div class="activity-time">14:35:10</div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon success">⚖️</div>
+                    <div class="activity-content">
+                        <div class="activity-title">Decision Engine → Transaction Guardian</div>
+                        <div class="activity-meta">Response: APPROVED (95% confidence)</div>
+                    </div>
+                    <div class="activity-time">14:35:12</div>
+                </div>
+            `;
+        }
+
+        // Auto-refresh
+        setInterval(() => {
+            const activeTab = document.querySelector('.tab.active').textContent.trim().toLowerCase().replace(' ', '');
+            loadTabData(activeTab);
+        }, 30000); // Refresh every 30 seconds
+
+        // Initialize
+        loadActivityFeed();
+    </script>
+</body>
+</html>

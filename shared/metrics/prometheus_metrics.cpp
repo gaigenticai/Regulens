@@ -6,6 +6,7 @@
  */
 
 #include "prometheus_metrics.hpp"
+#include "../resilience/circuit_breaker.hpp"
 #include <algorithm>
 #include <sstream>
 #include <iomanip>

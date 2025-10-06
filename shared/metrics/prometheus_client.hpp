@@ -10,8 +10,8 @@
 #include <string>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <shared/network/http_client.hpp>
-#include <shared/logging/structured_logger.hpp>
+#include "../network/http_client.hpp"
+#include "../logging/structured_logger.hpp"
 
 namespace regulens {
 

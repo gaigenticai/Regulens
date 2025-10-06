@@ -378,7 +378,6 @@ private:
     std::shared_ptr<ConfigurationManager> config_;
     StructuredLogger* logger_;
     std::shared_ptr<CaseBasedReasoner> case_reasoner_;
-    std::shared_ptr<CaseBasedReasoner> case_reasoner_;
 
     /**
      * @brief Find cases with similar context-decision combinations

@@ -46,11 +46,23 @@
 #include "../../core/agent/consensus_engine.hpp"
 #include "../../agents/real_agent.hpp"
 #include "../knowledge_base.hpp"
+#include "../regulatory_knowledge_base.hpp"
+#include "../audit/decision_audit_trail.hpp"
+#include "../../regulatory_monitor/regulatory_monitor.hpp"
 
 namespace regulens {
 
 // Forward declarations
 class AgentOrchestrator;
+
+/**
+ * @brief Agent types for the system
+ */
+enum class AgentType {
+    TRANSACTION_GUARDIAN,
+    REGULATORY_ASSESSOR,
+    AUDIT_INTELLIGENCE
+};
 
 /**
  * @brief Web UI handlers for feature testing
@@ -286,6 +298,15 @@ private:
 
     // Knowledge base
     std::shared_ptr<KnowledgeBase> knowledge_base_;
+
+    // Regulatory knowledge base
+    std::shared_ptr<RegulatoryKnowledgeBase> regulatory_knowledge_base_;
+
+    // Decision audit trail manager
+    std::shared_ptr<DecisionAuditTrailManager> decision_audit_manager_;
+
+    // Regulatory monitor
+    std::shared_ptr<RegulatoryMonitor> regulatory_monitor_;
 
     // Database connection for testing
     std::shared_ptr<PostgreSQLConnection> db_connection_;

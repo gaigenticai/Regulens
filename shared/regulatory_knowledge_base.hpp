@@ -6,9 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "../config/configuration_manager.hpp"
-#include "../logging/structured_logger.hpp"
-#include "../models/regulatory_change.hpp"
+#include "config/configuration_manager.hpp"
+#include "logging/structured_logger.hpp"
+#include "models/regulatory_change.hpp"
 
 namespace regulens {
 

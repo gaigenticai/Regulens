@@ -131,6 +131,53 @@ std::vector<nlohmann::json> PostgreSQLConnection::execute_query_multi(
     return results;
 }
 
+PostgreSQLConnection::QueryResult PostgreSQLConnection::execute_query(
+    const std::string& query, const std::vector<std::string>& params) {
+
+    QueryResult result;
+    std::lock_guard<std::mutex> lock(connection_mutex_);
+
+    if (!connected_) {
+        return result;
+    }
+
+    // Convert parameters to C-style strings
+    std::vector<const char*> param_values;
+    for (const auto& param : params) {
+        param_values.push_back(param.c_str());
+    }
+
+    PGresult* pg_result = PQexecParams(connection_, query.c_str(),
+                                      static_cast<int>(params.size()),
+                                      nullptr, param_values.data(), nullptr, nullptr, 0);
+
+    if (PQresultStatus(pg_result) != PGRES_TUPLES_OK) {
+        log_error("execute_query", pg_result);
+        PQclear(pg_result);
+        return result;
+    }
+
+    int num_rows = PQntuples(pg_result);
+    int num_fields = PQnfields(pg_result);
+
+    for (int i = 0; i < num_rows; ++i) {
+        std::unordered_map<std::string, std::string> row;
+        for (int j = 0; j < num_fields; ++j) {
+            const char* field_name = PQfname(pg_result, j);
+            if (PQgetisnull(pg_result, i, j)) {
+                row[field_name] = "";
+            } else {
+                const char* value = PQgetvalue(pg_result, i, j);
+                row[field_name] = std::string(value);
+            }
+        }
+        result.rows.push_back(row);
+    }
+
+    PQclear(pg_result);
+    return result;
+}
+
 bool PostgreSQLConnection::execute_command(
     const std::string& command, const std::vector<std::string>& params) {
 

@@ -42,11 +42,16 @@ public:
 
     // Query execution
     std::optional<nlohmann::json> execute_query_single(const std::string& query,
-                                                       const std::vector<std::string>& params = {});
+                                                        const std::vector<std::string>& params = {});
     std::vector<nlohmann::json> execute_query_multi(const std::string& query,
-                                                    const std::vector<std::string>& params = {});
+                                                     const std::vector<std::string>& params = {});
+    struct QueryResult {
+        std::vector<std::unordered_map<std::string, std::string>> rows;
+    };
+    QueryResult execute_query(const std::string& query,
+                              const std::vector<std::string>& params = {});
     bool execute_command(const std::string& command,
-                        const std::vector<std::string>& params = {});
+                         const std::vector<std::string>& params = {});
 
     // Transaction management
     bool begin_transaction();

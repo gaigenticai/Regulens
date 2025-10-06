@@ -63,8 +63,8 @@ struct FeedbackData {
     std::chrono::system_clock::time_point timestamp;
     std::chrono::system_clock::time_point applied_at;
 
-    FeedbackData(std::string sid, FeedbackType type, std::string source, std::string target)
-        : feedback_id(generate_feedback_id(sid, type, source, target)),
+    FeedbackData(FeedbackType type, std::string source, std::string target)
+        : feedback_id(generate_feedback_id("", type, source, target)),
           feedback_type(type), priority(FeedbackPriority::MEDIUM),
           source_entity(std::move(source)), target_entity(std::move(target)),
           feedback_score(0.0), timestamp(std::chrono::system_clock::now()) {}

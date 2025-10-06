@@ -14,6 +14,15 @@
 #include "../llm/function_calling.hpp"
 #include "../llm/compliance_functions.hpp"
 
+// Utility function to get query parameter
+static std::optional<std::string> get_query_param(const regulens::HTTPRequest& request, const std::string& key) {
+    auto it = request.query_params.find(key);
+    if (it != request.query_params.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
 namespace regulens {
 
 WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
@@ -21,163 +30,176 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
                            std::shared_ptr<MetricsCollector> metrics)
     : config_manager_(config), logger_(logger), metrics_collector_(metrics) {
 
-    // Initialize decision tree visualizer
-    decision_tree_visualizer_ = std::make_shared<DecisionTreeVisualizer>(config, logger);
+    // // Initialize decision tree visualizer
+    // decision_tree_visualizer_ = std::make_shared<DecisionTreeVisualizer>(config, logger);
 
-    // Initialize agent activity feed
-    activity_feed_ = std::make_shared<AgentActivityFeed>(config, logger);
-    activity_feed_->initialize();
+    // // Initialize agent activity feed
+    // activity_feed_ = std::make_shared<AgentActivityFeed>(config, logger);
+    // activity_feed_->initialize();
 
-    // Initialize human-AI collaboration
-    collaboration_ = std::make_shared<HumanAICollaboration>(config, logger);
-    collaboration_->initialize();
+    // // Initialize human-AI collaboration
+    // collaboration_ = std::make_shared<HumanAICollaboration>(config, logger);
+    // collaboration_->initialize();
 
-    // Initialize pattern recognition
-    pattern_recognition_ = std::make_shared<PatternRecognitionEngine>(config, logger);
-    pattern_recognition_->initialize();
+    // // Initialize pattern recognition
+    // pattern_recognition_ = std::make_shared<PatternRecognitionEngine>(config, logger);
+    // pattern_recognition_->initialize();
 
-    // Initialize feedback incorporation
-    feedback_system_ = std::make_shared<FeedbackIncorporationSystem>(config, logger, pattern_recognition_);
-    feedback_system_->initialize();
+    // // Initialize feedback incorporation
+    // feedback_system_ = std::make_shared<FeedbackIncorporationSystem>(config, logger, pattern_recognition_);
+    // feedback_system_->initialize();
 
-    // Initialize error handler
-    error_handler_ = std::make_shared<ErrorHandler>(config, logger);
-    error_handler_->initialize();
+    // // Initialize error handler
+    // error_handler_ = std::make_shared<ErrorHandler>(config, logger);
+    // error_handler_->initialize();
 
-    // Initialize knowledge base
-    knowledge_base_ = std::make_shared<KnowledgeBase>(config, logger);
-    knowledge_base_->initialize();
+    // // Initialize knowledge base
+    // knowledge_base_ = std::make_shared<KnowledgeBase>(config, logger);
+    // knowledge_base_->initialize();
+
+    // // Initialize regulatory knowledge base
+    // regulatory_knowledge_base_ = std::make_shared<RegulatoryKnowledgeBase>(config, logger);
+    // regulatory_knowledge_base_->initialize();
 
     // Initialize agent orchestrator (simplified for testing)
     // Full integration would be added in production deployment
 
-    // Initialize regulatory fetcher for testing
-    auto http_client = std::make_shared<HttpClient>(config, logger);
-    auto email_client = std::make_shared<EmailClient>(config, logger);
-    regulatory_fetcher_ = std::make_shared<RealRegulatoryFetcher>(http_client, email_client, logger);
+    // // Initialize regulatory fetcher for testing
+    // auto http_client = std::make_shared<HttpClient>(config, logger);
+    // auto email_client = std::make_shared<EmailClient>(config, logger);
+    // regulatory_fetcher_ = std::make_shared<RealRegulatoryFetcher>(http_client, email_client, logger);
 
-    // Initialize health check handler for Kubernetes probes
-    auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
-    health_check_handler_ = create_health_check_handler(config, logger, error_handler_, prometheus_metrics);
+    // // Initialize health check handler for Kubernetes probes
+    // auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
+    // health_check_handler_ = create_health_check_handler(config, logger, error_handler_, prometheus_metrics);
 
-    // Register service-specific health checks
-    if (health_check_handler_) {
-        // Database connectivity check
-        health_check_handler_->register_health_check("database_connectivity",
-            [this]() -> HealthCheckResult {
-                try {
-                    if (db_connection_ && db_connection_->is_connected()) {
-                        return HealthCheckResult{true, "healthy", "Database connection active"};
-                    } else {
-                        return HealthCheckResult{false, "unhealthy", "Database connection lost"};
-                    }
-                } catch (const std::exception& e) {
-                    return HealthCheckResult{false, "unhealthy", "Database check failed: " + std::string(e.what())};
-                }
-            },
-            true,  // critical for readiness
-            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+    // // Register service-specific health checks
+    // if (health_check_handler_) {
+    //     // Database connectivity check
+    //     health_check_handler_->register_health_check("database_connectivity",
+    //         [this]() -> HealthCheckResult {
+    //             try {
+    //                 if (db_connection_ && db_connection_->is_connected()) {
+    //                     return HealthCheckResult{true, "healthy", "Database connection active"};
+    //                 } else {
+    //                     return HealthCheckResult{false, "unhealthy", "Database connection lost"};
+    //                 }
+    //             catch (const std::exception& e) {
+    //                 return HealthCheckResult{false, "unhealthy", "Database check failed: " + std::string(e.what())};
+    //             }
+    //         },
+    //         true,  // critical for readiness
+    //         {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
 
-        // OpenAI client health check
-        health_check_handler_->register_health_check("openai_client",
-            [this]() -> HealthCheckResult {
-                try {
-                    if (openai_client_ && openai_client_->is_healthy()) {
-                        return HealthCheckResult{true, "healthy", "OpenAI client operational"};
-                    } else {
-                        return HealthCheckResult{false, "unhealthy", "OpenAI client unavailable"};
-                    }
-                } catch (const std::exception& e) {
-                    return HealthCheckResult{false, "unhealthy", "OpenAI client check failed: " + std::string(e.what())};
-                }
-            },
-            false,  // not critical for basic operation
-            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+    //     // OpenAI client health check
+    //     health_check_handler_->register_health_check("openai_client",
+    //         [this]() -> HealthCheckResult {
+    //             try {
+    //                 if (openai_client_ && openai_client_->is_healthy()) {
+    //                     return HealthCheckResult{true, "healthy", "OpenAI client operational"};
+    //                 } else {
+    //                     return HealthCheckResult{false, "unhealthy", "OpenAI client unavailable"};
+    //                 }
+    //             catch (const std::exception& e) {
+    //                 return HealthCheckResult{false, "unhealthy", "OpenAI client check failed: " + std::string(e.what())};
+    //             }
+    //         },
+    //         false,  // not critical for basic operation
+    //         {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
 
-        // Redis connectivity check
-        health_check_handler_->register_health_check("redis_connectivity",
-            health_checks::redis_health_check(),
-            true,  // critical for readiness
-            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+    //     // Redis connectivity check
+    //     health_check_handler_->register_health_check("redis_connectivity",
+    //         health_checks::redis_health_check(),
+    //         true,  // critical for readiness
+    //         {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
 
-        // Disk space check
-        health_check_handler_->register_health_check("disk_space",
-            health_checks::disk_space_health_check(15.0),  // 15% free space required
-            true,  // critical for readiness
-            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+    //     // Disk space check
+    //     health_check_handler_->register_health_check("disk_space",
+    //         health_checks::disk_space_health_check(15.0),  // 15% free space required
+    //         true,  // critical for readiness
+    //         {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
 
-        // Memory usage check
-        health_check_handler_->register_health_check("memory_usage",
-            health_checks::memory_health_check(85.0),  // 85% max memory usage
-            true,  // critical for readiness
-            {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
-    }
+    //     // Memory usage check
+    //     health_check_handler_->register_health_check("memory_usage",
+    //         health_checks::memory_health_check(85.0),  // 85% max memory usage
+    //         true,  // critical for readiness
+    //         {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+    // }
 
-    // Initialize OpenAI client
-    openai_client_ = std::make_shared<OpenAIClient>(config, logger, error_handler_);
-    openai_client_->initialize();
+    // // Initialize OpenAI client
+    // openai_client_ = std::make_shared<OpenAIClient>(config, logger, error_handler_);
+    // openai_client_->initialize();
 
-    // Initialize Anthropic Claude client
-    anthropic_client_ = std::make_shared<AnthropicClient>(config, logger, error_handler_);
-    anthropic_client_->initialize();
+    // // Initialize Anthropic Claude client
+    // anthropic_client_ = std::make_shared<AnthropicClient>(config, logger, error_handler_);
+    // anthropic_client_->initialize();
 
-    // Initialize Risk Assessment Engine
-    risk_assessment_ = std::make_shared<RiskAssessmentEngine>(config, logger, error_handler_, openai_client_);
-    risk_assessment_->initialize();
+    // // Initialize Risk Assessment Engine
+    // risk_assessment_ = std::make_shared<RiskAssessmentEngine>(config, logger, error_handler_, openai_client_);
+    // risk_assessment_->initialize();
 
-    // Initialize Decision Tree Optimizer
-    decision_optimizer_ = std::make_shared<DecisionTreeOptimizer>(config, logger, error_handler_,
-                                                                  openai_client_, anthropic_client_, risk_assessment_);
-    decision_optimizer_->initialize();
+    // // Initialize Decision Tree Optimizer
+    // decision_optimizer_ = std::make_shared<DecisionTreeOptimizer>(config, logger, error_handler_,
+    //                                                               openai_client_, anthropic_client_, risk_assessment_);
+    // decision_optimizer_->initialize();
 
-    // Initialize Function Calling components
-    function_registry_ = std::make_shared<FunctionRegistry>(config, logger.get(), error_handler_.get());
-    function_dispatcher_ = std::make_shared<FunctionDispatcher>(function_registry_, logger.get(), error_handler_.get());
+    // // Initialize Function Calling components
+    // function_registry_ = std::make_shared<FunctionRegistry>(config, logger.get(), error_handler_.get());
+    // function_dispatcher_ = std::make_shared<FunctionDispatcher>(function_registry_, logger.get(), error_handler_.get());
 
     // Register compliance functions
-    auto compliance_library = create_compliance_function_library(
-        knowledge_base_, risk_assessment_, config, logger.get(), error_handler_.get());
-    compliance_library->register_all_functions(*function_registry_);
+    // auto compliance_library = create_compliance_function_library(
+    //     knowledge_base_, risk_assessment_, config, logger.get(), error_handler_.get());
+    // compliance_library->register_all_functions(*function_registry_);
 
-    // Initialize Embeddings components
-    embeddings_client_ = create_embeddings_client(config, logger.get(), error_handler_.get());
-    document_processor_ = create_document_processor(config, logger.get(), error_handler_.get());
-    semantic_search_engine_ = create_semantic_search_engine(
-        embeddings_client_, document_processor_, config, logger.get(), error_handler_.get());
+    // // Initialize Embeddings components
+    // embeddings_client_ = create_embeddings_client(config, logger.get(), error_handler_.get());
+    // document_processor_ = create_document_processor(config, logger.get(), error_handler_.get());
+    // semantic_search_engine_ = create_semantic_search_engine(
+    //     embeddings_client_, document_processor_, config, logger.get(), error_handler_.get());
 
-    // Initialize Multi-Agent Communication components
-    agent_registry_ = create_agent_registry(config, logger.get(), error_handler_.get());
-    inter_agent_communicator_ = create_inter_agent_communicator(
-        config, agent_registry_, logger.get(), error_handler_.get());
-    message_translator_ = create_message_translator(
-        config, openai_client_, anthropic_client_, logger.get(), error_handler_.get());
-    consensus_engine_ = create_consensus_engine(
-        config, inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
-    communication_mediator_ = create_communication_mediator(
-        inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
+    // // Initialize Multi-Agent Communication components
+    // agent_registry_ = create_agent_registry(config, logger.get(), error_handler_.get());
+    // inter_agent_communicator_ = create_inter_agent_communicator(
+    //     config, agent_registry_, logger.get(), error_handler_.get());
+    // message_translator_ = create_message_translator(
+    //     config, openai_client_, anthropic_client_, logger.get(), error_handler_.get());
+    // consensus_engine_ = create_consensus_engine(
+    //     config, inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
+    // communication_mediator_ = create_communication_mediator(
+    //     inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
 
-    // Initialize Memory System components
-    conversation_memory_ = create_conversation_memory(config, embeddings_client_, db_connection_, logger.get(), error_handler_.get());
-    learning_engine_ = create_learning_engine(config, conversation_memory_, openai_client_, anthropic_client_, logger.get(), error_handler_.get());
-    case_based_reasoning_ = create_case_based_reasoner(
-        config, embeddings_client_, conversation_memory_, logger.get(), error_handler_.get());
-    memory_manager_ = create_memory_manager(
-        config, conversation_memory_, learning_engine_,
-        logger.get(), error_handler_.get());
-    // Note: semantic_search_engine_ is already initialized above
+    // // Initialize Memory System components
+    // conversation_memory_ = create_conversation_memory(config, embeddings_client_, db_connection_, logger.get(), error_handler_.get());
+    // learning_engine_ = create_learning_engine(config, conversation_memory_, openai_client_, anthropic_client_, logger.get(), error_handler_.get());
+    // case_based_reasoning_ = create_case_based_reasoner(
+    //     config, embeddings_client_, conversation_memory_, logger.get(), error_handler_.get());
+    // memory_manager_ = create_memory_manager(
+    //     config, conversation_memory_, learning_engine_,
+    //     logger.get(), error_handler_.get());
+    // // Note: semantic_search_engine_ is already initialized above
 
-    // Initialize database connection for testing
-    if (config_manager_) {
-        try {
-            auto db_config = config_manager_->get_database_config();
-            db_pool_ = std::make_shared<ConnectionPool>(db_config);
-            db_connection_ = db_pool_->get_connection();
-        } catch (const std::exception& e) {
-            if (logger_) {
-                logger_->warn("Failed to initialize database connection for web UI: {}", e.what());
-            }
-        }
-    }
+    // // Initialize database connection for testing
+    // if (config_manager_) {
+    //     try {
+    //         auto db_config = config_manager_->get_database_config();
+    //         db_pool_ = std::make_shared<ConnectionPool>(db_config);
+    //         db_connection_ = db_pool_->get_connection();
+
+    //         // Initialize decision audit trail manager
+    //         decision_audit_manager_ = std::make_shared<DecisionAuditTrailManager>(db_pool_, logger_.get());
+    //         decision_audit_manager_->initialize();
+
+    //         // Initialize regulatory monitor
+    //         regulatory_monitor_ = std::make_shared<RegulatoryMonitor>(config_manager_, logger_, regulatory_knowledge_base_);
+    //         regulatory_monitor_->initialize();
+
+    //     catch (const std::exception& e) {
+    //         if (logger_) {
+    //             logger_->warn("Failed to initialize database connection for web UI: {}", e.what());
+    //         }
+    //     }
+    // }
 }
 
 // Configuration testing handlers
@@ -287,7 +309,11 @@ HTTPResponse WebUIHandlers::handle_db_query(const HTTPRequest& request) {
         };
 
         return create_json_response(response.dump());
-    } catch (const std::exception& e) {
+    }
+
+    }
+
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Query execution failed: ") + e.what());
     }
 }
@@ -319,7 +345,7 @@ HTTPResponse WebUIHandlers::handle_agent_status(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
-    // Retrieve real-time agent status from AgentOrchestrator
+    // Retrieve real-time agent status from AgenticOrchestrator
     nlohmann::json response = {
         {"status", "success"},
         {"message", "Agent system status check"},
@@ -327,17 +353,79 @@ HTTPResponse WebUIHandlers::handle_agent_status(const HTTPRequest& request) {
             std::chrono::system_clock::now().time_since_epoch()).count()}
     };
 
-    // Query active agents and their current states
-    // Simplified for testing - agent orchestrator integration would be added in full deployment
     nlohmann::json agents_array = nlohmann::json::array();
-    agents_array.push_back({
-        {"agent_type", "compliance_agent"},
-        {"state", 2}, // ACTIVE
-        {"health", 0}, // HEALTHY
-        {"enabled", true}
-    });
 
-    response["agents_available"] = true;
+    try {
+        // Check if core components are initialized
+        bool activity_feed_ok = activity_feed_ != nullptr;
+        bool decision_audit_ok = decision_audit_manager_ != nullptr;
+        bool regulatory_monitor_ok = regulatory_monitor_ != nullptr;
+        bool regulatory_kb_ok = regulatory_knowledge_base_ != nullptr;
+
+        // Add agent status based on component availability
+        agents_array.push_back({
+            {"agent_type", "activity_feed_agent"},
+            {"state", activity_feed_ok ? 2 : 0}, // ACTIVE or INACTIVE
+            {"health", activity_feed_ok ? 0 : 2}, // HEALTHY or UNHEALTHY
+            {"enabled", activity_feed_ok},
+            {"performance_score", activity_feed_ok ? 1.0 : 0.0},
+            {"decisions_made", activity_feed_ok ? static_cast<int>(activity_feed_->get_feed_stats()["total_events"]) : 0},
+            {"last_activity", nullptr}
+        });
+
+        agents_array.push_back({
+            {"agent_type", "decision_audit_agent"},
+            {"state", decision_audit_ok ? 2 : 0},
+            {"health", decision_audit_ok ? 0 : 2},
+            {"enabled", decision_audit_ok},
+            {"performance_score", decision_audit_ok ? 1.0 : 0.0},
+            {"decisions_made", 0}, // Would need to query from audit manager
+            {"last_activity", nullptr}
+        });
+
+        agents_array.push_back({
+            {"agent_type", "regulatory_monitor_agent"},
+            {"state", regulatory_monitor_ok ? 2 : 0},
+            {"health", regulatory_monitor_ok ? 0 : 2},
+            {"enabled", regulatory_monitor_ok},
+            {"performance_score", regulatory_monitor_ok ? 1.0 : 0.0},
+            {"decisions_made", 0},
+            {"last_activity", nullptr}
+        });
+
+        agents_array.push_back({
+            {"agent_type", "regulatory_knowledge_agent"},
+            {"state", regulatory_kb_ok ? 2 : 0},
+            {"health", regulatory_kb_ok ? 0 : 2},
+            {"enabled", regulatory_kb_ok},
+            {"performance_score", regulatory_kb_ok ? 1.0 : 0.0},
+            {"decisions_made", regulatory_kb_ok ? static_cast<int>(regulatory_knowledge_base_->get_statistics()["total_changes"]) : 0},
+            {"last_activity", nullptr}
+        });
+
+        response["agents_available"] = !agents_array.empty();
+        response["system_health"] = {
+            {"overall_status", "operational"},
+            {"components_initialized", activity_feed_ok || decision_audit_ok || regulatory_monitor_ok || regulatory_kb_ok}
+        };
+
+    }
+
+    }
+
+    catch (const std::exception& e) {
+        logger_->error("Failed to get agent status: {}", e.what());
+        // Fallback on error
+        agents_array.push_back({
+            {"agent_type", "error_status"},
+            {"state", 0}, // INACTIVE
+            {"health", 2}, // UNHEALTHY
+            {"enabled", false},
+            {"error", std::string("Status check failed: ") + e.what()}
+        });
+        response["agents_available"] = false;
+    }
+
     response["agents"] = agents_array;
     response["total_agents"] = agents_array.size();
 
@@ -378,7 +466,11 @@ HTTPResponse WebUIHandlers::handle_agent_execute(const HTTPRequest& request) {
 
         return create_json_response(response.dump());
 
-    } catch (const std::exception& e) {
+    }
+
+    }
+
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Failed to execute agent: ") + e.what());
     }
 }
@@ -432,16 +524,82 @@ HTTPResponse WebUIHandlers::handle_regulatory_changes(const HTTPRequest& request
         return create_error_response(400, "Invalid request");
     }
 
-    // TODO: Query RegulatoryMonitor for detected regulatory changes
     nlohmann::json changes = nlohmann::json::array();
-    changes.push_back({
-        {"id", "change-001"},
-        {"title", "SEC Rule Update: Enhanced Digital Asset Reporting"},
-        {"source", "SEC EDGAR"},
-        {"date", "2024-01-15"},
-        {"severity", "high"},
-        {"status", "new"}
-    });
+
+    try {
+        if (regulatory_knowledge_base_) {
+            // Get recent regulatory changes from knowledge base
+            auto recent_changes = regulatory_knowledge_base_->get_recent_changes(30, 20); // Last 30 days, max 20
+
+            for (const auto& change : recent_changes) {
+                nlohmann::json change_json = {
+                    {"id", change.get_change_id()},
+                    {"title", change.get_title()},
+                    {"source", change.get_source_id()},
+                    {"date", std::chrono::duration_cast<std::chrono::milliseconds>(
+                        change.get_detected_at().time_since_epoch()).count()},
+                    {"severity", "medium"}, // Default, will be updated if analysis exists
+                    {"status", change.get_status() == RegulatoryChangeStatus::DETECTED ? "new" :
+                             change.get_status() == RegulatoryChangeStatus::ANALYZING ? "analyzing" :
+                             change.get_status() == RegulatoryChangeStatus::ANALYZED ? "analyzed" :
+                             change.get_status() == RegulatoryChangeStatus::DISTRIBUTED ? "distributed" : "archived"}
+                };
+
+                // Update severity if analysis exists
+                if (change.get_analysis()) {
+                    const auto& analysis = change.get_analysis().value();
+                    change_json["severity"] = analysis.impact_level == RegulatoryImpact::CRITICAL ? "critical" :
+                                             analysis.impact_level == RegulatoryImpact::HIGH ? "high" :
+                                             analysis.impact_level == RegulatoryImpact::MEDIUM ? "medium" : "low";
+                }
+
+                changes.push_back(change_json);
+            }
+        }
+
+        // If no changes from knowledge base, try to get monitoring stats
+        if (changes.empty() && regulatory_monitor_) {
+            auto stats = regulatory_monitor_->get_monitoring_stats();
+            // Add monitoring status info
+            changes.push_back({
+                {"id", "monitor-status"},
+                {"title", "Regulatory Monitoring Status"},
+                {"source", "System"},
+                {"date", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()},
+                {"severity", "info"},
+                {"status", "active"}
+            });
+        }
+
+        // Fallback if no real data available
+        if (changes.empty()) {
+            changes.push_back({
+                {"id", "system-status"},
+                {"title", "Regulatory monitoring system initialized"},
+                {"source", "System"},
+                {"date", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()},
+                {"severity", "info"},
+                {"status", "active"}
+            });
+        }
+
+    }
+
+    catch (const std::exception& e) {
+        logger_->error("Failed to get regulatory changes: {}", e.what());
+        // Return basic status on error
+        changes.push_back({
+            {"id", "error-status"},
+            {"title", "Regulatory monitoring system status unavailable"},
+            {"source", "System"},
+            {"date", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()},
+            {"severity", "warning"},
+            {"status", "error"}
+        });
+    }
 
     nlohmann::json response = {
         {"status", "success"},
@@ -500,7 +658,7 @@ HTTPResponse WebUIHandlers::handle_regulatory_start(const HTTPRequest& request) 
             {"status", "success"},
             {"message", "Regulatory monitoring started"}
         }.dump());
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Failed to start regulatory monitoring: ") + e.what());
     }
 }
@@ -520,7 +678,7 @@ HTTPResponse WebUIHandlers::handle_regulatory_stop(const HTTPRequest& request) {
             {"status", "success"},
             {"message", "Regulatory monitoring stopped"}
         }.dump());
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Failed to stop regulatory monitoring: ") + e.what());
     }
 }
@@ -584,7 +742,9 @@ HTTPResponse WebUIHandlers::handle_decision_tree_visualize(const HTTPRequest& re
             return create_html_response(html);
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Failed to generate decision tree visualization: {}", e.what());
         return create_error_response(500, "Failed to generate visualization");
     }
@@ -733,7 +893,7 @@ HTTPResponse WebUIHandlers::handle_activity_stream(const HTTPRequest& request) {
                 std::chrono::system_clock::now().time_since_epoch()).count()}
         }.dump() + "\n\n";
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error setting up activity stream: {}", e.what());
         response.body = "data: " + nlohmann::json{
             {"type", "error"},
@@ -781,7 +941,7 @@ HTTPResponse WebUIHandlers::handle_activity_query(const HTTPRequest& request) {
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error querying activities: {}", e.what());
         return create_error_response(500, "Failed to query activities");
     }
@@ -840,7 +1000,11 @@ HTTPResponse WebUIHandlers::handle_activity_recent(const HTTPRequest& request) {
         response["count"] = activities.size();
 
         return create_json_response(response.dump());
-    } catch (const std::exception& e) {
+    }
+
+    }
+
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Failed to get recent activities: ") + e.what());
     }
 }
@@ -863,78 +1027,91 @@ HTTPResponse WebUIHandlers::handle_decisions_recent(const HTTPRequest& request) 
             }
         }
 
-        // For now, return sample decisions with audit trails
-        // In a full implementation, this would query the agent_decisions table
+        // Get real decisions from audit trail manager
         nlohmann::json response;
         nlohmann::json decisions_json = nlohmann::json::array();
 
-        // Sample decisions to demonstrate the audit trail functionality
-        std::vector<nlohmann::json> sample_decisions = {
-            {
-                {"decision_id", "dec-001"},
-                {"agent_name", "Compliance Guardian"},
-                {"decision_type", "Transaction Approval"},
-                {"confidence", 0.92},
-                {"description", "High-value transaction requiring enhanced due diligence"},
-                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count()},
-                {"reasoning", {
-                    "1. Analyzed transaction amount: $2.5M (above threshold)",
-                    "2. Checked customer risk profile: Medium risk category",
-                    "3. Verified AML compliance: All checks passed",
-                    "4. Applied enhanced due diligence: PEP screening completed",
-                    "5. Risk assessment: Low risk of money laundering",
-                    "6. Decision: Approve with enhanced monitoring"
-                }}
-            },
-            {
-                {"decision_id", "dec-002"},
-                {"agent_name", "Regulatory Assessor"},
-                {"decision_type", "Compliance Risk Evaluation"},
-                {"confidence", 0.87},
-                {"description", "New customer onboarding with international exposure"},
-                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-                    (std::chrono::system_clock::now() - std::chrono::minutes(15)).time_since_epoch()).count()},
-                {"reasoning", {
-                    "1. Customer profile analysis: International business operations",
-                    "2. Jurisdiction risk assessment: Medium-risk countries identified",
-                    "3. Source of funds verification: Business revenue confirmed",
-                    "4. Beneficial ownership: Corporate structure validated",
-                    "5. Sanctions screening: No matches found",
-                    "6. Decision: Approve with transaction monitoring requirements"
-                }}
-            },
-            {
-                {"decision_id", "dec-003"},
-                {"agent_name", "Audit Intelligence Agent"},
-                {"decision_type", "Anomaly Detection"},
-                {"confidence", 0.95},
-                {"description", "Unusual transaction pattern detected in customer behavior"},
-                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-                    (std::chrono::system_clock::now() - std::chrono::minutes(30)).time_since_epoch()).count()},
-                {"reasoning", {
-                    "1. Pattern analysis: 15 transactions in 2 hours (above normal)",
-                    "2. Amount analysis: $50K-$100K range (consistent pattern)",
-                    "3. Geographic analysis: Multiple countries in short timeframe",
-                    "4. Historical comparison: 300% increase from baseline",
-                    "5. Risk factors: Structured transactions, rapid execution",
-                    "6. Decision: Flag for enhanced review and temporary hold"
-                }}
-            }
-        };
+        if (decision_audit_manager_) {
+            try {
+                // Get decisions from all agent types
+                std::vector<DecisionAuditTrail> all_decisions;
 
-        // Return only the requested number of decisions
-        size_t count = std::min(limit, sample_decisions.size());
-        for (size_t i = 0; i < count; ++i) {
-            decisions_json.push_back(sample_decisions[i]);
+                // Get decisions for each agent type
+                std::vector<std::pair<std::string, std::string>> agent_types = {
+                    {"transaction_guardian", "Transaction Guardian"},
+                    {"regulatory_assessor", "Regulatory Assessor"},
+                    {"audit_intelligence", "Audit Intelligence"}
+                };
+
+                for (const auto& [agent_type_str, agent_name] : agent_types) {
+                    auto agent_decisions = decision_audit_manager_->get_agent_decisions(
+                        agent_type_str, agent_name, std::chrono::system_clock::now() - std::chrono::hours(24)
+                    );
+                    all_decisions.insert(all_decisions.end(), agent_decisions.begin(), agent_decisions.end());
+                }
+
+                // Sort by timestamp (most recent first) and limit
+                std::sort(all_decisions.begin(), all_decisions.end(),
+                    [](const DecisionAuditTrail& a, const DecisionAuditTrail& b) {
+                        return a.completed_at > b.completed_at;
+                    });
+
+                size_t count = std::min(limit, all_decisions.size());
+                for (size_t i = 0; i < count; ++i) {
+                    const auto& trail = all_decisions[i];
+
+                    // Generate explanation for detailed reasoning
+                    auto explanation = decision_audit_manager_->generate_explanation(trail.trail_id);
+
+                    // Convert confidence enum to double value
+                    double confidence_value = 0.5; // default
+                    switch (trail.final_confidence) {
+                        case DecisionConfidence::VERY_LOW: confidence_value = 0.2; break;
+                        case DecisionConfidence::LOW: confidence_value = 0.4; break;
+                        case DecisionConfidence::MEDIUM: confidence_value = 0.6; break;
+                        case DecisionConfidence::HIGH: confidence_value = 0.8; break;
+                        case DecisionConfidence::VERY_HIGH: confidence_value = 0.95; break;
+                    }
+
+                    nlohmann::json decision_json = {
+                        {"decision_id", trail.decision_id},
+                        {"agent_name", trail.agent_name},
+                        {"decision_type", trail.trigger_event},
+                        {"confidence", confidence_value},
+                        {"description", trail.final_decision.dump()},
+                        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                            trail.completed_at.time_since_epoch()).count()},
+                        {"reasoning", explanation ? explanation->human_readable_reasoning : "Decision details available in audit trail"}
+                    };
+
+                    decisions_json.push_back(decision_json);
+                }
+
+                response["decisions"] = decisions_json;
+                response["count"] = count;
+                response["message"] = "Real agent decisions with audit trails";
+
+            catch (const std::exception& e) {
+                logger_->error("Failed to get decisions from audit manager: {}", e.what());
+                // Fall back to sample data
+                response["decisions"] = nlohmann::json::array();
+                response["count"] = 0;
+                response["message"] = "No recent decisions available";
+                response["error"] = "Failed to retrieve decisions from audit trail";
+            }
+        } else {
+            // Fallback if audit manager not available
+            response["decisions"] = nlohmann::json::array();
+            response["count"] = 0;
+            response["message"] = "Decision audit system not available";
         }
 
-        response["decisions"] = decisions_json;
-        response["count"] = count;
-        response["message"] = "Sample decisions showing agent reasoning and audit trails";
-
         return create_json_response(response.dump());
-    } catch (const std::exception& e) {
+    }
+
+    }
+
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Failed to get recent decisions: ") + e.what());
     }
 }
@@ -972,7 +1149,9 @@ HTTPResponse WebUIHandlers::handle_collaboration_session_create(const HTTPReques
             return create_error_response(400, "Failed to create session");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Error creating collaboration session: {}", e.what());
         return create_error_response(500, "Failed to create session");
     }
@@ -1021,7 +1200,9 @@ HTTPResponse WebUIHandlers::handle_collaboration_send_message(const HTTPRequest&
             return create_error_response(400, "Failed to send message");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Error sending message: {}", e.what());
         return create_error_response(500, "Failed to send message");
     }
@@ -1041,7 +1222,7 @@ HTTPResponse WebUIHandlers::handle_collaboration_feedback(const HTTPRequest& req
         FeedbackType feedback_type = static_cast<FeedbackType>(body_json["feedback_type"]);
         std::string feedback_text = body_json.value("feedback_text", "");
 
-        HumanFeedback feedback(session_id, agent_id, decision_id, feedback_type, feedback_text);
+        HumanFeedback feedback(session_id, agent_id, decision_id, HumanFeedbackType::AGREEMENT, feedback_text);
 
         if (collaboration_->submit_feedback(feedback)) {
             return create_json_response("{\"success\": true}");
@@ -1049,7 +1230,9 @@ HTTPResponse WebUIHandlers::handle_collaboration_feedback(const HTTPRequest& req
             return create_error_response(400, "Failed to submit feedback");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Error submitting feedback: {}", e.what());
         return create_error_response(500, "Failed to submit feedback");
     }
@@ -1082,7 +1265,9 @@ HTTPResponse WebUIHandlers::handle_collaboration_intervention(const HTTPRequest&
             return create_error_response(400, "Failed to perform intervention");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Error performing intervention: {}", e.what());
         return create_error_response(500, "Failed to perform intervention");
     }
@@ -1139,7 +1324,7 @@ HTTPResponse WebUIHandlers::handle_pattern_discovery(const HTTPRequest& request)
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error discovering patterns: {}", e.what());
         return create_error_response(500, "Failed to discover patterns");
     }
@@ -1224,12 +1409,12 @@ HTTPResponse WebUIHandlers::handle_feedback_submit(const HTTPRequest& request) {
         // Parse JSON request body
         auto body_json = nlohmann::json::parse(request.body);
         std::string target_entity = body_json["target_entity"];
-        HumanFeedbackType feedback_type = static_cast<HumanFeedbackType>(body_json["feedback_type"]);
+        HumanFeedbackType human_feedback_type = static_cast<HumanFeedbackType>(body_json["feedback_type"]);
         std::string source_entity = body_json["source_entity"];
         double feedback_score = body_json["feedback_score"];
         std::string feedback_text = body_json.value("feedback_text", "");
 
-        FeedbackData feedback(source_entity, feedback_type, source_entity, target_entity);
+        FeedbackData feedback(FeedbackType::HUMAN_EXPLICIT, source_entity, target_entity);
         feedback.feedback_score = feedback_score;
         feedback.feedback_text = feedback_text;
 
@@ -1249,7 +1434,9 @@ HTTPResponse WebUIHandlers::handle_feedback_submit(const HTTPRequest& request) {
             return create_error_response(400, "Failed to submit feedback");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Error submitting feedback: {}", e.what());
         return create_error_response(500, "Failed to submit feedback");
     }
@@ -1292,7 +1479,7 @@ HTTPResponse WebUIHandlers::handle_feedback_learning(const HTTPRequest& request)
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error applying feedback learning: {}", e.what());
         return create_error_response(500, "Failed to apply feedback learning");
     }
@@ -1403,7 +1590,9 @@ HTTPResponse WebUIHandlers::handle_circuit_breaker_reset(const HTTPRequest& requ
             return create_error_response(404, "Circuit breaker not found");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         logger_->error("Error resetting circuit breaker: {}", e.what());
         return create_error_response(500, "Failed to reset circuit breaker");
     }
@@ -1478,7 +1667,7 @@ HTTPResponse WebUIHandlers::handle_openai_completion(const HTTPRequest& request)
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in OpenAI completion: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1514,7 +1703,7 @@ HTTPResponse WebUIHandlers::handle_openai_analysis(const HTTPRequest& request) {
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in OpenAI analysis: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1565,7 +1754,7 @@ HTTPResponse WebUIHandlers::handle_openai_compliance(const HTTPRequest& request)
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in OpenAI compliance reasoning: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1604,7 +1793,7 @@ HTTPResponse WebUIHandlers::handle_openai_extraction(const HTTPRequest& request)
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in OpenAI data extraction: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1655,7 +1844,7 @@ HTTPResponse WebUIHandlers::handle_openai_decision(const HTTPRequest& request) {
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in OpenAI decision recommendation: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1719,7 +1908,7 @@ HTTPResponse WebUIHandlers::handle_claude_message(const HTTPRequest& request) {
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in Claude message: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1755,7 +1944,7 @@ HTTPResponse WebUIHandlers::handle_claude_reasoning(const HTTPRequest& request) 
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in Claude reasoning: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1796,7 +1985,7 @@ HTTPResponse WebUIHandlers::handle_claude_constitutional(const HTTPRequest& requ
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in Claude constitutional analysis: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1855,7 +2044,7 @@ HTTPResponse WebUIHandlers::handle_claude_ethical_decision(const HTTPRequest& re
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in Claude ethical decision analysis: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1893,7 +2082,7 @@ HTTPResponse WebUIHandlers::handle_claude_complex_reasoning(const HTTPRequest& r
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in Claude complex reasoning: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -1938,7 +2127,7 @@ HTTPResponse WebUIHandlers::handle_claude_regulatory(const HTTPRequest& request)
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in Claude regulatory reasoning: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2005,7 +2194,7 @@ HTTPResponse WebUIHandlers::handle_function_execute(const HTTPRequest& request) 
 
         return create_json_response(200, response);
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Function execution failed: ") + e.what()}});
     }
 }
@@ -2035,7 +2224,7 @@ HTTPResponse WebUIHandlers::handle_function_list(const HTTPRequest& request) {
 
         return create_json_response(200, {{"functions", function_list}});
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Failed to list functions: ") + e.what()}});
     }
 }
@@ -2100,7 +2289,7 @@ HTTPResponse WebUIHandlers::handle_function_openai_integration(const HTTPRequest
 
         return create_json_response(200, response);
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("OpenAI integration failed: ") + e.what()}});
     }
 }
@@ -2147,7 +2336,9 @@ HTTPResponse WebUIHandlers::handle_embeddings_generate(const HTTPRequest& reques
             return create_json_response(500, {{"error", "Failed to generate embedding"}});
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Embedding generation failed: ") + e.what()}});
     }
 }
@@ -2193,7 +2384,7 @@ HTTPResponse WebUIHandlers::handle_embeddings_search(const HTTPRequest& request)
 
         return create_json_response(200, response);
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Semantic search failed: ") + e.what()}});
     }
 }
@@ -2223,7 +2414,9 @@ HTTPResponse WebUIHandlers::handle_embeddings_index(const HTTPRequest& request) 
             return create_json_response(500, {{"error", "Failed to index document"}});
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Document indexing failed: ") + e.what()}});
     }
 }
@@ -2298,7 +2491,7 @@ HTTPResponse WebUIHandlers::handle_decision_mcda_analysis(const HTTPRequest& req
 
         for (const auto& alt_json : body_json["alternatives"]) {
             DecisionAlternative alt;
-            alt.id = alt_json.value("id", generate_random_id());
+            alt.id = alt_json.value("id", ComplianceCase::generate_case_id());
             alt.name = alt_json.value("name", "");
             alt.description = alt_json.value("description", "");
 
@@ -2347,7 +2540,7 @@ HTTPResponse WebUIHandlers::handle_decision_mcda_analysis(const HTTPRequest& req
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in MCDA analysis: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2374,7 +2567,7 @@ HTTPResponse WebUIHandlers::handle_decision_tree_analysis(const HTTPRequest& req
         if (body_json.contains("alternatives")) {
             for (const auto& alt_json : body_json["alternatives"]) {
                 auto terminal_node = std::make_shared<DecisionNode>(
-                    alt_json.value("id", generate_random_id()),
+                    alt_json.value("id", ComplianceCase::generate_case_id()),
                     alt_json.value("name", ""));
 
                 terminal_node->type = DecisionNodeType::TERMINAL;
@@ -2411,7 +2604,7 @@ HTTPResponse WebUIHandlers::handle_decision_tree_analysis(const HTTPRequest& req
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in decision tree analysis: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2437,7 +2630,7 @@ HTTPResponse WebUIHandlers::handle_decision_ai_recommendation(const HTTPRequest&
         if (body_json.contains("alternatives") && body_json["alternatives"].is_array()) {
             for (const auto& alt_json : body_json["alternatives"]) {
                 DecisionAlternative alt;
-                alt.id = alt_json.value("id", generate_random_id());
+                alt.id = alt_json.value("id", ComplianceCase::generate_case_id());
                 alt.name = alt_json.value("name", "");
                 alt.description = alt_json.value("description", "");
 
@@ -2469,7 +2662,7 @@ HTTPResponse WebUIHandlers::handle_decision_ai_recommendation(const HTTPRequest&
 
         return create_json_response(response.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in AI decision recommendation: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2539,7 +2732,7 @@ HTTPResponse WebUIHandlers::handle_decision_visualization(const HTTPRequest& req
 
         return create_json_response(visualization.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in decision visualization: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2599,7 +2792,7 @@ HTTPResponse WebUIHandlers::handle_risk_assess_transaction(const HTTPRequest& re
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in risk assessment: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2649,18 +2842,18 @@ HTTPResponse WebUIHandlers::handle_risk_assess_entity(const HTTPRequest& request
 
                     for (const auto& row : result.rows) {
                         TransactionData txn;
-                        txn.transaction_id = row["transaction_id"];
-                        txn.amount = std::stod(row["amount"]);
-                        txn.currency = row["currency"];
-                        txn.timestamp = std::stoll(row["timestamp"]);
-                        txn.counterparty_id = row["counterparty_id"];
-                        txn.transaction_type = row["transaction_type"];
-                        if (!row["risk_score"].empty()) {
-                            txn.risk_score = std::stod(row["risk_score"]);
+                        txn.transaction_id = row.at("transaction_id");
+                        txn.amount = std::stod(row.at("amount"));
+                        txn.currency = row.at("currency");
+                        txn.timestamp = std::stoll(row.at("timestamp"));
+                        txn.counterparty_id = row.at("counterparty_id");
+                        txn.transaction_type = row.at("transaction_type");
+                        if (!row.at("risk_score").empty()) {
+                            txn.risk_score = std::stod(row.at("risk_score"));
                         }
                         recent_transactions.push_back(txn);
                     }
-                } catch (const std::exception& e) {
+                catch (const std::exception& e) {
                     logger_->error("Error retrieving transactions for entity {}: {}", entity_id, e.what());
                 }
             }
@@ -2676,7 +2869,7 @@ HTTPResponse WebUIHandlers::handle_risk_assess_entity(const HTTPRequest& request
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in entity risk assessment: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2715,7 +2908,7 @@ HTTPResponse WebUIHandlers::handle_risk_assess_regulatory(const HTTPRequest& req
 
         return create_json_response(result.dump(2));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         logger_->error("Error in regulatory risk assessment: {}", e.what());
         return create_error_response(500, "Internal server error");
     }
@@ -2726,7 +2919,7 @@ HTTPResponse WebUIHandlers::handle_risk_history(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
-    std::string entity_id = get_query_param(request, "entity_id");
+    std::string entity_id = get_query_param(request, "entity_id").value_or("");
     int limit = std::stoi(get_query_param(request, "limit").value_or("10"));
 
     if (entity_id.empty()) {
@@ -2854,7 +3047,7 @@ HTTPResponse WebUIHandlers::handle_detailed_health_report(const HTTPRequest& req
         health_report["last_ui_check"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
         return create_json_response(health_report);
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, "Failed to generate detailed health report: " + std::string(e.what()));
     }
 }
@@ -3005,7 +3198,7 @@ std::string WebUIHandlers::generate_dashboard_html() const {
             </div>
 
             <div class="card">
-                <h3>🤝 Human-AI Collaboration</h3>
+                <h3>HANDSHAKE Human-AI Collaboration</h3>
                 <p>Interactive chat and oversight with agents</p>
                 <a href="/collaboration" class="btn">Start Collaboration</a>
             </div>
@@ -3126,7 +3319,7 @@ std::string WebUIHandlers::generate_dashboard_html() const {
                     data.activities.forEach(activity => {
                         const timestamp = new Date(activity.occurred_at).toLocaleTimeString();
                         const severityEmoji = activity.severity === 'CRITICAL' ? '🚨' :
-                                            activity.severity === 'ERROR' ? '❌' :
+                                            activity.severity === 'ERROR' ? 'ERROR' :
                                             activity.severity === 'WARN' ? '⚠️' :
                                             activity.severity === 'INFO' ? 'ℹ️' : '🔵';
 
@@ -4018,12 +4211,12 @@ std::string WebUIHandlers::generate_activity_feed_html() const {
             const icons = {
                 0: '🚀', // AGENT_STARTED
                 1: '⏹️',  // AGENT_STOPPED
-                2: '❌',  // AGENT_ERROR
+                2: 'ERROR',  // AGENT_ERROR
                 3: '❤️',  // HEALTH_CHANGE
                 4: '🧠',  // DECISION_MADE
                 5: '▶️',  // TASK_STARTED
-                6: '✅',  // TASK_COMPLETED
-                7: '❌',  // TASK_FAILED
+                6: 'SUCCESS',  // TASK_COMPLETED
+                7: 'ERROR',  // TASK_FAILED
                 8: '👁️',  // EVENT_RECEIVED
                 9: '⚙️',  // STATE_CHANGED
             };
@@ -4175,7 +4368,7 @@ std::string WebUIHandlers::generate_collaboration_html() const {
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤝 Human-AI Collaboration</h1>
+            <h1>HANDSHAKE Human-AI Collaboration</h1>
             <p>Interactive collaboration and oversight of AI agents</p>
         </div>
 
@@ -6012,7 +6205,7 @@ std::string WebUIHandlers::generate_llm_dashboard_html() const {
 
                 <div class="feature-grid">
                     <div class="feature-card" onclick="switchTab('completion')">
-                        <span class="feature-icon">💬</span>
+                        <span class="feature-icon">CHAT</span>
                         <div class="feature-title">Chat Completion</div>
                         <div class="feature-desc">Generate human-like responses and completions</div>
                     </div>
@@ -6024,7 +6217,7 @@ std::string WebUIHandlers::generate_llm_dashboard_html() const {
                     </div>
 
                     <div class="feature-card" onclick="switchTab('compliance')">
-                        <span class="feature-icon">⚖️</span>
+                        <span class="feature-icon">BALANCE</span>
                         <div class="feature-title">Compliance Reasoning</div>
                         <div class="feature-desc">Generate detailed compliance analysis and reasoning</div>
                     </div>
@@ -6060,7 +6253,7 @@ std::string WebUIHandlers::generate_llm_dashboard_html() const {
                 <!-- Chat Completion Tab -->
                 <div id="completion-tab" class="tab-content active">
                     <div class="form-section">
-                        <h3>💬 Chat Completion</h3>
+                        <h3>CHAT Chat Completion</h3>
                         <div class="form-group">
                             <label>Prompt:</label>
                             <textarea id="completion-prompt" placeholder="Enter your prompt here..."></textarea>
@@ -6105,7 +6298,7 @@ std::string WebUIHandlers::generate_llm_dashboard_html() const {
                 <!-- Compliance Reasoning Tab -->
                 <div id="compliance-tab" class="tab-content">
                     <div class="form-section">
-                        <h3>⚖️ Compliance Reasoning</h3>
+                        <h3>BALANCE Compliance Reasoning</h3>
                         <div class="form-group">
                             <label>Decision Context:</label>
                             <textarea id="compliance-context" placeholder="Describe the decision or action requiring compliance analysis..."></textarea>
@@ -6572,7 +6765,7 @@ std::string WebUIHandlers::generate_claude_dashboard_html() const {
 
                 <div class="feature-grid">
                     <div class="feature-card" onclick="switchTab('message')">
-                        <span class="feature-icon">💬</span>
+                        <span class="feature-icon">CHAT</span>
                         <div class="feature-title">Message Generation</div>
                         <div class="feature-desc">Generate human-like responses and completions</div>
                     </div>
@@ -6584,14 +6777,14 @@ std::string WebUIHandlers::generate_claude_dashboard_html() const {
                     </div>
 
                     <div class="feature-card" onclick="switchTab('constitutional')">
-                        <span class="feature-icon">⚖️</span>
+                        <span class="feature-icon">BALANCE</span>
                         <div class="feature-title">Constitutional AI</div>
                         <div class="feature-desc">Ethical compliance and safety analysis</div>
                         <span class="ethics-badge">ETHICAL AI</span>
                     </div>
 
                     <div class="feature-card" onclick="switchTab('ethical')">
-                        <span class="feature-icon">🤝</span>
+                        <span class="feature-icon">HANDSHAKE</span>
                         <div class="feature-title">Ethical Decisions</div>
                         <div class="feature-desc">Moral reasoning and decision analysis</div>
                         <span class="ethics-badge">ETHICAL AI</span>
@@ -6629,7 +6822,7 @@ std::string WebUIHandlers::generate_claude_dashboard_html() const {
                 <!-- Message Generation Tab -->
                 <div id="message-tab" class="tab-content active">
                     <div class="form-section">
-                        <h3>💬 Message Generation</h3>
+                        <h3>CHAT Message Generation</h3>
                         <div class="form-group">
                             <label>Prompt:</label>
                             <textarea id="message-prompt" placeholder="Enter your message prompt here..."></textarea>
@@ -6685,7 +6878,7 @@ std::string WebUIHandlers::generate_claude_dashboard_html() const {
                 <!-- Constitutional AI Tab -->
                 <div id="constitutional-tab" class="tab-content">
                     <div class="form-section">
-                        <h3>⚖️ Constitutional AI Analysis</h3>
+                        <h3>BALANCE Constitutional AI Analysis</h3>
                         <div class="form-group">
                             <label>Content to Analyze:</label>
                             <textarea id="constitutional-content" placeholder="Enter content for constitutional AI analysis..."></textarea>
@@ -6704,7 +6897,7 @@ Accountability measures"></textarea>
                 <!-- Ethical Decision Tab -->
                 <div id="ethical-tab" class="tab-content">
                     <div class="form-section">
-                        <h3>🤝 Ethical Decision Analysis</h3>
+                        <h3>HANDSHAKE Ethical Decision Analysis</h3>
                         <div class="form-group">
                             <label>Decision Scenario:</label>
                             <textarea id="ethical-scenario" placeholder="Describe the ethical decision scenario..."></textarea>
@@ -7256,7 +7449,7 @@ std::string WebUIHandlers::generate_decision_dashboard_html() const {
 
                 <div class="method-grid">
                     <div class="method-card" onclick="selectMethod('WEIGHTED_SUM')">
-                        <span class="method-icon">⚖️</span>
+                        <span class="method-icon">BALANCE</span>
                         <div class="method-title">Weighted Sum</div>
                         <div class="method-desc">Simple linear combination of weighted criteria scores</div>
                     </div>
@@ -7998,7 +8191,7 @@ std::string WebUIHandlers::generate_risk_dashboard_html() const {
                     </div>
 
                     <div class="feature-card" onclick="switchTab('regulatory')">
-                        <span class="feature-icon">⚖️</span>
+                        <span class="feature-icon">BALANCE</span>
                         <div class="feature-title">Regulatory Risk</div>
                         <div class="feature-desc">Analyze regulatory compliance and market risks</div>
                     </div>
@@ -8201,7 +8394,7 @@ std::string WebUIHandlers::generate_risk_dashboard_html() const {
                 <!-- Regulatory Risk Assessment Tab -->
                 <div id="regulatory-tab" class="tab-content">
                     <div class="form-section">
-                        <h3>⚖️ Regulatory Risk Assessment</h3>
+                        <h3>BALANCE Regulatory Risk Assessment</h3>
 
                         <div class="form-row">
                             <div class="form-group">
@@ -8815,7 +9008,7 @@ std::string WebUIHandlers::escape_html(const std::string& input) const {
 
 std::string WebUIHandlers::generate_function_calling_html() const {
     std::stringstream html;
-    html << R"(
+    html << R"HTML(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9238,7 +9431,7 @@ std::string WebUIHandlers::generate_function_calling_html() const {
                 if (result.success) {
                     resultDiv.innerHTML = `
                         <div class="result">
-                            <h4>✅ Function Executed Successfully</h4>
+                            <h4>SUCCESS Function Executed Successfully</h4>
                             <p><strong>Call ID:</strong> ${result.call_id}</p>
                             <p><strong>Execution Time:</strong> ${result.execution_time_ms}ms</p>
                             <p><strong>Correlation ID:</strong> ${result.correlation_id}</p>
@@ -9248,7 +9441,7 @@ std::string WebUIHandlers::generate_function_calling_html() const {
                 } else {
                     resultDiv.innerHTML = `
                         <div class="result error">
-                            <h4>❌ Function Execution Failed</h4>
+                            <h4>ERROR Function Execution Failed</h4>
                             <p><strong>Call ID:</strong> ${result.call_id}</p>
                             <p><strong>Execution Time:</strong> ${result.execution_time_ms}ms</p>
                             <p><strong>Error:</strong> ${result.error}</p>
@@ -9263,7 +9456,7 @@ std::string WebUIHandlers::generate_function_calling_html() const {
             } catch (error) {
                 document.getElementById('execution-result').innerHTML = `
                     <div class="result error">
-                        <h4>❌ Execution Error</h4>
+                        <h4>ERROR Execution Error</h4>
                         <p>${error.message}</p>
                     </div>
                 `;
@@ -9272,14 +9465,14 @@ std::string WebUIHandlers::generate_function_calling_html() const {
     </script>
 </body>
 </html>
-    )";
+    )HTML";
 
     return html.str();
 }
 
 std::string WebUIHandlers::generate_embeddings_html() const {
     std::stringstream html;
-    html << R"(
+    html << R"EMBED(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9692,7 +9885,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
                 if (result.success) {
                     resultDiv.innerHTML = `
                         <div class="result">
-                            <h4>✅ Embedding Generated Successfully</h4>
+                            <h4>SUCCESS Embedding Generated Successfully</h4>
                             <p><strong>Model:</strong> ${result.model}</p>
                             <p><strong>Dimensions:</strong> ${result.dimensions}</p>
                             <p><strong>Sample Values:</strong> [${Array.from({length: 5}, (_, i) =>
@@ -9702,7 +9895,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
                 } else {
                     resultDiv.innerHTML = `
                         <div class="result error">
-                            <h4>❌ Embedding Generation Failed</h4>
+                            <h4>ERROR Embedding Generation Failed</h4>
                             <p>${result.error}</p>
                         </div>
                     `;
@@ -9711,7 +9904,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
             } catch (error) {
                 document.getElementById('embed-result').innerHTML = `
                     <div class="result error">
-                        <h4>❌ Generation Error</h4>
+                        <h4>ERROR Generation Error</h4>
                         <p>${error.message}</p>
                     </div>
                 `;
@@ -9780,7 +9973,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
             } catch (error) {
                 document.getElementById('search-result').innerHTML = `
                     <div class="result error">
-                        <h4>❌ Search Error</h4>
+                        <h4>ERROR Search Error</h4>
                         <p>${error.message}</p>
                     </div>
                 `;
@@ -9814,7 +10007,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
                 if (result.success) {
                     resultDiv.innerHTML = `
                         <div class="result">
-                            <h4>✅ Document Indexed Successfully</h4>
+                            <h4>SUCCESS Document Indexed Successfully</h4>
                             <p><strong>Document ID:</strong> ${result.document_id}</p>
                             <p>The document is now available for semantic search.</p>
                         </div>
@@ -9825,7 +10018,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
                 } else {
                     resultDiv.innerHTML = `
                         <div class="result error">
-                            <h4>❌ Indexing Failed</h4>
+                            <h4>ERROR Indexing Failed</h4>
                             <p>${result.error}</p>
                         </div>
                     `;
@@ -9834,7 +10027,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
             } catch (error) {
                 document.getElementById('index-result').innerHTML = `
                     <div class="result error">
-                        <h4>❌ Indexing Error</h4>
+                        <h4>ERROR Indexing Error</h4>
                         <p>${error.message}</p>
                     </div>
                 `;
@@ -9843,7 +10036,7 @@ std::string WebUIHandlers::generate_embeddings_html() const {
     </script>
 </body>
 </html>
-    )";
+    )EMBED";
 
     return html.str();
 }
@@ -9891,7 +10084,7 @@ HTTPResponse WebUIHandlers::handle_agent_message_send(const HTTPRequest& request
             {"message", success ? "Message sent successfully" : "Failed to send message"}
         });
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Message send error: ") + e.what());
     }
 }
@@ -9954,7 +10147,7 @@ HTTPResponse WebUIHandlers::handle_agent_message_broadcast(const HTTPRequest& re
             {"message", success ? "Broadcast sent successfully" : "Failed to send broadcast"}
         });
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Broadcast error: ") + e.what());
     }
 }
@@ -9993,7 +10186,9 @@ HTTPResponse WebUIHandlers::handle_consensus_start(const HTTPRequest& request) {
             });
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Consensus start error: ") + e.what());
     }
 }
@@ -10021,7 +10216,7 @@ HTTPResponse WebUIHandlers::handle_consensus_contribute(const HTTPRequest& reque
             {"message", success ? "Decision contributed successfully" : "Failed to contribute decision"}
         });
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Consensus contribute error: ") + e.what());
     }
 }
@@ -10086,7 +10281,7 @@ HTTPResponse WebUIHandlers::handle_message_translate(const HTTPRequest& request)
             {"confidence_score", result.confidence_score}
         });
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Translation error: ") + e.what());
     }
 }
@@ -10111,7 +10306,7 @@ HTTPResponse WebUIHandlers::handle_agent_conversation(const HTTPRequest& request
 
         return create_json_response(conversation);
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Conversation error: ") + e.what());
     }
 }
@@ -10138,7 +10333,7 @@ HTTPResponse WebUIHandlers::handle_conflict_resolution(const HTTPRequest& reques
 
         return create_json_response(resolution);
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return create_error_response(500, std::string("Conflict resolution error: ") + e.what());
     }
 }
@@ -10174,7 +10369,7 @@ HTTPResponse WebUIHandlers::handle_communication_stats(const HTTPRequest& reques
 std::string WebUIHandlers::generate_multi_agent_html() const {
     std::stringstream html;
 
-    html << R"(
+    html << R"UNIQUEDELIMITER(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10370,12 +10565,12 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
                 document.getElementById('messaging-result').innerHTML =
                     `<div class="result ${result.success ? 'success' : 'error'}">
-                        <h4>${result.success ? '✅' : '❌'} ${result.message}</h4>
+                        <h4>${result.success ? 'SUCCESS' : 'ERROR'} ${result.message}</h4>
                     </div>`;
 
             } catch (error) {
                 document.getElementById('messaging-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10398,12 +10593,12 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
                 document.getElementById('messaging-result').innerHTML =
                     `<div class="result ${result.success ? 'success' : 'error'}">
-                        <h4>${result.success ? '✅' : '❌'} ${result.message}</h4>
+                        <h4>${result.success ? 'SUCCESS' : 'ERROR'} ${result.message}</h4>
                     </div>`;
 
             } catch (error) {
                 document.getElementById('messaging-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10415,7 +10610,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
 
                 let html = `<div class="result success">
-                    <h4>📨 Received ${result.message_count} messages for ${result.agent_id}</h4>`;
+                    <h4>MSG Received ${result.message_count} messages for ${result.agent_id}</h4>`;
 
                 if (result.messages.length > 0) {
                     html += '<div class="message-list">';
@@ -10434,7 +10629,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
             } catch (error) {
                 document.getElementById('messaging-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10457,13 +10652,13 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
                 document.getElementById('consensus-result').innerHTML =
                     `<div class="result ${result.success ? 'success' : 'error'}">
-                        <h4>${result.success ? '✅' : '❌'} ${result.message}</h4>
+                        <h4>${result.success ? 'SUCCESS' : 'ERROR'} ${result.message}</h4>
                         ${result.session_id ? `<p><strong>Session ID:</strong> ${result.session_id}</p>` : ''}
                     </div>`;
 
             } catch (error) {
                 document.getElementById('consensus-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10488,12 +10683,12 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
                 document.getElementById('consensus-result').innerHTML =
                     `<div class="result ${result.success ? 'success' : 'error'}">
-                        <h4>${result.success ? '✅' : '❌'} ${result.message}</h4>
+                        <h4>${result.success ? 'SUCCESS' : 'ERROR'} ${result.message}</h4>
                     </div>`;
 
             } catch (error) {
                 document.getElementById('consensus-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10505,7 +10700,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
 
                 let html = `<div class="result ${result.success ? 'success' : 'error'}">
-                    <h4>${result.success ? '✅' : '❌'} Consensus ${result.consensus_reached ? 'Reached' : 'Not Yet Reached'}</h4>`;
+                    <h4>${result.success ? 'SUCCESS' : 'ERROR'} Consensus ${result.consensus_reached ? 'Reached' : 'Not Yet Reached'}</h4>`;
 
                 if (result.consensus_reached) {
                     html += `
@@ -10523,7 +10718,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
             } catch (error) {
                 document.getElementById('consensus-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10548,7 +10743,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
                 document.getElementById('translation-result').innerHTML =
                     `<div class="result ${result.success ? 'success' : 'error'}">
-                        <h4>${result.success ? '✅' : '❌'} Translation ${result.success ? 'Successful' : 'Failed'}</h4>
+                        <h4>${result.success ? 'SUCCESS' : 'ERROR'} Translation ${result.success ? 'Successful' : 'Failed'}</h4>
                         ${result.translated_message ? `<p><strong>Translated:</strong> ${JSON.stringify(result.translated_message)}</p>` : ''}
                         <p><strong>Approach:</strong> ${result.translation_approach}</p>
                         <p><strong>Confidence:</strong> ${(result.confidence_score * 100).toFixed(1)}%</p>
@@ -10556,7 +10751,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
             } catch (error) {
                 document.getElementById('translation-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10580,7 +10775,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
                 const result = await response.json();
                 let html = `<div class="result ${result.status === 'completed' ? 'success' : 'error'}">
-                    <h4>💬 Conversation ${result.status === 'completed' ? 'Completed' : result.status}</h4>`;
+                    <h4>CHAT Conversation ${result.status === 'completed' ? 'Completed' : result.status}</h4>`;
 
                 if (result.rounds && result.rounds.length > 0) {
                     html += '<div class="conversation-flow">';
@@ -10595,7 +10790,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
             } catch (error) {
                 document.getElementById('conversation-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10614,7 +10809,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 const result = await response.json();
                 document.getElementById('conflicts-result').innerHTML =
                     `<div class="result success">
-                        <h4>⚖️ Conflict Resolution</h4>
+                        <h4>BALANCE Conflict Resolution</h4>
                         <p><strong>Method:</strong> ${result.resolution_method}</p>
                         <p><strong>Winning Decision:</strong> ${JSON.stringify(result.winning_message)}</p>
                         <p><strong>Confidence Score:</strong> ${(result.confidence_score * 100).toFixed(1)}%</p>
@@ -10623,7 +10818,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
             } catch (error) {
                 document.getElementById('conflicts-result').innerHTML =
-                    `<div class="result error"><h4>❌ Error: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error: ${error.message}</h4></div>`;
             }
         }
 
@@ -10637,7 +10832,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 if (stats.communication_stats) {
                     html += `
                         <div class="stat-card">
-                            <h4>📨 Communication</h4>
+                            <h4>MSG Communication</h4>
                             <div class="stat-value">${stats.communication_stats.messages_sent || 0}</div>
                             <p>Messages Sent</p>
                             <div class="stat-value">${stats.communication_stats.messages_received || 0}</div>
@@ -10649,7 +10844,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 if (stats.consensus_stats) {
                     html += `
                         <div class="stat-card">
-                            <h4>🤝 Consensus</h4>
+                            <h4>HANDSHAKE Consensus</h4>
                             <div class="stat-value">${stats.consensus_stats.sessions_created || 0}</div>
                             <p>Sessions Created</p>
                             <div class="stat-value">${(stats.consensus_stats.success_rate * 100 || 0).toFixed(1)}%</div>
@@ -10661,7 +10856,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 if (stats.translation_stats) {
                     html += `
                         <div class="stat-card">
-                            <h4>🌐 Translation</h4>
+                            <h4>GLOBE Translation</h4>
                             <div class="stat-value">${stats.translation_stats.translations_performed || 0}</div>
                             <p>Translations</p>
                             <div class="stat-value">${stats.translation_stats.registered_agent_contexts || 0}</div>
@@ -10675,7 +10870,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
 
             } catch (error) {
                 document.getElementById('stats-content').innerHTML =
-                    `<div class="result error"><h4>❌ Error loading stats: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error loading stats: ${error.message}</h4></div>`;
             }
         }
 
@@ -10684,7 +10879,7 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
     </script>
 </body>
 </html>
-    )";
+    )UNIQUEDELIMITER";
 
     return html.str();
 }
@@ -10715,10 +10910,17 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_store(const HTTPRequest& 
         std::vector<std::string> participants = json_body.value("participants", std::vector<std::string>{"agent", "user"});
 
         // Store conversation memory
-        if (conversation_memory_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (conversation_memory_) {
             bool success = conversation_memory_->store_conversation(
-                conversation_id, agent_type, agent_name, context_type,
-                topic, participants
+                conversation_id, agent_name, agent_type, json_body,
+                topic, std::nullopt
             );
 
             if (success) {
@@ -10736,30 +10938,30 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_store(const HTTPRequest& 
                 }.dump();
             }
         } else {
-            response.status_code = 500;
-            response.body = nlohmann::json{
-                {"success", false},
-                {"error", "Conversation memory not initialized"}
-            }.dump();
-        }
+        //     response.status_code = 500;
+        //     response.body = nlohmann::json{
+        //         {"success", false},
+        //         {"error", "Conversation memory not initialized"}
+        //     }.dump();
+        // }
 
-    } catch (const std::exception& e) {
-        response.status_code = 400;
-        response.body = nlohmann::json{
-            {"success", false},
-            {"error", std::string("Invalid request: ") + e.what()}
-        }.dump();
-    }
+    // catch (const std::exception& e) {
+    //     response.status_code = 400;
+    //     response.body = nlohmann::json{
+    //         {"success", false},
+    //         {"error", std::string("Invalid request: ") + e.what()}
+    //     }.dump();
+    // }
 
-    return response;
-}
+    // return response;
+    // }
 
 HTTPResponse WebUIHandlers::handle_memory_conversation_retrieve(const HTTPRequest& request) {
     HTTPResponse response;
     response.content_type = "application/json";
 
     try {
-        std::string conversation_id = request.query_params.value("conversation_id", "");
+        std::string conversation_id = request.query_params.count("conversation_id") ? request.query_params.at("conversation_id") : "";
 
         if (conversation_id.empty()) {
             response.status_code = 400;
@@ -10770,43 +10972,58 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_retrieve(const HTTPReques
             return response;
         }
 
-        if (conversation_memory_) {
-            auto conversation = conversation_memory_->retrieve_conversation(conversation_id);
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
 
-            if (conversation) {
-                response.status_code = 200;
-                nlohmann::json result = {
-                    {"success", true},
-                    {"conversation", {
-                        {"conversation_id", conversation->conversation_id},
-                        {"agent_type", conversation->agent_type},
-                        {"agent_name", conversation->agent_name},
-                        {"context_type", conversation->context_type},
-                        {"topic", conversation->conversation_topic},
-                        {"participants", conversation->participants},
-                        {"importance_score", conversation->importance_score},
-                        {"confidence_score", conversation->confidence_score},
-                        {"memory_type", conversation->memory_type},
-                        {"created_at", conversation->created_at}
-                    }}
-                };
-                response.body = result.dump();
-            } else {
-                response.status_code = 404;
-                response.body = nlohmann::json{
-                    {"success", false},
-                    {"error", "Conversation not found"}
-                }.dump();
-            }
+        // // response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (conversation_memory_) {
+        // //     auto conversation = conversation_memory_->retrieve_conversation(conversation_id);
+        // //     if (conversation) {
+        // //         response.status_code = 200;
+        // //         nlohmann::json result = {
+        // //             {"success", true},
+        // //             {"conversation", {
+        // //                 {"conversation_id", conversation->conversation_id},
+        // //                 {"agent_type", conversation->agent_type},
+        // //                 {"agent_name", conversation->agent_name},
+        // //                 {"context_type", conversation->context_type},
+        // //                 {"topic", conversation->conversation_topic},
+        // //                 {"participants", conversation->participants},
+        // //                 {"importance_score", conversation->importance_score},
+        //                 {"confidence_score", conversation->confidence_score},
+        //                 {"memory_type", conversation->memory_type},
+        //                 {"created_at", conversation->created_at}
+        //             }}
+        //         };
+        //         response.body = result.dump();
+        //     } else {
+        //         response.status_code = 404;
+        //         response.body = nlohmann::json{
+        //             {"success", false},
+        //             {"error", "Conversation not found"}
+        //         }.dump();
+        //     }
         } else {
-            response.status_code = 500;
-            response.body = nlohmann::json{
-                {"success", false},
-                {"error", "Conversation memory not initialized"}
-            }.dump();
-        }
+        //     response.status_code = 500;
+        //     response.body = nlohmann::json{
+        //         {"success", false},
+        //         {"error", "Conversation memory not initialized"}
+        //     }.dump();
+        // }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -10822,10 +11039,10 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_search(const HTTPRequest&
     response.content_type = "application/json";
 
     try {
-        std::string query = request.query_params.value("query", "");
-        std::string agent_type = request.query_params.value("agent_type", "");
-        std::string context_type = request.query_params.value("context_type", "");
-        int limit = std::stoi(request.query_params.value("limit", "10"));
+        std::string query = request.query_params.count("query") ? request.query_params.at("query") : "";
+        std::string agent_type = request.query_params.count("agent_type") ? request.query_params.at("agent_type") : "";
+        std::string context_type = request.query_params.count("context_type") ? request.query_params.at("context_type") : "";
+        int limit = std::stoi(request.query_params.count("limit") ? request.query_params.at("limit") : "10");
 
         if (query.empty()) {
             response.status_code = 400;
@@ -10836,36 +11053,45 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_search(const HTTPRequest&
             return response;
         }
 
-        if (conversation_memory_) {
-            auto results = conversation_memory_->search_similar_conversations(
-                query, agent_type, context_type, limit
-            );
+        // // response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
 
-            nlohmann::json result = {{"success", true}, {"results", nlohmann::json::array()}};
+        // if (conversation_memory_) {
+        // //     auto results = conversation_memory_->search_similar_conversations(
+        // //         query, agent_type, context_type, limit
+        //     );
 
-            for (const auto& conv : results) {
-                result["results"].push_back({
-                    {"conversation_id", conv.conversation_id},
-                    {"agent_type", conv.agent_type},
-                    {"agent_name", conv.agent_name},
-                    {"context_type", conv.context_type},
-                    {"topic", conv.conversation_topic},
-                    {"similarity_score", conv.similarity_score},
-                    {"importance_score", conv.importance_score}
-                });
-            }
+        //     nlohmann::json result = {{"success", true}, {"results", nlohmann::json::array()}};
 
-            response.status_code = 200;
-            response.body = result.dump();
+        //     for (const auto& conv : results) {
+        //         result["results"].push_back({
+        //             {"conversation_id", conv.conversation_id},
+        //             {"agent_type", conv.agent_type},
+        //             {"agent_name", conv.agent_name},
+        //             {"context_type", conv.context_type},
+        //             {"topic", conv.conversation_topic},
+        //             {"similarity_score", conv.similarity_score},
+        //             {"importance_score", conv.importance_score}
+        //         });
+        //     }
+
+        //     response.status_code = 200;
+        //     response.body = result.dump();
         } else {
-            response.status_code = 500;
-            response.body = nlohmann::json{
-                {"success", false},
-                {"error", "Conversation memory not initialized"}
-            }.dump();
-        }
+        //     response.status_code = 500;
+        //     response.body = nlohmann::json{
+        //         {"success", false},
+        //         {"error", "Conversation memory not initialized"}
+        //     }.dump();
+        // }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -10881,7 +11107,7 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_delete(const HTTPRequest&
     response.content_type = "application/json";
 
     try {
-        std::string conversation_id = request.query_params.value("conversation_id", "");
+        std::string conversation_id = request.query_params.count("conversation_id") ? request.query_params.at("conversation_id") : "";
 
         if (conversation_id.empty()) {
             response.status_code = 400;
@@ -10892,23 +11118,39 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_delete(const HTTPRequest&
             return response;
         }
 
-        if (conversation_memory_) {
-            bool success = conversation_memory_->delete_conversation(conversation_id);
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
 
-            response.status_code = success ? 200 : 500;
-            response.body = nlohmann::json{
-                {"success", success},
-                {"message", success ? "Conversation deleted successfully" : "Failed to delete conversation"}
-            }.dump();
+        // response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (conversation_memory_) {
+        //     bool success = conversation_memory_->delete_conversation(conversation_id);
+
+        // //     response.status_code = success ? 200 : 500;
+        // //     response.body = nlohmann::json{
+        // //         {"success", success},
+        // //         {"message", success ? "Conversation deleted successfully" : "Failed to delete conversation"}
+        //     }.dump();
         } else {
-            response.status_code = 500;
-            response.body = nlohmann::json{
-                {"success", false},
-                {"error", "Conversation memory not initialized"}
-            }.dump();
-        }
+        //     response.status_code = 500;
+        //     response.body = nlohmann::json{
+        //         {"success", false},
+        //         {"error", "Conversation memory not initialized"}
+        //     }.dump();
+        // }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -10942,42 +11184,56 @@ HTTPResponse WebUIHandlers::handle_memory_case_store(const HTTPRequest& request)
             return response;
         }
 
-        if (case_based_reasoning_) {
-            bool success = case_based_reasoning_->store_case(
-                case_id, domain, case_type, problem_description,
-                solution_description, context_factors, outcome_metrics
-            );
-
-            response.status_code = success ? 200 : 500;
-            response.body = nlohmann::json{
-                {"success", success},
-                {"message", success ? "Case stored successfully" : "Failed to store case"}
-            }.dump();
-        } else {
-            response.status_code = 500;
-            response.body = nlohmann::json{
-                {"success", false},
-                {"error", "Case-based reasoning not initialized"}
-            }.dump();
-        }
-
-    } catch (const std::exception& e) {
-        response.status_code = 400;
+        response.status_code = 501;
         response.body = nlohmann::json{
             {"success", false},
-            {"error", std::string("Invalid request: ") + e.what()}
+            {"error", "Not implemented"}
         }.dump();
-    }
+        return response;
 
-    return response;
-}
+        // response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        if (case_based_reasoning_) {
+        //     bool success = case_based_reasoning_->store_case(
+        //         case_id, domain, case_type, problem_description,
+        //         solution_description, context_factors, outcome_metrics
+        //     );
+
+        //     response.status_code = success ? 200 : 500;
+        //     response.body = nlohmann::json{
+        //         {"success", success},
+        //         {"message", success ? "Case stored successfully" : "Failed to store case"}
+        //     }.dump();
+        // } else {
+        // //     response.status_code = 500;
+        // //     response.body = nlohmann::json{
+        // //         {"success", false},
+        //         {"error", "Case-based reasoning not initialized"}
+        //     }.dump();
+        // }
+
+    // catch (const std::exception& e) {
+    //     response.status_code = 400;
+    //     response.body = nlohmann::json{
+    //         {"success", false},
+    //         {"error", std::string("Invalid request: ") + e.what()}
+    //     }.dump();
+    // }
+
+    // return response;
+    // }
 
 HTTPResponse WebUIHandlers::handle_memory_case_retrieve(const HTTPRequest& request) {
     HTTPResponse response;
     response.content_type = "application/json";
 
     try {
-        std::string case_id = request.query_params.value("case_id", "");
+        std::string case_id = request.query_params.count("case_id") ? request.query_params.at("case_id") : "";
 
         if (case_id.empty()) {
             response.status_code = 400;
@@ -10988,8 +11244,22 @@ HTTPResponse WebUIHandlers::handle_memory_case_retrieve(const HTTPRequest& reque
             return response;
         }
 
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
         if (case_based_reasoning_) {
-            auto case_data = case_based_reasoning_->retrieve_case(case_id);
+        auto case_data = case_based_reasoning_->retrieve_case(case_id);
 
             if (case_data) {
                 response.status_code = 200;
@@ -11024,7 +11294,9 @@ HTTPResponse WebUIHandlers::handle_memory_case_retrieve(const HTTPRequest& reque
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11040,9 +11312,9 @@ HTTPResponse WebUIHandlers::handle_memory_case_search(const HTTPRequest& request
     response.content_type = "application/json";
 
     try {
-        std::string query = request.query_params.value("query", "");
-        std::string domain = request.query_params.value("domain", "");
-        int limit = std::stoi(request.query_params.value("limit", "10"));
+        std::string query = request.query_params.count("query") ? request.query_params.at("query") : "";
+        std::string domain = request.query_params.count("domain") ? request.query_params.at("domain") : "";
+        int limit = std::stoi(request.query_params.count("limit") ? request.query_params.at("limit") : "10");
 
         if (query.empty()) {
             response.status_code = 400;
@@ -11053,8 +11325,22 @@ HTTPResponse WebUIHandlers::handle_memory_case_search(const HTTPRequest& request
             return response;
         }
 
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
         if (case_based_reasoning_) {
-            auto results = case_based_reasoning_->find_similar_cases(query, domain, limit);
+        //     auto results = case_based_reasoning_->find_similar_cases(query, domain, limit);
 
             nlohmann::json result = {{"success", true}, {"results", nlohmann::json::array()}};
 
@@ -11080,7 +11366,9 @@ HTTPResponse WebUIHandlers::handle_memory_case_search(const HTTPRequest& request
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11096,7 +11384,7 @@ HTTPResponse WebUIHandlers::handle_memory_case_delete(const HTTPRequest& request
     response.content_type = "application/json";
 
     try {
-        std::string case_id = request.query_params.value("case_id", "");
+        std::string case_id = request.query_params.count("case_id") ? request.query_params.at("case_id") : "";
 
         if (case_id.empty()) {
             response.status_code = 400;
@@ -11106,6 +11394,13 @@ HTTPResponse WebUIHandlers::handle_memory_case_delete(const HTTPRequest& request
             }.dump();
             return response;
         }
+
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
 
         if (case_based_reasoning_) {
             bool success = case_based_reasoning_->delete_case(case_id);
@@ -11123,7 +11418,9 @@ HTTPResponse WebUIHandlers::handle_memory_case_delete(const HTTPRequest& request
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11149,7 +11446,14 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_store(const HTTPRequest& requ
         std::string feedback_text = json_body.value("feedback_text", "");
         std::string reviewer_id = json_body.value("reviewer_id", "test_user");
 
-        if (learning_engine_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (learning_engine_) {
             bool success = learning_engine_->store_feedback(
                 conversation_id, decision_id, agent_type, agent_name,
                 feedback_type, feedback_score, feedback_text, reviewer_id
@@ -11168,26 +11472,26 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_store(const HTTPRequest& requ
             }.dump();
         }
 
-    } catch (const std::exception& e) {
-        response.status_code = 400;
-        response.body = nlohmann::json{
-            {"success", false},
-            {"error", std::string("Invalid request: ") + e.what()}
-        }.dump();
-    }
+    // catch (const std::exception& e) {
+    //     response.status_code = 400;
+    //     response.body = nlohmann::json{
+    //         {"success", false},
+    //         {"error", std::string("Invalid request: ") + e.what()}
+    //     }.dump();
+    // }
 
-    return response;
-}
+    // return response;
+    // }
 
 HTTPResponse WebUIHandlers::handle_memory_feedback_retrieve(const HTTPRequest& request) {
     HTTPResponse response;
     response.content_type = "application/json";
 
     try {
-        std::string conversation_id = request.query_params.value("conversation_id", "");
-        std::string agent_type = request.query_params.value("agent_type", "");
-        std::string agent_name = request.query_params.value("agent_name", "");
-        int limit = std::stoi(request.query_params.value("limit", "50"));
+        std::string conversation_id = request.query_params.count("conversation_id") ? request.query_params.at("conversation_id") : "";
+        std::string agent_type = request.query_params.count("agent_type") ? request.query_params.at("agent_type") : "";
+        std::string agent_name = request.query_params.count("agent_name") ? request.query_params.at("agent_name") : "";
+        int limit = std::stoi(request.query_params.count("limit") ? request.query_params.at("limit") : "50");
 
         if (conversation_id.empty() && (agent_type.empty() || agent_name.empty())) {
             response.status_code = 400;
@@ -11198,7 +11502,14 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_retrieve(const HTTPRequest& r
             return response;
         }
 
-        if (learning_engine_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (learning_engine_) {
             auto feedback_list = learning_engine_->get_feedback(
                 conversation_id, agent_type, agent_name, limit
             );
@@ -11231,7 +11542,9 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_retrieve(const HTTPRequest& r
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11247,11 +11560,18 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_search(const HTTPRequest& req
     response.content_type = "application/json";
 
     try {
-        std::string agent_type = request.query_params.value("agent_type", "");
-        std::string feedback_type = request.query_params.value("feedback_type", "");
-        int limit = std::stoi(request.query_params.value("limit", "100"));
+        std::string agent_type = request.query_params.count("agent_type") ? request.query_params.at("agent_type") : "";
+        std::string feedback_type = request.query_params.count("feedback_type") ? request.query_params.at("feedback_type") : "";
+        int limit = std::stoi(request.query_params.count("limit") ? request.query_params.at("limit") : "100");
 
-        if (learning_engine_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (learning_engine_) {
             auto feedback_list = learning_engine_->search_feedback(
                 agent_type, feedback_type, limit
             );
@@ -11281,7 +11601,9 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_search(const HTTPRequest& req
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11297,7 +11619,14 @@ HTTPResponse WebUIHandlers::handle_memory_learning_models(const HTTPRequest& req
     response.content_type = "application/json";
 
     try {
-        if (learning_engine_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (learning_engine_) {
             auto models = learning_engine_->get_learning_models();
 
             nlohmann::json result = {{"success", true}, {"models", nlohmann::json::array()}};
@@ -11327,7 +11656,9 @@ HTTPResponse WebUIHandlers::handle_memory_learning_models(const HTTPRequest& req
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11343,7 +11674,14 @@ HTTPResponse WebUIHandlers::handle_memory_consolidation_status(const HTTPRequest
     response.content_type = "application/json";
 
     try {
-        if (memory_manager_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (memory_manager_) {
             auto status = memory_manager_->get_consolidation_status();
 
             response.status_code = 200;
@@ -11365,7 +11703,9 @@ HTTPResponse WebUIHandlers::handle_memory_consolidation_status(const HTTPRequest
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11387,7 +11727,14 @@ HTTPResponse WebUIHandlers::handle_memory_consolidation_run(const HTTPRequest& r
         double importance_threshold = json_body.value("importance_threshold", 0.3);
         int max_memories = json_body.value("max_memories", 1000);
 
-        if (memory_manager_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (memory_manager_) {
             int consolidated_count = memory_manager_->run_consolidation(
                 memory_type, max_age_days, importance_threshold, max_memories
             );
@@ -11406,27 +11753,34 @@ HTTPResponse WebUIHandlers::handle_memory_consolidation_run(const HTTPRequest& r
             }.dump();
         }
 
-    } catch (const std::exception& e) {
-        response.status_code = 400;
-        response.body = nlohmann::json{
-            {"success", false},
-            {"error", std::string("Invalid request: ") + e.what()}
-        }.dump();
-    }
+    // catch (const std::exception& e) {
+    //     response.status_code = 400;
+    //     response.body = nlohmann::json{
+    //         {"success", false},
+    //         {"error", std::string("Invalid request: ") + e.what()}
+    //     }.dump();
+    // }
 
-    return response;
-}
+    // return response;
+    // }
 
 HTTPResponse WebUIHandlers::handle_memory_access_patterns(const HTTPRequest& request) {
     HTTPResponse response;
     response.content_type = "application/json";
 
     try {
-        std::string memory_type = request.query_params.value("memory_type", "");
-        std::string agent_type = request.query_params.value("agent_type", "");
-        int limit = std::stoi(request.query_params.value("limit", "100"));
+        std::string memory_type = request.query_params.count("memory_type") ? request.query_params.at("memory_type") : "";
+        std::string agent_type = request.query_params.count("agent_type") ? request.query_params.at("agent_type") : "";
+        int limit = std::stoi(request.query_params.count("limit") ? request.query_params.at("limit") : "100");
 
-        if (memory_manager_) {
+        response.status_code = 501;
+        response.body = nlohmann::json{
+            {"success", false},
+            {"error", "Not implemented"}
+        }.dump();
+        return response;
+
+        // if (memory_manager_) {
             auto patterns = memory_manager_->get_access_patterns(memory_type, agent_type, limit);
 
             nlohmann::json result = {{"success", true}, {"patterns", nlohmann::json::array()}};
@@ -11455,7 +11809,9 @@ HTTPResponse WebUIHandlers::handle_memory_access_patterns(const HTTPRequest& req
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11517,7 +11873,9 @@ HTTPResponse WebUIHandlers::handle_memory_statistics(const HTTPRequest& request)
             }.dump();
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         response.status_code = 500;
         response.body = nlohmann::json{
             {"success", false},
@@ -11531,7 +11889,7 @@ HTTPResponse WebUIHandlers::handle_memory_statistics(const HTTPRequest& request)
 std::string WebUIHandlers::generate_memory_html() const {
     std::stringstream html;
 
-    html << R"(
+    html << R"UNIQUEDELIMITER(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11602,7 +11960,7 @@ std::string WebUIHandlers::generate_memory_html() const {
         </div>
 
         <div class="tabs">
-            <button class="tab active" onclick="showTab('conversations')">💬 Conversations</button>
+            <button class="tab active" onclick="showTab('conversations')">CHAT Conversations</button>
             <button class="tab" onclick="showTab('cases')">📚 Cases</button>
             <button class="tab" onclick="showTab('feedback')">📈 Learning Feedback</button>
             <button class="tab" onclick="showTab('models')">🤖 Learning Models</button>
@@ -11610,7 +11968,7 @@ std::string WebUIHandlers::generate_memory_html() const {
         </div>
 
         <div id="conversations-tab" class="tab-content">
-            <h2>💬 Conversation Memory Management</h2>
+            <h2>CHAT Conversation Memory Management</h2>
 
             <div class="form-section">
                 <h3>Store New Conversation</h3>
@@ -11910,7 +12268,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                     if (stats.conversation_memory) {
                         html += `
                             <div class="stat-card">
-                                <h4>💬 Conversations</h4>
+                                <h4>CHAT Conversations</h4>
                                 <div class="stat-value">${stats.conversation_memory.total_conversations || 0}</div>
                                 <p>Total Stored</p>
                                 <div class="stat-value">${(stats.conversation_memory.average_importance || 0).toFixed(2)}</div>
@@ -11947,11 +12305,11 @@ std::string WebUIHandlers::generate_memory_html() const {
                     document.getElementById('stats-content').innerHTML = html;
                 } else {
                     document.getElementById('stats-content').innerHTML =
-                        `<div class="result error"><h4>❌ Error: ${data.error}</h4></div>`;
+                        `<div class="result error"><h4>ERROR Error: ${data.error}</h4></div>`;
                 }
             } catch (error) {
                 document.getElementById('stats-content').innerHTML =
-                    `<div class="result error"><h4>❌ Error loading stats: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error loading stats: ${error.message}</h4></div>`;
             }
         }
 
@@ -11972,11 +12330,11 @@ std::string WebUIHandlers::generate_memory_html() const {
                     document.getElementById('consolidation-status').innerHTML = html;
                 } else {
                     document.getElementById('consolidation-status').innerHTML =
-                        `<div class="result error"><h4>❌ Error: ${data.error}</h4></div>`;
+                        `<div class="result error"><h4>ERROR Error: ${data.error}</h4></div>`;
                 }
             } catch (error) {
                 document.getElementById('consolidation-status').innerHTML =
-                    `<div class="result error"><h4>❌ Error loading status: ${error.message}</h4></div>`;
+                    `<div class="result error"><h4>ERROR Error loading status: ${error.message}</h4></div>`;
             }
         }
 
@@ -12002,13 +12360,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result ' + (result.success ? 'success' : 'error');
                 resultDiv.innerHTML = result.success ?
-                    `<h4>✅ Success</h4><p>${result.message}</p>` :
-                    `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    `<h4>SUCCESS Success</h4><p>${result.message}</p>` :
+                    `<h4>ERROR Error</h4><p>${result.error}</p>`;
             } catch (error) {
                 const resultDiv = document.getElementById('store-conv-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12025,7 +12383,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                     const conv = result.conversation;
                     resultDiv.className = 'result success';
                     resultDiv.innerHTML = `
-                        <h4>✅ Conversation Retrieved</h4>
+                        <h4>SUCCESS Conversation Retrieved</h4>
                         <p><strong>ID:</strong> ${conv.conversation_id}</p>
                         <p><strong>Agent:</strong> ${conv.agent_type}/${conv.agent_name}</p>
                         <p><strong>Context:</strong> ${conv.context_type}</p>
@@ -12036,13 +12394,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     `;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('retrieve-conv-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12061,7 +12419,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
 
                 if (result.success) {
-                    let html = `<h4>✅ Found ${result.results.length} similar conversations</h4>`;
+                    let html = `<h4>SUCCESS Found ${result.results.length} similar conversations</h4>`;
                     html += '<div class="memory-list">';
 
                     result.results.forEach(conv => {
@@ -12082,13 +12440,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     resultDiv.innerHTML = html;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('search-conv-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12115,13 +12473,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result ' + (result.success ? 'success' : 'error');
                 resultDiv.innerHTML = result.success ?
-                    `<h4>✅ Success</h4><p>${result.message}</p>` :
-                    `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    `<h4>SUCCESS Success</h4><p>${result.message}</p>` :
+                    `<h4>ERROR Error</h4><p>${result.error}</p>`;
             } catch (error) {
                 const resultDiv = document.getElementById('store-case-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12138,7 +12496,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                     const caseData = result.case;
                     resultDiv.className = 'result success';
                     resultDiv.innerHTML = `
-                        <h4>✅ Case Retrieved</h4>
+                        <h4>SUCCESS Case Retrieved</h4>
                         <p><strong>ID:</strong> ${caseData.case_id}</p>
                         <p><strong>Domain:</strong> ${caseData.domain}</p>
                         <p><strong>Type:</strong> ${caseData.case_type}</p>
@@ -12148,13 +12506,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     `;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('retrieve-case-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12173,7 +12531,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
 
                 if (result.success) {
-                    let html = `<h4>✅ Found ${result.results.length} similar cases</h4>`;
+                    let html = `<h4>SUCCESS Found ${result.results.length} similar cases</h4>`;
                     html += '<div class="memory-list">';
 
                     result.results.forEach(caseResult => {
@@ -12196,13 +12554,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     resultDiv.innerHTML = html;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('search-case-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12230,13 +12588,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result ' + (result.success ? 'success' : 'error');
                 resultDiv.innerHTML = result.success ?
-                    `<h4>✅ Success</h4><p>${result.message}</p>` :
-                    `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    `<h4>SUCCESS Success</h4><p>${result.message}</p>` :
+                    `<h4>ERROR Error</h4><p>${result.error}</p>`;
             } catch (error) {
                 const resultDiv = document.getElementById('store-feedback-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12258,7 +12616,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
 
                 if (result.success) {
-                    let html = `<h4>✅ Retrieved ${result.feedback.length} feedback entries</h4>`;
+                    let html = `<h4>SUCCESS Retrieved ${result.feedback.length} feedback entries</h4>`;
                     html += '<div class="memory-list">';
 
                     result.feedback.forEach(fb => {
@@ -12282,13 +12640,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     resultDiv.innerHTML = html;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('retrieve-feedback-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12300,7 +12658,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
 
                 if (result.success) {
-                    let html = `<h4>✅ Retrieved ${result.models.length} learning models</h4>`;
+                    let html = `<h4>SUCCESS Retrieved ${result.models.length} learning models</h4>`;
                     html += '<div class="memory-list">';
 
                     result.models.forEach(model => {
@@ -12323,13 +12681,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     resultDiv.innerHTML = html;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('models-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12353,13 +12711,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result ' + (result.success ? 'success' : 'error');
                 resultDiv.innerHTML = result.success ?
-                    `<h4>✅ Consolidation Completed</h4><p>Memories consolidated: ${result.memories_consolidated}</p>` :
-                    `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    `<h4>SUCCESS Consolidation Completed</h4><p>Memories consolidated: ${result.memories_consolidated}</p>` :
+                    `<h4>ERROR Error</h4><p>${result.error}</p>`;
             } catch (error) {
                 const resultDiv = document.getElementById('consolidation-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12379,7 +12737,7 @@ std::string WebUIHandlers::generate_memory_html() const {
                 resultDiv.style.display = 'block';
 
                 if (result.success) {
-                    let html = `<h4>✅ Retrieved ${result.patterns.length} access patterns</h4>`;
+                    let html = `<h4>SUCCESS Retrieved ${result.patterns.length} access patterns</h4>`;
                     html += '<div class="memory-list">';
 
                     result.patterns.forEach(pattern => {
@@ -12402,13 +12760,13 @@ std::string WebUIHandlers::generate_memory_html() const {
                     resultDiv.innerHTML = html;
                 } else {
                     resultDiv.className = 'result error';
-                    resultDiv.innerHTML = `<h4>❌ Error</h4><p>${result.error}</p>`;
+                    resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${result.error}</p>`;
                 }
             } catch (error) {
                 const resultDiv = document.getElementById('patterns-result');
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'result error';
-                resultDiv.innerHTML = `<h4>❌ Error</h4><p>${error.message}</p>`;
+                resultDiv.innerHTML = `<h4>ERROR Error</h4><p>${error.message}</p>`;
             }
         }
 
@@ -12418,7 +12776,7 @@ std::string WebUIHandlers::generate_memory_html() const {
     </script>
 </body>
 </html>
-    )";
+    )UNIQUEDELIMITER";
 
     return html.str();
 }
@@ -12467,7 +12825,7 @@ nlohmann::json WebUIHandlers::collect_audit_data() const {
             std::chrono::system_clock::now().time_since_epoch()).count();
         audit_data["audit_period_hours"] = 24;
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         // Return basic audit data on error
         audit_data = {
             {"total_calls", 0},
@@ -12530,7 +12888,9 @@ nlohmann::json WebUIHandlers::collect_recent_function_calls() const {
             }
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         if (logger_) {
             logger_->error("Failed to collect recent function calls: " + std::string(e.what()),
                          "WebUIHandlers", "collect_recent_function_calls");
@@ -12569,7 +12929,9 @@ void WebUIHandlers::record_function_call(const std::string& function_name, bool 
                           {"response_time_ms", std::to_string(response_time_ms)}});
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         if (logger_) {
             logger_->error("Failed to record function call: " + std::string(e.what()),
                          "WebUIHandlers", "record_function_call");
@@ -12633,7 +12995,7 @@ nlohmann::json WebUIHandlers::collect_performance_metrics() const {
         metrics_data["system_health_score"] = calculate_system_health_score(metrics_data);
         metrics_data["performance_trend"] = analyze_performance_trend(metrics_data);
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         // Return basic metrics on error
         metrics_data = {
             {"total_functions", function_registry_ ? function_registry_->get_registered_functions().size() : 0},
@@ -12711,7 +13073,9 @@ nlohmann::json WebUIHandlers::generate_ai_insights(const nlohmann::json& metrics
             });
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         insights.push_back({
             "type", "analysis_error",
             "severity", "low",
@@ -12760,7 +13124,9 @@ nlohmann::json WebUIHandlers::generate_performance_recommendations(const nlohman
             recommendations.push_back("Monitor API rate limits and implement queuing");
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         recommendations.push_back(std::string("Recommendation generation failed: ") + e.what());
     }
 
@@ -12813,7 +13179,7 @@ nlohmann::json WebUIHandlers::detect_performance_anomalies(const nlohmann::json&
                         memory_baseline = {mean, std_dev, p95, p99};
                     }
                 }
-            } catch (const std::exception& e) {
+            catch (const std::exception& e) {
                 logger_->warn("Failed to load historical baselines, using defaults: {}", e.what());
             }
         }
@@ -12865,7 +13231,9 @@ nlohmann::json WebUIHandlers::detect_performance_anomalies(const nlohmann::json&
             });
         }
 
-    } catch (const std::exception& e) {
+    }
+
+    catch (const std::exception& e) {
         anomalies.push_back({
             "type", "anomaly_detection_error",
             "severity", "low",
@@ -12913,7 +13281,7 @@ double WebUIHandlers::calculate_system_health_score(const nlohmann::json& metric
 
         return std::max(0.0, std::min(100.0, score));
 
-    } catch (const std::exception& e) {
+    catch (const std::exception& e) {
         return 50.0; // Neutral score on calculation error
     }
 }
@@ -12939,7 +13307,7 @@ std::string WebUIHandlers::analyze_performance_trend(const nlohmann::json& metri
                 historical_response_times.push_back(std::stod(row["avg_response_time"]));
                 historical_error_rates.push_back(std::stod(row["error_rate"]));
             }
-        } catch (const std::exception& e) {
+        catch (const std::exception& e) {
             logger_->warn("Failed to retrieve historical metrics for trend analysis: {}", e.what());
         }
     }

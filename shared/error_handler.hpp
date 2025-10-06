@@ -289,7 +289,9 @@ private:
     void clear_error_context(const std::string& correlation_id);
 
     // Comprehensive health monitoring
+public:
     nlohmann::json get_system_health_report();
+private:
     bool check_external_service_health(const std::string& service_name, const std::string& endpoint);
     nlohmann::json get_component_health_status();
     void perform_external_health_checks();

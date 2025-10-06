@@ -199,7 +199,7 @@ private:
  */
 inline FeedbackData create_feedback_from_human(const HumanFeedback& human_fb,
                                              const std::string& decision_id) {
-    FeedbackData fb(decision_id, FeedbackType::HUMAN_EXPLICIT,
+    FeedbackData fb(FeedbackType::HUMAN_EXPLICIT,
                    "human:" + human_fb.session_id, human_fb.agent_id);
 
     fb.decision_id = human_fb.decision_id;
@@ -242,7 +242,7 @@ inline FeedbackData create_feedback_from_validation(const std::string& decision_
                                                    const std::string& agent_id,
                                                    bool correct_outcome,
                                                    double confidence = 1.0) {
-    FeedbackData fb("system_validation_" + decision_id, FeedbackType::SYSTEM_VALIDATION,
+    FeedbackData fb(FeedbackType::SYSTEM_VALIDATION,
                    "system", agent_id);
 
     fb.decision_id = decision_id;
@@ -265,8 +265,7 @@ inline FeedbackData create_feedback_from_performance(const std::string& agent_id
                                                    double actual_value,
                                                    double expected_value,
                                                    double tolerance = 0.1) {
-    FeedbackData fb("performance_" + agent_id + "_" + metric_name,
-                   FeedbackType::PERFORMANCE_METRIC, "system", agent_id);
+    FeedbackData fb(FeedbackType::PERFORMANCE_METRIC, "system", agent_id);
 
     fb.context = "performance_monitoring";
     double deviation = std::abs(actual_value - expected_value) / std::abs(expected_value);

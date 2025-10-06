@@ -119,6 +119,10 @@ private:
         web_ui_server_->set_config_manager(config_ptr);
         web_ui_server_->set_logger(logger_ptr);
 
+        // Initialize Metrics Collector and Web UI Handlers
+        metrics_collector_ = std::make_shared<MetricsCollector>(logger_ptr);
+        web_ui_handlers_ = std::make_unique<WebUIHandlers>(config_ptr, logger_ptr, metrics_collector_);
+
         // Register Web UI routes
         setup_web_ui_routes();
 
@@ -167,54 +171,27 @@ private:
 
         // API: Activity feed
         web_ui_server_->add_route("GET", "/api/activity", [this](const HTTPRequest& req) {
-            nlohmann::json response = {
-                {"activities", nlohmann::json::array({
-                    {{"type", "primary"}, {"icon", "✅"}, {"title", "Transaction Approved"},
-                     {"description", "Transaction Guardian • TXN-789456 • Risk: LOW"}, {"time", "2 min ago"}},
-                    {{"type", "warning"}, {"icon", "📋"}, {"title", "New SEC Filing Detected"},
-                     {"description", "Regulatory Assessor • Form 10-K Analysis"}, {"time", "5 min ago"}},
-                    {{"type", "success"}, {"icon", "🔍"}, {"title", "Audit Report Generated"},
-                     {"description", "Audit Intelligence • Q4 2024 Report"}, {"time", "12 min ago"}}
-                })}
-            };
-            return HTTPResponse(200, "OK", response.dump(), "application/json");
+            return web_ui_handlers_->handle_activity_feed(req);
         });
 
         // API: Decisions
         web_ui_server_->add_route("GET", "/api/decisions", [this](const HTTPRequest& req) {
-            nlohmann::json response = {
-                {"decisions", nlohmann::json::array({
-                    {{"title", "Transaction Risk Assessment"}, {"confidence", 95}, {"status", "approved"},
-                     {"reasoning", "Transaction approved based on: (1) customer history clean, (2) amount within normal range, (3) geo-location verified"}},
-                    {{"title", "Compliance Policy Update Review"}, {"confidence", 78}, {"status", "review"},
-                     {"reasoning", "New FCA regulation requires human review: potential impact on 3 business processes identified"}}
-                })}
-            };
-            return HTTPResponse(200, "OK", response.dump(), "application/json");
+            return web_ui_handlers_->handle_decisions_recent(req);
         });
 
         // API: Regulatory changes
         web_ui_server_->add_route("GET", "/api/regulatory-changes", [this](const HTTPRequest& req) {
-            nlohmann::json response = {
-                {"changes", nlohmann::json::array({
-                    {{"risk", "danger"}, {"title", "SEC: New AI disclosure requirements"}},
-                    {{"risk", "warning"}, {"title", "FCA: Updated AML guidelines"}}
-                })}
-            };
-            return HTTPResponse(200, "OK", response.dump(), "application/json");
+            return web_ui_handlers_->handle_regulatory_changes(req);
         });
 
         // API: Audit trail
         web_ui_server_->add_route("GET", "/api/audit-trail", [this](const HTTPRequest& req) {
-            nlohmann::json response = {
-                {"events", nlohmann::json::array({
-                    {{"icon", "📝"}, {"title", "Decision Engine: Risk Assessment"},
-                     {"description", "TXN-789456 approved • Risk: LOW • Confidence: 95%"}, {"time", "14:35:12"}},
-                    {{"icon", "⚙️"}, {"title", "Admin: Configuration Change"},
-                     {"description", "Updated risk thresholds • User: admin@regulens.ai"}, {"time", "14:32:08"}}
-                })}
-            };
-            return HTTPResponse(200, "OK", response.dump(), "application/json");
+            return web_ui_handlers_->handle_decision_history(req);
+        });
+
+        // API: Agent status
+        web_ui_server_->add_route("GET", "/api/agent-status", [this](const HTTPRequest& req) {
+            return web_ui_handlers_->handle_agent_status(req);
         });
 
         // API: Communication
@@ -366,6 +343,8 @@ private:
     std::unique_ptr<RegulatoryMonitor> regulatory_monitor_;
     std::shared_ptr<RegulatoryKnowledgeBase> knowledge_base_;
     std::unique_ptr<WebUIServer> web_ui_server_;
+    std::shared_ptr<MetricsCollector> metrics_collector_;
+    std::unique_ptr<WebUIHandlers> web_ui_handlers_;
     Timer health_check_timer_;
 };
 

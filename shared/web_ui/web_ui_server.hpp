@@ -43,6 +43,7 @@ struct HTTPRequest {
     std::unordered_map<std::string, std::string> headers;
     std::string body;
     std::unordered_map<std::string, std::string> params;
+    std::unordered_map<std::string, std::string> query_params;
 
     HTTPRequest() = default;
     HTTPRequest(const std::string& m, const std::string& p,

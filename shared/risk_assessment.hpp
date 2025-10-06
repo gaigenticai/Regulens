@@ -132,6 +132,8 @@ struct TransactionData {
     std::string transaction_type;
     std::string payment_method;
     std::chrono::system_clock::time_point transaction_time;
+    long long timestamp;
+    double risk_score;
     std::string source_location;
     std::string destination_location;
     std::string counterparty_id;

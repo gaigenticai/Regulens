@@ -255,12 +255,23 @@ export interface AgentMessage {
 
 export interface CollaborationSession {
   id: string;
+  title: string;
+  description?: string;
   createdAt: string;
+  updatedAt?: string;
   participants: string[];
-  topic: string;
-  status: 'active' | 'paused' | 'completed';
+  agentIds: string[];
+  topic?: string;
+  objective?: string;
+  status: 'active' | 'paused' | 'completed' | 'archived';
   messageCount: number;
   lastActivity: string;
+  context?: Record<string, unknown>;
+  settings?: {
+    maxDuration?: number;
+    autoArchive?: boolean;
+    allowExternal?: boolean;
+  };
 }
 
 export interface CollaborationMessage {
@@ -268,9 +279,13 @@ export interface CollaborationMessage {
   sessionId: string;
   timestamp: string;
   sender: string;
-  senderType: 'human' | 'agent';
+  agentId?: string;
+  senderType: 'human' | 'agent' | 'system';
   content: string;
+  type?: 'text' | 'code' | 'file' | 'system';
   attachments?: string[];
+  replyToId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Feedback {
@@ -552,4 +567,212 @@ export interface TimeSeriesDataPoint {
   timestamp: string;
   value: number;
   metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// LLM MODELS & COMPLETIONS (Phase 5)
+// ============================================================================
+
+export interface LLMModel {
+  id: string;
+  name: string;
+  provider: 'openai' | 'anthropic' | 'google' | 'custom';
+  version: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+  capabilities: string[];
+  pricing: {
+    inputTokenPrice: number;
+    outputTokenPrice: number;
+    currency: string;
+  };
+  status: 'available' | 'deprecated' | 'beta';
+  description?: string;
+}
+
+export interface LLMCompletion {
+  id: string;
+  modelId: string;
+  prompt: string;
+  completion: string;
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cost: number;
+  };
+  timestamp: string;
+  finishReason: 'stop' | 'length' | 'content_filter' | 'error';
+  metadata?: Record<string, unknown>;
+}
+
+export interface LLMAnalysis {
+  id: string;
+  modelId: string;
+  text: string;
+  analysisType: 'sentiment' | 'summary' | 'entities' | 'classification' | 'custom';
+  result: Record<string, unknown>;
+  confidence: number;
+  timestamp: string;
+  processingTimeMs: number;
+}
+
+export interface LLMConversation {
+  id: string;
+  title: string;
+  modelId: string;
+  systemPrompt?: string;
+  messages: LLMMessage[];
+  createdAt: string;
+  updatedAt: string;
+  totalTokens: number;
+  totalCost: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LLMMessage {
+  id: string;
+  conversationId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  tokens?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LLMUsageStats {
+  totalRequests: number;
+  totalTokens: number;
+  totalCost: number;
+  byModel: Record<string, {
+    requests: number;
+    tokens: number;
+    cost: number;
+  }>;
+  timeRange: string;
+}
+
+export interface LLMBatchJob {
+  id: string;
+  modelId: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  totalItems: number;
+  processedItems: number;
+  failedItems: number;
+  createdAt: string;
+  completedAt?: string;
+  results?: Array<{
+    id: string;
+    completion: string;
+    error?: string;
+  }>;
+}
+
+export interface LLMFineTuneJob {
+  id: string;
+  baseModelId: string;
+  customModelId?: string;
+  status: 'pending' | 'training' | 'completed' | 'failed';
+  trainingProgress: number;
+  epochs: number;
+  currentEpoch: number;
+  trainingLoss?: number;
+  validationLoss?: number;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface LLMBenchmark {
+  modelId: string;
+  benchmarks: {
+    accuracy: number;
+    latencyMs: number;
+    throughput: number;
+    costPerToken: number;
+  };
+  testDate: string;
+}
+
+// ============================================================================
+// COLLABORATION SYSTEM (Phase 5)
+// ============================================================================
+
+export interface CollaborationAgent {
+  id: string;
+  name: string;
+  type: 'human' | 'ai' | 'system';
+  role: 'participant' | 'observer' | 'facilitator';
+  status: 'online' | 'offline' | 'away' | 'busy';
+  capabilities?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CollaborationTask {
+  id: string;
+  sessionId: string;
+  title: string;
+  description?: string;
+  assignedTo?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  progress: number;
+  dueDate?: string;
+  createdAt: string;
+  completedAt?: string;
+  dependencies?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CollaborationResource {
+  id: string;
+  sessionId: string;
+  type: 'file' | 'code' | 'link' | 'data';
+  title: string;
+  content: string | object;
+  description?: string;
+  sharedBy: string;
+  sharedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CollaborationDecision {
+  id: string;
+  sessionId: string;
+  proposalId: string;
+  title: string;
+  description: string;
+  votes: Array<{
+    agentId: string;
+    vote: 'approve' | 'reject' | 'abstain';
+    comment?: string;
+    timestamp: string;
+  }>;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  decidedAt?: string;
+}
+
+export interface CollaborationAnalytics {
+  sessionId: string;
+  duration: number;
+  messageCount: number;
+  taskCount: number;
+  completedTasks: number;
+  participantCount: number;
+  activeTime: number;
+  decisionsMade: number;
+  resourcesShared: number;
+}
+
+export interface CollaborationStats {
+  totalSessions: number;
+  activeSessions: number;
+  totalMessages: number;
+  totalTasks: number;
+  completedTasks: number;
+  averageSessionDuration: number;
+  topParticipants: Array<{
+    agentId: string;
+    sessionCount: number;
+  }>;
 }

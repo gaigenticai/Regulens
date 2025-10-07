@@ -36,6 +36,11 @@ const DataIngestion = lazy(() => import('@/pages/DataIngestion'));
 const PatternRecognition = lazy(() => import('@/pages/PatternRecognition'));
 const KnowledgeBase = lazy(() => import('@/pages/KnowledgeBase'));
 
+// Phase 5 - Advanced Features
+const PatternAnalysis = lazy(() => import('@/pages/PatternAnalysis'));
+const LLMAnalysis = lazy(() => import('@/pages/LLMAnalysis'));
+const AgentCollaboration = lazy(() => import('@/pages/AgentCollaboration'));
+
 // System & Monitoring
 const SystemMetrics = lazy(() => import('@/pages/SystemMetrics'));
 const CircuitBreakers = lazy(() => import('@/pages/CircuitBreakers'));
@@ -168,6 +173,27 @@ export const routes: AppRoute[] = [
     element: KnowledgeBase,
     showInNav: true,
     icon: 'BookOpen',
+  },
+  {
+    path: '/pattern-analysis',
+    name: 'Pattern Analysis',
+    element: PatternAnalysis,
+    showInNav: true,
+    icon: 'Network',
+  },
+  {
+    path: '/llm-analysis',
+    name: 'LLM Analysis',
+    element: LLMAnalysis,
+    showInNav: true,
+    icon: 'Sparkles',
+  },
+  {
+    path: '/agent-collaboration',
+    name: 'Agent Collaboration',
+    element: AgentCollaboration,
+    showInNav: true,
+    icon: 'Users',
   },
   {
     path: '/metrics',

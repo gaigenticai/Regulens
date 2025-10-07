@@ -7,7 +7,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import apiClient from '@/services/api';
-import type { RegulatoryChange, RegulatorySource } from '@/types/api';
+import type { RegulatoryChange } from '@/types/api';
 
 interface UseRegulatoryChangesOptions {
   limit?: number;
@@ -30,13 +30,12 @@ export function useRegulatoryChanges(options: UseRegulatoryChangesOptions = {}) 
   const { data: changes = [], isLoading, isError, error } = useQuery({
     queryKey: ['regulatory-changes', limit, sourceId, severity, status, startDate, endDate],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (limit) params.append('limit', limit.toString());
-      if (sourceId) params.append('source_id', sourceId);
-      if (severity) params.append('severity', severity);
-      if (status) params.append('status', status);
-      if (startDate) params.append('start_date', startDate);
-      if (endDate) params.append('end_date', endDate);
+      const params: { from?: string; to?: string; source?: string; severity?: string; limit?: number } = {};
+      if (limit) params.limit = limit;
+      if (sourceId) params.source = sourceId;
+      if (severity) params.severity = severity;
+      if (startDate) params.from = startDate;
+      if (endDate) params.to = endDate;
 
       const data = await apiClient.getRegulatoryChanges(params);
       return data;

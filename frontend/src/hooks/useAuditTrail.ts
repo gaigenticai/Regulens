@@ -7,7 +7,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import apiClient from '@/services/api';
-import type { AuditEntry, AuditStats } from '@/types/api';
+import type { AuditEntry } from '@/types/api';
 
 interface UseAuditTrailOptions {
   limit?: number;
@@ -31,14 +31,13 @@ export function useAuditTrail(options: UseAuditTrailOptions = {}) {
   const { data: entries = [], isLoading, isError, error } = useQuery({
     queryKey: ['audit-trail', limit, userId, action, entityType, startDate, endDate, severity],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (limit) params.append('limit', limit.toString());
-      if (userId) params.append('user_id', userId);
-      if (action) params.append('action', action);
-      if (entityType) params.append('entity_type', entityType);
-      if (startDate) params.append('start_date', startDate);
-      if (endDate) params.append('end_date', endDate);
-      if (severity) params.append('severity', severity);
+      const params: { from?: string; to?: string; eventType?: string; actor?: string; severity?: string; limit?: number } = {};
+      if (limit) params.limit = limit;
+      if (userId) params.actor = userId;
+      if (action) params.eventType = action;
+      if (startDate) params.from = startDate;
+      if (endDate) params.to = endDate;
+      if (severity) params.severity = severity;
 
       const data = await apiClient.getAuditTrail(params);
       return data;
@@ -161,17 +160,16 @@ export function useAuditSearch(searchTerm: string, filters: UseAuditTrailOptions
   return useQuery({
     queryKey: ['audit-search', searchTerm, filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('q', searchTerm);
-      if (filters.limit) params.append('limit', filters.limit.toString());
-      if (filters.userId) params.append('user_id', filters.userId);
-      if (filters.action) params.append('action', filters.action);
-      if (filters.entityType) params.append('entity_type', filters.entityType);
-      if (filters.startDate) params.append('start_date', filters.startDate);
-      if (filters.endDate) params.append('end_date', filters.endDate);
-      if (filters.severity) params.append('severity', filters.severity);
+      const params: Record<string, string> = {};
+      if (filters.limit) params.limit = filters.limit.toString();
+      if (filters.userId) params.user_id = filters.userId;
+      if (filters.action) params.action = filters.action;
+      if (filters.entityType) params.entity_type = filters.entityType;
+      if (filters.startDate) params.start_date = filters.startDate;
+      if (filters.endDate) params.end_date = filters.endDate;
+      if (filters.severity) params.severity = filters.severity;
 
-      const data = await apiClient.searchAuditTrail(params);
+      const data = await apiClient.searchAuditTrail(searchTerm, params);
       return data;
     },
     enabled: searchTerm.length >= 2, // Only search with 2+ characters

@@ -241,29 +241,8 @@ class RegulesAPIClient {
   }
 
   // ============================================================================
-  // COLLABORATION
+  // FEEDBACK (Old Collaboration)
   // ============================================================================
-
-  async getCollaborationSessions(): Promise<API.CollaborationSession[]> {
-    const response = await this.client.get<API.CollaborationSession[]>('/collaboration/sessions');
-    return response.data;
-  }
-
-  async createCollaborationSession(topic: string): Promise<API.CollaborationSession> {
-    const response = await this.client.post<API.CollaborationSession>('/collaboration/session/create', { topic });
-    return response.data;
-  }
-
-  async getSessionMessages(sessionId: string): Promise<API.CollaborationMessage[]> {
-    const response = await this.client.get<API.CollaborationMessage[]>('/collaboration/session/messages', {
-      params: { sessionId },
-    });
-    return response.data;
-  }
-
-  async sendCollaborationMessage(sessionId: string, content: string): Promise<void> {
-    await this.client.post('/collaboration/message/send', { sessionId, content });
-  }
 
   async submitFeedback(feedback: Partial<API.Feedback>): Promise<API.Feedback> {
     const response = await this.client.post<API.Feedback>('/collaboration/feedback', feedback);
@@ -280,27 +259,13 @@ class RegulesAPIClient {
     return response.data;
   }
 
-  // ============================================================================
-  // PATTERN RECOGNITION
-  // ============================================================================
-
-  async getPatterns(): Promise<API.Pattern[]> {
-    const response = await this.client.get<API.Pattern[]>('/patterns');
-    return response.data;
-  }
-
   async discoverPatterns(params: { timeframe: string; minConfidence: number }): Promise<API.Pattern[]> {
     const response = await this.client.post<API.Pattern[]>('/patterns/discover', params);
     return response.data;
   }
 
-  async getPatternStats(): Promise<API.PatternStats> {
-    const response = await this.client.get<API.PatternStats>('/patterns/stats');
-    return response.data;
-  }
-
   // ============================================================================
-  // LLM INTEGRATION
+  // LLM (Legacy methods)
   // ============================================================================
 
   async llmCompletion(request: API.LLMCompletionRequest): Promise<API.LLMCompletionResponse> {
@@ -366,20 +331,188 @@ class RegulesAPIClient {
   }
 
   // ============================================================================
-  // KNOWLEDGE BASE
+  // AUDIT TRAIL (Phase 4 Missing Methods)
   // ============================================================================
 
-  async searchKnowledge(query: string): Promise<API.KnowledgeEntry[]> {
-    const response = await this.client.get<API.KnowledgeEntry[]>('/knowledge/search', {
-      params: { q: query },
+  async getAuditEntry(id: string): Promise<API.AuditEntry> {
+    const response = await this.client.get<API.AuditEntry>(`/audit/${id}`);
+    return response.data;
+  }
+
+  async getAuditStats(timeRange?: string): Promise<API.AuditStats> {
+    const response = await this.client.get<API.AuditStats>('/audit/stats', {
+      params: timeRange ? { time_range: timeRange } : undefined,
     });
     return response.data;
   }
 
-  async getCaseExamples(situation: string): Promise<API.CaseExample[]> {
-    const response = await this.client.get<API.CaseExample[]>('/knowledge/cases', {
-      params: { situation },
+  async searchAuditTrail(query: string, filters?: Record<string, string>): Promise<API.AuditEntry[]> {
+    const params = { q: query, ...filters };
+    const response = await this.client.get<API.AuditEntry[]>('/audit/search', { params });
+    return response.data;
+  }
+
+  async getEntityAuditTrail(entityType: string, entityId: string): Promise<API.AuditEntry[]> {
+    const response = await this.client.get<API.AuditEntry[]>('/audit/entity', {
+      params: { entity_type: entityType, entity_id: entityId },
     });
+    return response.data;
+  }
+
+  async getUserActivity(userId: string, timeRange?: string): Promise<API.AuditEntry[]> {
+    const response = await this.client.get<API.AuditEntry[]>(`/audit/user/${userId}`, {
+      params: timeRange ? { time_range: timeRange } : undefined,
+    });
+    return response.data;
+  }
+
+  // ============================================================================
+  // REGULATORY CHANGES (Phase 4 Missing Methods)
+  // ============================================================================
+
+  async updateRegulatoryStatus(id: string, status: API.RegulatoryChange['status'], notes?: string): Promise<API.RegulatoryChange> {
+    const response = await this.client.put<API.RegulatoryChange>(`/regulatory/${id}/status`, { status, notes });
+    return response.data;
+  }
+
+  async getImpactAssessment(changeId: string): Promise<{ impactScore: number; affectedSystems: string[]; recommendations: string[] }> {
+    const response = await this.client.get(`/regulatory/${changeId}/impact`);
+    return response.data;
+  }
+
+  async generateImpactAssessment(changeId: string): Promise<{ jobId: string; message: string }> {
+    const response = await this.client.post(`/regulatory/${changeId}/assess`);
+    return response.data;
+  }
+
+  async getRegulatoryStats(): Promise<API.RegulatoryStats> {
+    const response = await this.client.get<API.RegulatoryStats>('/regulatory/stats');
+    return response.data;
+  }
+
+  // ============================================================================
+  // TRANSACTIONS (Phase 4 Missing Methods)
+  // ============================================================================
+
+  async getTransactionStats(): Promise<API.TransactionStats> {
+    const response = await this.client.get<API.TransactionStats>('/transactions/stats');
+    return response.data;
+  }
+
+  async analyzeTransaction(id: string): Promise<API.FraudAnalysis> {
+    const response = await this.client.post<API.FraudAnalysis>(`/transactions/${id}/analyze`);
+    return response.data;
+  }
+
+  async getFraudAnalysis(transactionId: string): Promise<API.FraudAnalysis> {
+    const response = await this.client.get<API.FraudAnalysis>(`/transactions/${transactionId}/fraud-analysis`);
+    return response.data;
+  }
+
+  async approveTransactionWithNotes(id: string, notes?: string): Promise<API.Transaction> {
+    const response = await this.client.post<API.Transaction>(`/transactions/${id}/approve`, { notes });
+    return response.data;
+  }
+
+  async rejectTransactionWithNotes(id: string, reason: string, notes?: string): Promise<API.Transaction> {
+    const response = await this.client.post<API.Transaction>(`/transactions/${id}/reject`, { reason, notes });
+    return response.data;
+  }
+
+  async getTransactionPatterns(): Promise<API.TransactionPattern[]> {
+    const response = await this.client.get<API.TransactionPattern[]>('/transactions/patterns');
+    return response.data;
+  }
+
+  async detectAnomalies(params: { timeRange: string; sensitivity?: number }): Promise<API.AnomalyDetectionResult[]> {
+    const response = await this.client.post<API.AnomalyDetectionResult[]>('/transactions/detect-anomalies', params);
+    return response.data;
+  }
+
+  async getTransactionMetrics(timeRange: string): Promise<{ totalVolume: number; avgRiskScore: number; flaggedCount: number; timeline: API.TimeSeriesDataPoint[] }> {
+    const response = await this.client.get('/transactions/metrics', {
+      params: { time_range: timeRange },
+    });
+    return response.data;
+  }
+
+  // ============================================================================
+  // FRAUD DETECTION (Phase 4 Missing Methods)
+  // ============================================================================
+
+  async getFraudRule(id: string): Promise<API.FraudRule> {
+    const response = await this.client.get<API.FraudRule>(`/fraud/rules/${id}`);
+    return response.data;
+  }
+
+  async createFraudRule(rule: API.CreateFraudRuleRequest): Promise<API.FraudRule> {
+    const response = await this.client.post<API.FraudRule>('/fraud/rules', rule);
+    return response.data;
+  }
+
+  async updateFraudRule(id: string, rule: Partial<API.CreateFraudRuleRequest>): Promise<API.FraudRule> {
+    const response = await this.client.put<API.FraudRule>(`/fraud/rules/${id}`, rule);
+    return response.data;
+  }
+
+  async deleteFraudRule(id: string): Promise<void> {
+    await this.client.delete(`/fraud/rules/${id}`);
+  }
+
+  async toggleFraudRule(id: string, enabled: boolean): Promise<API.FraudRule> {
+    const response = await this.client.patch<API.FraudRule>(`/fraud/rules/${id}/toggle`, { enabled });
+    return response.data;
+  }
+
+  async testFraudRule(ruleId: string, timeRange: string): Promise<{ matchCount: number; falsePositives: number; accuracy: number; matchedTransactions: string[] }> {
+    const response = await this.client.post(`/fraud/rules/${ruleId}/test`, { time_range: timeRange });
+    return response.data;
+  }
+
+  async getFraudAlerts(params: URLSearchParams): Promise<API.FraudAlert[]> {
+    const response = await this.client.get<API.FraudAlert[]>('/fraud/alerts', { params });
+    return response.data;
+  }
+
+  async getFraudAlert(id: string): Promise<API.FraudAlert> {
+    const response = await this.client.get<API.FraudAlert>(`/fraud/alerts/${id}`);
+    return response.data;
+  }
+
+  async updateFraudAlertStatus(id: string, status: API.FraudAlert['status'], notes?: string): Promise<API.FraudAlert> {
+    const response = await this.client.put<API.FraudAlert>(`/fraud/alerts/${id}/status`, { status, notes });
+    return response.data;
+  }
+
+  async getFraudStats(timeRange: string): Promise<API.FraudStats> {
+    const response = await this.client.get<API.FraudStats>('/fraud/stats', {
+      params: { time_range: timeRange },
+    });
+    return response.data;
+  }
+
+  async getFraudModels(): Promise<Array<{ id: string; name: string; accuracy: number; type: string }>> {
+    const response = await this.client.get('/fraud/models');
+    return response.data;
+  }
+
+  async trainFraudModel(params: { modelType: string; trainingData: string; parameters?: Record<string, any> }): Promise<{ jobId: string; message: string }> {
+    const response = await this.client.post('/fraud/models/train', params);
+    return response.data;
+  }
+
+  async getModelPerformance(modelId: string): Promise<{ accuracy: number; precision: number; recall: number; f1Score: number; confusionMatrix: number[][] }> {
+    const response = await this.client.get(`/fraud/models/${modelId}/performance`);
+    return response.data;
+  }
+
+  async runBatchFraudScan(params: { transactionIds?: string[]; dateRange?: { start: string; end: string }; ruleIds?: string[] }): Promise<{ jobId: string; message: string }> {
+    const response = await this.client.post('/fraud/scan/batch', params);
+    return response.data;
+  }
+
+  async exportFraudReport(params: { format: 'pdf' | 'csv' | 'json'; timeRange: string; includeAlerts?: boolean; includeRules?: boolean; includeStats?: boolean }): Promise<{ url: string; expiresAt: string }> {
+    const response = await this.client.post('/fraud/export', params);
     return response.data;
   }
 
@@ -433,6 +566,494 @@ class RegulesAPIClient {
 
   async getDatabaseStats(): Promise<Record<string, unknown>> {
     const response = await this.client.get<Record<string, unknown>>('/db/stats');
+    return response.data;
+  }
+
+  // ============================================================================
+  // PATTERNS (Phase 5)
+  // ============================================================================
+
+  async getPatterns(params: Record<string, string>): Promise<API.Pattern[]> {
+    const response = await this.client.get<API.Pattern[]>('/patterns', { params });
+    return response.data;
+  }
+
+  async getPatternById(id: string): Promise<API.Pattern> {
+    const response = await this.client.get<API.Pattern>(`/patterns/${id}`);
+    return response.data;
+  }
+
+  async getPatternStats(): Promise<API.PatternStats> {
+    const response = await this.client.get<API.PatternStats>('/patterns/stats');
+    return response.data;
+  }
+
+  async detectPatterns(params: {
+    dataSource: string;
+    algorithm?: 'clustering' | 'sequential' | 'association' | 'neural';
+    timeRange?: string;
+    minSupport?: number;
+    minConfidence?: number;
+  }): Promise<{ jobId: string; message: string }> {
+    const response = await this.client.post<{ jobId: string; message: string }>('/patterns/detect', params);
+    return response.data;
+  }
+
+  async getPatternPredictions(patternId: string): Promise<{ predictions: Array<{ timestamp: string; probability: number; value: number }> }> {
+    const response = await this.client.get(`/patterns/${patternId}/predictions`);
+    return response.data;
+  }
+
+  async validatePattern(patternId: string, validationData: Record<string, unknown>): Promise<{ isValid: boolean; confidence: number; details: Record<string, unknown> }> {
+    const response = await this.client.post(`/patterns/${patternId}/validate`, validationData);
+    return response.data;
+  }
+
+  async getPatternCorrelations(patternId: string): Promise<{ correlations: Array<{ patternId: string; correlation: number; description: string }> }> {
+    const response = await this.client.get(`/patterns/${patternId}/correlations`);
+    return response.data;
+  }
+
+  async getPatternTimeline(patternId: string, timeRange: string): Promise<{ timeline: API.TimeSeriesDataPoint[] }> {
+    const response = await this.client.get(`/patterns/${patternId}/timeline`, { params: { time_range: timeRange } });
+    return response.data;
+  }
+
+  async exportPatternReport(params: {
+    patternIds?: string[];
+    format: 'pdf' | 'csv' | 'json';
+    includeVisualization?: boolean;
+    includeStats?: boolean;
+  }): Promise<{ url: string; expiresAt: string }> {
+    const response = await this.client.post('/patterns/export', params);
+    return response.data;
+  }
+
+  async getPatternAnomalies(params: Record<string, string>): Promise<Array<{ patternId: string; anomalyType: string; severity: string; detected: string; details: Record<string, unknown> }>> {
+    const response = await this.client.get('/patterns/anomalies', { params });
+    return response.data;
+  }
+
+  // ============================================================================
+  // KNOWLEDGE BASE (Phase 5)
+  // ============================================================================
+
+  async searchKnowledge(params: Record<string, string>): Promise<API.KnowledgeEntry[]> {
+    const response = await this.client.get<API.KnowledgeEntry[]>('/knowledge/search', { params });
+    return response.data;
+  }
+
+  async getKnowledgeEntries(params: Record<string, string>): Promise<API.KnowledgeEntry[]> {
+    const response = await this.client.get<API.KnowledgeEntry[]>('/knowledge/entries', { params });
+    return response.data;
+  }
+
+  async getKnowledgeEntry(id: string): Promise<API.KnowledgeEntry> {
+    const response = await this.client.get<API.KnowledgeEntry>(`/knowledge/entries/${id}`);
+    return response.data;
+  }
+
+  async createKnowledgeEntry(entry: {
+    title: string;
+    content: string;
+    category: string;
+    tags: string[];
+    metadata?: Record<string, unknown>;
+  }): Promise<API.KnowledgeEntry> {
+    const response = await this.client.post<API.KnowledgeEntry>('/knowledge/entries', entry);
+    return response.data;
+  }
+
+  async updateKnowledgeEntry(id: string, entry: Partial<{
+    title: string;
+    content: string;
+    category: string;
+    tags: string[];
+    metadata: Record<string, unknown>;
+  }>): Promise<API.KnowledgeEntry> {
+    const response = await this.client.put<API.KnowledgeEntry>(`/knowledge/entries/${id}`, entry);
+    return response.data;
+  }
+
+  async deleteKnowledgeEntry(id: string): Promise<void> {
+    await this.client.delete(`/knowledge/entries/${id}`);
+  }
+
+  async getSimilarKnowledge(entryId: string, limit: number): Promise<API.KnowledgeEntry[]> {
+    const response = await this.client.get<API.KnowledgeEntry[]>(`/knowledge/entries/${entryId}/similar`, {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  async getCaseExamples(params: Record<string, string>): Promise<API.CaseExample[]> {
+    const response = await this.client.get<API.CaseExample[]>('/knowledge/cases', { params });
+    return response.data;
+  }
+
+  async getCaseExample(id: string): Promise<API.CaseExample> {
+    const response = await this.client.get<API.CaseExample>(`/knowledge/cases/${id}`);
+    return response.data;
+  }
+
+  async askKnowledgeBase(params: {
+    question: string;
+    context?: string[];
+    maxResults?: number;
+    temperature?: number;
+  }): Promise<{ answer: string; sources: API.KnowledgeEntry[]; confidence: number }> {
+    const response = await this.client.post('/knowledge/ask', params);
+    return response.data;
+  }
+
+  async generateEmbedding(text: string): Promise<{ embedding: number[]; model: string; dimensions: number }> {
+    const response = await this.client.post('/knowledge/embeddings', { text });
+    return response.data;
+  }
+
+  async getKnowledgeStats(): Promise<{ totalEntries: number; totalCategories: number; totalTags: number; lastUpdated: string }> {
+    const response = await this.client.get('/knowledge/stats');
+    return response.data;
+  }
+
+  async reindexKnowledge(): Promise<{ message: string; entriesProcessed: number }> {
+    const response = await this.client.post('/knowledge/reindex');
+    return response.data;
+  }
+
+  // ============================================================================
+  // LLM INTEGRATION (Phase 5)
+  // ============================================================================
+
+  get baseURL(): string {
+    return this.client.defaults.baseURL || '';
+  }
+
+  get wsBaseURL(): string {
+    const base = this.baseURL.replace(/^http/, 'ws').replace('/api', '');
+    return `${base}/ws`;
+  }
+
+  async getLLMModels(): Promise<API.LLMModel[]> {
+    const response = await this.client.get<API.LLMModel[]>('/llm/models');
+    return response.data;
+  }
+
+  async getLLMModel(modelId: string): Promise<API.LLMModel> {
+    const response = await this.client.get<API.LLMModel>(`/llm/models/${modelId}`);
+    return response.data;
+  }
+
+  async generateLLMCompletion(params: {
+    modelId: string;
+    prompt: string;
+    systemPrompt?: string;
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+    stop?: string[];
+  }): Promise<API.LLMCompletion> {
+    const response = await this.client.post<API.LLMCompletion>('/llm/completions', params);
+    return response.data;
+  }
+
+  async analyzeLLM(params: {
+    modelId: string;
+    text: string;
+    analysisType: 'sentiment' | 'summary' | 'entities' | 'classification' | 'custom';
+    instructions?: string;
+    temperature?: number;
+  }): Promise<API.LLMAnalysis> {
+    const response = await this.client.post<API.LLMAnalysis>('/llm/analyze', params);
+    return response.data;
+  }
+
+  async getLLMConversations(params: Record<string, string>): Promise<API.LLMConversation[]> {
+    const response = await this.client.get<API.LLMConversation[]>('/llm/conversations', { params });
+    return response.data;
+  }
+
+  async getLLMConversation(conversationId: string): Promise<API.LLMConversation> {
+    const response = await this.client.get<API.LLMConversation>(`/llm/conversations/${conversationId}`);
+    return response.data;
+  }
+
+  async createLLMConversation(params: {
+    title?: string;
+    modelId: string;
+    systemPrompt?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<API.LLMConversation> {
+    const response = await this.client.post<API.LLMConversation>('/llm/conversations', params);
+    return response.data;
+  }
+
+  async addLLMMessage(params: {
+    conversationId: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<API.LLMMessage> {
+    const response = await this.client.post<API.LLMMessage>(`/llm/conversations/${params.conversationId}/messages`, params);
+    return response.data;
+  }
+
+  async deleteLLMConversation(conversationId: string): Promise<void> {
+    await this.client.delete(`/llm/conversations/${conversationId}`);
+  }
+
+  async getLLMUsageStats(params: Record<string, string>): Promise<API.LLMUsageStats> {
+    const response = await this.client.get<API.LLMUsageStats>('/llm/usage', { params });
+    return response.data;
+  }
+
+  async estimateLLMCost(params: {
+    modelId: string;
+    inputTokens: number;
+    outputTokens: number;
+  }): Promise<{ cost: number; currency: string; breakdown: Record<string, number> }> {
+    const response = await this.client.post('/llm/cost-estimate', params);
+    return response.data;
+  }
+
+  async batchProcessLLM(params: {
+    modelId: string;
+    items: Array<{ id: string; prompt: string }>;
+    systemPrompt?: string;
+    temperature?: number;
+    maxTokens?: number;
+    batchSize?: number;
+  }): Promise<API.LLMBatchJob> {
+    const response = await this.client.post<API.LLMBatchJob>('/llm/batch', params);
+    return response.data;
+  }
+
+  async getLLMBatchJob(jobId: string): Promise<API.LLMBatchJob> {
+    const response = await this.client.get<API.LLMBatchJob>(`/llm/batch/${jobId}`);
+    return response.data;
+  }
+
+  async fineTuneLLM(params: {
+    baseModelId: string;
+    trainingDataset: string;
+    validationDataset?: string;
+    epochs?: number;
+    learningRate?: number;
+    batchSize?: number;
+    name?: string;
+    description?: string;
+  }): Promise<API.LLMFineTuneJob> {
+    const response = await this.client.post<API.LLMFineTuneJob>('/llm/fine-tune', params);
+    return response.data;
+  }
+
+  async getFineTuneJob(jobId: string): Promise<API.LLMFineTuneJob> {
+    const response = await this.client.get<API.LLMFineTuneJob>(`/llm/fine-tune/${jobId}`);
+    return response.data;
+  }
+
+  async compareLLMModels(params: {
+    modelIds: string[];
+    prompts: string[];
+    systemPrompt?: string;
+    temperature?: number;
+  }): Promise<{ comparisons: Array<{ modelId: string; prompt: string; completion: string; tokens: number; latency: number }> }> {
+    const response = await this.client.post('/llm/compare', params);
+    return response.data;
+  }
+
+  async getLLMBenchmarks(modelId: string): Promise<API.LLMBenchmark> {
+    const response = await this.client.get<API.LLMBenchmark>(`/llm/models/${modelId}/benchmarks`);
+    return response.data;
+  }
+
+  async exportLLMReport(params: {
+    conversationId?: string;
+    analysisId?: string;
+    format: 'pdf' | 'json' | 'txt' | 'md';
+    includeMetadata?: boolean;
+    includeTokenStats?: boolean;
+  }): Promise<{ url: string; expiresAt: string }> {
+    const response = await this.client.post('/llm/export', params);
+    return response.data;
+  }
+
+  // ============================================================================
+  // COLLABORATION (Phase 5)
+  // ============================================================================
+
+  async getCollaborationSessions(params: Record<string, string>): Promise<API.CollaborationSession[]> {
+    const response = await this.client.get<API.CollaborationSession[]>('/collaboration/sessions', { params });
+    return response.data;
+  }
+
+  async getCollaborationSession(sessionId: string): Promise<API.CollaborationSession> {
+    const response = await this.client.get<API.CollaborationSession>(`/collaboration/sessions/${sessionId}`);
+    return response.data;
+  }
+
+  async createCollaborationSession(params: {
+    title: string;
+    description?: string;
+    agentIds: string[];
+    objective?: string;
+    context?: Record<string, unknown>;
+    settings?: {
+      maxDuration?: number;
+      autoArchive?: boolean;
+      allowExternal?: boolean;
+    };
+  }): Promise<API.CollaborationSession> {
+    const response = await this.client.post<API.CollaborationSession>('/collaboration/sessions', params);
+    return response.data;
+  }
+
+  async updateCollaborationSession(sessionId: string, updates: Partial<{
+    title: string;
+    description: string;
+    status: 'active' | 'completed' | 'archived';
+    objective: string;
+    context: Record<string, unknown>;
+  }>): Promise<API.CollaborationSession> {
+    const response = await this.client.put<API.CollaborationSession>(`/collaboration/sessions/${sessionId}`, updates);
+    return response.data;
+  }
+
+  async joinCollaborationSession(params: {
+    sessionId: string;
+    agentId: string;
+    role?: 'participant' | 'observer' | 'facilitator';
+  }): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post(`/collaboration/sessions/${params.sessionId}/join`, params);
+    return response.data;
+  }
+
+  async leaveCollaborationSession(params: {
+    sessionId: string;
+    agentId: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post(`/collaboration/sessions/${params.sessionId}/leave`, params);
+    return response.data;
+  }
+
+  async getCollaborationAgents(sessionId: string): Promise<API.CollaborationAgent[]> {
+    const response = await this.client.get<API.CollaborationAgent[]>(`/collaboration/sessions/${sessionId}/agents`);
+    return response.data;
+  }
+
+  async getCollaborationMessages(sessionId: string, params: Record<string, string>): Promise<API.CollaborationMessage[]> {
+    const response = await this.client.get<API.CollaborationMessage[]>(`/collaboration/sessions/${sessionId}/messages`, { params });
+    return response.data;
+  }
+
+  async sendCollaborationMessage(params: {
+    sessionId: string;
+    agentId: string;
+    content: string;
+    type?: 'text' | 'code' | 'file' | 'system';
+    metadata?: Record<string, unknown>;
+    replyToId?: string;
+  }): Promise<API.CollaborationMessage> {
+    const response = await this.client.post<API.CollaborationMessage>(`/collaboration/sessions/${params.sessionId}/messages`, params);
+    return response.data;
+  }
+
+  async getCollaborationTasks(sessionId: string, params: Record<string, string>): Promise<API.CollaborationTask[]> {
+    const response = await this.client.get<API.CollaborationTask[]>(`/collaboration/sessions/${sessionId}/tasks`, { params });
+    return response.data;
+  }
+
+  async createCollaborationTask(params: {
+    sessionId: string;
+    title: string;
+    description?: string;
+    assignedTo?: string;
+    priority?: 'low' | 'medium' | 'high' | 'critical';
+    dueDate?: string;
+    dependencies?: string[];
+    metadata?: Record<string, unknown>;
+  }): Promise<API.CollaborationTask> {
+    const response = await this.client.post<API.CollaborationTask>(`/collaboration/sessions/${params.sessionId}/tasks`, params);
+    return response.data;
+  }
+
+  async updateCollaborationTask(sessionId: string, taskId: string, updates: Partial<{
+    title: string;
+    description: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+    assignedTo: string;
+    priority: 'low' | 'medium' | 'high' | 'critical';
+    dueDate: string;
+    progress: number;
+  }>): Promise<API.CollaborationTask> {
+    const response = await this.client.put<API.CollaborationTask>(`/collaboration/sessions/${sessionId}/tasks/${taskId}`, updates);
+    return response.data;
+  }
+
+  async getCollaborationAnalytics(sessionId: string): Promise<API.CollaborationAnalytics> {
+    const response = await this.client.get<API.CollaborationAnalytics>(`/collaboration/sessions/${sessionId}/analytics`);
+    return response.data;
+  }
+
+  async getCollaborationStats(params: Record<string, string>): Promise<API.CollaborationStats> {
+    const response = await this.client.get<API.CollaborationStats>('/collaboration/stats', { params });
+    return response.data;
+  }
+
+  async shareCollaborationResource(params: {
+    sessionId: string;
+    type: 'file' | 'code' | 'link' | 'data';
+    content: string | object;
+    title?: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<API.CollaborationResource> {
+    const response = await this.client.post<API.CollaborationResource>(`/collaboration/sessions/${params.sessionId}/resources`, params);
+    return response.data;
+  }
+
+  async getCollaborationResources(sessionId: string, params: Record<string, string>): Promise<API.CollaborationResource[]> {
+    const response = await this.client.get<API.CollaborationResource[]>(`/collaboration/sessions/${sessionId}/resources`, { params });
+    return response.data;
+  }
+
+  async submitCollaborationVote(params: {
+    sessionId: string;
+    proposalId: string;
+    agentId: string;
+    vote: 'approve' | 'reject' | 'abstain';
+    comment?: string;
+  }): Promise<API.CollaborationDecision> {
+    const response = await this.client.post<API.CollaborationDecision>(`/collaboration/sessions/${params.sessionId}/votes`, params);
+    return response.data;
+  }
+
+  async getCollaborationDecisions(sessionId: string): Promise<API.CollaborationDecision[]> {
+    const response = await this.client.get<API.CollaborationDecision[]>(`/collaboration/sessions/${sessionId}/decisions`);
+    return response.data;
+  }
+
+  async exportCollaborationReport(params: {
+    sessionId: string;
+    format: 'pdf' | 'md' | 'json' | 'html';
+    includeMessages?: boolean;
+    includeTasks?: boolean;
+    includeAnalytics?: boolean;
+    includeResources?: boolean;
+  }): Promise<{ url: string; expiresAt: string }> {
+    const response = await this.client.post('/collaboration/export', params);
+    return response.data;
+  }
+
+  async searchCollaboration(params: Record<string, string>): Promise<Array<{
+    type: 'message' | 'task' | 'resource';
+    sessionId: string;
+    item: API.CollaborationMessage | API.CollaborationTask | API.CollaborationResource;
+    relevance: number;
+  }>> {
+    const response = await this.client.get('/collaboration/search', { params });
     return response.data;
   }
 }

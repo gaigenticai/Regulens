@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <cmath>
 #include <thread>
+#include <regex>
 
 namespace regulens {
 
@@ -159,8 +160,11 @@ std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAIC
 
     if (use_advanced_circuit_breaker_) {
         // Use advanced circuit breaker with detailed error handling
+        // Store response in a variable that will be captured by the lambda
+        std::optional<OpenAIResponse> temp_result;
+
         auto breaker_result = error_handler_->execute_with_advanced_circuit_breaker(
-            [this, &request]() -> regulens::CircuitBreakerResult {
+            [this, &request, &temp_result]() -> regulens::CircuitBreakerResult {
                 // Make the API request
                 auto http_response = make_api_request("/chat/completions", request.to_json());
                 if (!http_response) {
@@ -188,54 +192,48 @@ std::optional<OpenAIResponse> OpenAIClient::create_chat_completion(const OpenAIC
                 // Update usage statistics
                 update_usage_stats(*parsed_response);
 
-                return regulens::CircuitBreakerResult(true, parsed_response,
+                // Store result for later use
+                temp_result = parsed_response;
+
+                return regulens::CircuitBreakerResult(true, nlohmann::json::object(),
                     "Success", std::chrono::milliseconds(0),
                     regulens::CircuitState::CLOSED);
             },
             CIRCUIT_BREAKER_SERVICE, "OpenAIClient", "create_chat_completion"
         );
 
-        if (breaker_result.success && breaker_result.data) {
-            // Extract the OpenAIResponse from the circuit breaker result
-            try {
-                result = breaker_result.data->get<OpenAIResponse>();
-            } catch (const std::exception& e) {
-                logger_->error("Failed to extract OpenAI response from circuit breaker result: " + std::string(e.what()));
-                result = std::nullopt;
-            }
+        if (breaker_result.success) {
+            result = temp_result;
         }
     } else {
-        // Use basic circuit breaker for backward compatibility
-        result = error_handler_->execute_with_circuit_breaker<std::optional<OpenAIResponse>>(
-            [this, &request]() -> std::optional<OpenAIResponse> {
-                // Make the API request
-                auto http_response = make_api_request("/chat/completions", request.to_json());
-                if (!http_response) {
-                    return std::nullopt;
-                }
-
+        // Direct execution without advanced circuit breaker
+        try {
+            // Make the API request
+            auto http_response = make_api_request("/chat/completions", request.to_json());
+            if (!http_response) {
+                result = std::nullopt;
+            } else {
                 // Parse the response
                 auto parsed_response = parse_api_response(*http_response);
                 if (!parsed_response) {
-                    return std::nullopt;
-                }
-
-                // Validate response
-                if (!validate_response(*parsed_response)) {
+                    result = std::nullopt;
+                } else if (!validate_response(*parsed_response)) {
+                    // Validate response
                     handle_api_error("validation", "Invalid API response structure");
-                    return std::nullopt;
+                    result = std::nullopt;
+                } else {
+                    // Update usage statistics
+                    update_usage_stats(*parsed_response);
+                    result = parsed_response;
                 }
-
-                // Update usage statistics
-                update_usage_stats(*parsed_response);
-
-                return parsed_response;
-            },
-            CIRCUIT_BREAKER_SERVICE, "OpenAIClient", "create_chat_completion"
-        );
+            }
+        } catch (const std::exception& e) {
+            logger_->error("API request execution failed: " + std::string(e.what()));
+            result = std::nullopt;
+        }
     }
 
-    if (result && *result) {
+    if (result) {
         successful_requests_++;
 
         // Cache the successful response if caching is enabled
@@ -990,7 +988,7 @@ std::vector<FunctionCall> OpenAIClient::parse_function_calls_from_response(const
 
         error_handler_->report_error(ErrorInfo{
             ErrorCategory::PROCESSING,
-            ErrorSeverity::ERROR,
+            ErrorSeverity::MEDIUM,
             "OpenAIClient",
             "parse_function_calls_from_response",
             "Failed to parse function calls: " + std::string(e.what()),
@@ -1040,8 +1038,8 @@ std::string OpenAIClient::generate_prompt_hash(const OpenAICompletionRequest& re
 
     // Include key parameters that affect the response
     content << "model:" << request.model << "|";
-    content << "temperature:" << request.temperature << "|";
-    content << "max_tokens:" << request.max_tokens << "|";
+    content << "temperature:" << request.temperature.value_or(0.7) << "|";
+    content << "max_tokens:" << request.max_tokens.value_or(2000) << "|";
 
     // Include function/tool definitions if present
     if (request.functions) {
@@ -1074,7 +1072,7 @@ double OpenAIClient::calculate_prompt_complexity(const OpenAICompletionRequest& 
     double length_score = std::min(1.0, static_cast<double>(total_chars) / 8000.0) * 0.5;
 
     // Temperature affects complexity (lower temp = more deterministic = higher complexity)
-    double temp_score = (1.0 - request.temperature) * 0.2;
+    double temp_score = (1.0 - request.temperature.value_or(0.7)) * 0.2;
 
     // Function/tool calling increases complexity
     double function_score = 0.0;

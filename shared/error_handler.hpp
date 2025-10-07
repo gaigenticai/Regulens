@@ -10,6 +10,8 @@
 #include <atomic>
 #include <functional>
 #include <future>
+#include <optional>
+#include <type_traits>
 #include <nlohmann/json.hpp>
 
 #include "models/error_handling.hpp"
@@ -21,6 +23,15 @@
 #include "config/configuration_manager.hpp"
 
 namespace regulens {
+
+// Type trait to detect std::optional types
+template<typename T>
+struct is_optional : std::false_type {};
+
+template<typename T>
+struct is_optional<std::optional<T>> : std::true_type {
+    using value_type = T;
+};
 
 // Circuit breaker states
 enum class CircuitBreakerState {
@@ -82,7 +93,7 @@ public:
             // Update component health
             update_component_health(component_name, true, "Basic execution success");
 
-            return CircuitBreakerResult(true, result, "", execution_time, CircuitState::CLOSED);
+            return CircuitBreakerResult(true, nlohmann::json::object(), "", execution_time, CircuitState::CLOSED);
 
         } catch (const std::exception& e) {
             auto end_time = std::chrono::high_resolution_clock::now();
@@ -432,20 +443,33 @@ std::optional<T> ErrorHandler::execute_with_circuit_breaker(
     }
 
     // Execute through circuit breaker
-    auto cb_result = breaker->execute([&operation]() -> CircuitBreakerResult {
+    std::optional<T> result_holder;
+    auto cb_result = breaker->execute([&operation, &result_holder]() -> CircuitBreakerResult {
         try {
-            auto result = operation();
-            return CircuitBreakerResult(true, nlohmann::json(result), "",
-                                      std::chrono::milliseconds(0), CircuitState::CLOSED);
+            result_holder = operation();
+            // Check if result is valid
+            if constexpr (is_optional<T>::value) {
+                // For optional types, check if it has a value
+                if (result_holder && result_holder->has_value()) {
+                    return CircuitBreakerResult(true, nlohmann::json::object(), "",
+                                              std::chrono::milliseconds(0), CircuitState::CLOSED);
+                } else {
+                    return CircuitBreakerResult(false, std::nullopt, "Operation returned empty optional",
+                                              std::chrono::milliseconds(0), CircuitState::CLOSED);
+                }
+            } else {
+                return CircuitBreakerResult(true, nlohmann::json::object(), "",
+                                          std::chrono::milliseconds(0), CircuitState::CLOSED);
+            }
         } catch (const std::exception& e) {
             return CircuitBreakerResult(false, std::nullopt, e.what(),
                                       std::chrono::milliseconds(0), CircuitState::CLOSED);
         }
     });
 
-    if (cb_result.success) {
+    if (cb_result.success && result_holder) {
         update_component_health(component_name, true, "Circuit breaker success");
-        return std::any_cast<T>(cb_result.data.value());
+        return *result_holder;
     } else {
         ErrorInfo error(ErrorCategory::EXTERNAL_API, ErrorSeverity::HIGH,
                       component_name, operation_name,

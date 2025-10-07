@@ -149,7 +149,7 @@ export function useTransaction(id: string | undefined) {
     queryKey: ['transaction', id],
     queryFn: async () => {
       if (!id) throw new Error('Transaction ID is required');
-      const data = await apiClient.getTransaction(id);
+      const data = await apiClient.getTransactionById(id);
       return data;
     },
     enabled: !!id,

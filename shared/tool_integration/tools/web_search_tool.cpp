@@ -48,26 +48,27 @@ WebSearchTool::WebSearchTool(const ToolConfig& config, StructuredLogger* logger)
 ToolResult WebSearchTool::execute_operation(const std::string& operation,
                                           const nlohmann::json& parameters) {
     if (!is_authenticated()) {
-        return ToolResult::create_error("Web search tool not authenticated");
+        return ToolResult(false, {}, "Web search tool not authenticated");
     }
 
     try {
         if (operation == "search") {
             if (!parameters.contains("query")) {
-                return ToolResult::create_error("Missing query parameter");
+                return ToolResult(false, {}, "Missing query parameter");
             }
             return perform_web_search(parameters["query"], parameters);
         } else if (operation == "cached_search") {
             if (!parameters.contains("query")) {
-                return ToolResult::create_error("Missing query parameter");
+                return ToolResult(false, {}, "Missing query parameter");
             }
             return get_cached_results(parameters["query"]);
         } else {
-            return ToolResult::create_error("Unknown web search operation: " + operation);
+            return ToolResult(false, {}, "Unknown web search operation: " + operation);
         }
     } catch (const std::exception& e) {
-        record_operation_result("execute_operation", false, std::chrono::milliseconds(0));
-        return ToolResult::create_error("Web search operation failed: " + std::string(e.what()));
+        auto result = ToolResult(false, {}, "Web search operation failed: " + std::string(e.what()), std::chrono::milliseconds(0));
+        record_operation_result(result);
+        return result;
     }
 }
 
@@ -116,7 +117,7 @@ ToolResult WebSearchTool::perform_web_search(const std::string& query, const nlo
         } else if (search_config_.search_engine == "duckduckgo") {
             results = search_duckduckgo(query, max_results);
         } else {
-            return ToolResult::create_error("Unsupported search engine: " + search_config_.search_engine);
+            return ToolResult(false, {}, "Unsupported search engine: " + search_config_.search_engine);
         }
 
         // Filter and rank results
@@ -134,22 +135,23 @@ ToolResult WebSearchTool::perform_web_search(const std::string& query, const nlo
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start_time);
-        record_operation_result("perform_web_search", true, duration);
-
-        return ToolResult::create_success(response);
+        auto result = ToolResult(true, response, "", duration);
+        record_operation_result(result);
+        return result;
 
     } catch (const std::exception& e) {
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start_time);
-        record_operation_result("perform_web_search", false, duration);
-        return ToolResult::create_error("Web search failed: " + std::string(e.what()));
+        auto result = ToolResult(false, {}, "Web search failed: " + std::string(e.what()), duration);
+        record_operation_result(result);
+        return result;
     }
 }
 
 ToolResult WebSearchTool::get_cached_results(const std::string& query) {
     auto it = result_cache_.find(query);
     if (it == result_cache_.end()) {
-        return ToolResult::create_error("No cached results found");
+        return ToolResult(false, {}, "No cached results found");
     }
 
     // Check if cache is still valid
@@ -159,15 +161,16 @@ ToolResult WebSearchTool::get_cached_results(const std::string& query) {
 
     if (cache_age > max_age) {
         result_cache_.erase(it);
-        return ToolResult::create_error("Cached results expired");
+        return ToolResult(false, {}, "Cached results expired");
     }
 
     nlohmann::json response = search_results_to_json(it->second);
     response["cached"] = true;
     response["cache_age_seconds"] = std::chrono::duration_cast<std::chrono::seconds>(cache_age).count();
 
-    record_operation_result("get_cached_results", true, std::chrono::milliseconds(1));
-    return ToolResult::create_success(response);
+    auto result = ToolResult(true, response, "", std::chrono::milliseconds(1));
+    record_operation_result(result);
+    return result;
 }
 
 void WebSearchTool::cache_results(const std::string& query, const std::vector<SearchResult>& results) {

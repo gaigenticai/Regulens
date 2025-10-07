@@ -3,6 +3,7 @@
  */
 
 #include "standard_ingestion_pipeline.hpp"
+#include <regex>
 
 namespace regulens {
 

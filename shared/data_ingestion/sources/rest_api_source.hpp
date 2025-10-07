@@ -48,6 +48,8 @@ struct RESTAPIConfig {
     AuthenticationType auth_type = AuthenticationType::NONE;
     std::unordered_map<std::string, std::string> auth_params;
     PaginationType pagination_type = PaginationType::NONE;
+    std::unordered_map<std::string, std::string> pagination_params;
+    std::unordered_map<std::string, std::string> query_params;
     int page_size = 100;
     int max_pages = 100;
     std::chrono::seconds rate_limit_window = std::chrono::seconds(60);
@@ -56,6 +58,7 @@ struct RESTAPIConfig {
     bool follow_redirects = true;
     int max_redirects = 5;
     std::unordered_map<std::string, std::string> default_headers;
+    std::unordered_map<std::string, std::string> custom_headers;
     nlohmann::json request_template;
 };
 
@@ -78,9 +81,9 @@ public:
     void set_api_config(const RESTAPIConfig& api_config);
     bool authenticate();
     std::vector<nlohmann::json> fetch_paginated_data();
-    nlohmann::json make_authenticated_request(const std::string& method,
+    HttpResponse make_authenticated_request(const std::string& method,
                                             const std::string& path,
-                                            const nlohmann::json& data = nullptr);
+                                            const std::string& body = "");
 
 private:
     // Authentication methods
@@ -119,10 +122,16 @@ private:
     void refresh_auth_token();
     bool handle_rate_limit_exceeded(const HttpResponse& response);
 
+    // Helper functions
+    std::string base64_encode(const std::string& input);
+    std::string url_encode(const std::string& value);
+    nlohmann::json extract_json_path(const nlohmann::json& json_data, const std::string& path);
+
     // Internal state
     RESTAPIConfig api_config_;
     bool connected_;
     std::string auth_token_;
+    std::string oauth_refresh_token_;
     std::chrono::system_clock::time_point token_expiry_;
     int request_count_in_window_;
     std::chrono::steady_clock::time_point window_start_;

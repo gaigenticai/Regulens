@@ -8,6 +8,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
+#include <random>
 
 namespace regulens {
 
@@ -465,22 +467,24 @@ nlohmann::json WebScrapingSource::extract_data_with_rules(const std::string& con
     nlohmann::json extracted_data;
 
     // Apply extraction rules from config
-    if (scraping_config_.extraction_rules.contains("patterns")) {
-        for (const auto& rule : scraping_config_.extraction_rules["patterns"]) {
-            std::string field_name = rule.value("name", "field");
-            std::string pattern_str = rule.value("pattern", "");
+    for (const auto& rule : scraping_config_.extraction_rules) {
+        std::string field_name = rule.rule_name;
+        std::string selector = rule.selector;
+        std::string data_type = rule.data_type;
 
-            if (!pattern_str.empty()) {
-                try {
-                    std::regex pattern(pattern_str);
+        if (data_type == "text" || data_type == "html") {
+            try {
+                // Use selector as regex pattern for simple extraction
+                if (!selector.empty()) {
+                    std::regex pattern(selector);
                     std::smatch match;
                     if (std::regex_search(content, match, pattern)) {
                         extracted_data[field_name] = match[1].str();
                     }
-                } catch (const std::regex_error& e) {
-                    logger_->log(LogLevel::WARN, "Invalid regex pattern for field " +
-                                field_name + ": " + e.what());
                 }
+            } catch (const std::regex_error& e) {
+                logger_->log(LogLevel::WARN, "Invalid regex pattern for field " +
+                            field_name + ": " + e.what());
             }
         }
     }
@@ -1055,14 +1059,14 @@ std::string WebScrapingSource::extract_meta_description(const std::string& conte
     return "";
 }
 
-nlohmann::json WebScrapingSource::extract_documents(const std::string& content) {
-    nlohmann::json documents = nlohmann::json::array();
+std::vector<nlohmann::json> WebScrapingSource::extract_documents(const std::string& content) {
+    std::vector<nlohmann::json> documents;
 
     // Look for press releases, announcements, etc.
     std::vector<std::regex> doc_patterns = {
-        std::regex(R"(<div[^>]*class=["'][^"']*(press-release|announcement|news-item)[^"']*["'][^>]*>(.*?)</div>)", std::regex_constants::icase | std::regex_constants::dotall),
-        std::regex(R"(<article[^>]*>(.*?)</article>)", std::regex_constants::icase | std::regex_constants::dotall),
-        std::regex(R"(<h[1-3][^>]*>(.*?)</h[1-3]>)", std::regex_constants::icase | std::regex_constants::dotall)
+        std::regex(R"(<div[^>]*class=["'][^"']*(press-release|announcement|news-item)[^"']*["'][^>]*>(.*?)</div>)", std::regex_constants::icase),
+        std::regex(R"(<article[^>]*>(.*?)</article>)", std::regex_constants::icase),
+        std::regex(R"(<h[1-3][^>]*>(.*?)</h[1-3]>)", std::regex_constants::icase)
     };
 
     for (const auto& pattern : doc_patterns) {

@@ -248,10 +248,18 @@ ToolResult MCPToolIntegration::subscribe_to_resource(const std::string& uri) {
 
 bool MCPToolIntegration::initialize_mcp_connection() {
     try {
-        // Initialize WebSocket connection
+        // Initialize WebSocket connection (optional for HTTP/STDIO transports)
+#ifdef USE_WEBSOCKET
         if (!initialize_websocket_connection()) {
             return false;
         }
+#else
+        // WebSocket not available - will use HTTP or STDIO transport
+        if (logger_) {
+            logger_->debug("WebSocket support not compiled, using HTTP/STDIO transport",
+                          "MCPToolIntegration", "initialize_mcp_connection");
+        }
+#endif
 
         // Perform MCP handshake
         nlohmann::json handshake_params = {
@@ -282,6 +290,7 @@ bool MCPToolIntegration::initialize_mcp_connection() {
                 {"params", nlohmann::json::object()}
             };
 
+#ifdef USE_WEBSOCKET
             websocketpp::lib::error_code ec;
             ws_client_->send(ws_connection_, initialized_notification.dump(),
                            websocketpp::frame::opcode::text, ec);
@@ -289,6 +298,10 @@ bool MCPToolIntegration::initialize_mcp_connection() {
             if (ec) {
                 logger_->log(LogLevel::WARN, "Failed to send initialized notification: " + ec.message());
             }
+#else
+            logger_->log(LogLevel::DEBUG, "Initialized notification skipped (WebSocket not available)",
+                        "MCPToolIntegration", "initialize_mcp_connection");
+#endif
 
             logger_->log(LogLevel::INFO, "MCP server initialized successfully");
             return true;
@@ -349,6 +362,7 @@ bool MCPToolIntegration::discover_mcp_resources() {
     }
 }
 
+#ifdef USE_WEBSOCKET
 bool MCPToolIntegration::initialize_websocket_connection() {
     // WebSocket support temporarily disabled (requires websocketpp library)
     logger_->log(LogLevel::WARN, "MCP WebSocket support not available - websocketpp library not installed");
@@ -393,12 +407,14 @@ void MCPToolIntegration::handle_mcp_notification(const nlohmann::json& notificat
         }
     }
 }
+#endif // USE_WEBSOCKET
 
 nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, const nlohmann::json& params) {
     if (!ws_connected_) {
         return {{"error", "WebSocket not connected"}};
     }
 
+#ifdef USE_WEBSOCKET
     try {
         std::string request_id = generate_request_id();
 
@@ -445,33 +461,9 @@ nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, c
         logger_->log(LogLevel::ERROR, "MCP WebSocket request failed: " + std::string(e.what()));
         return {{"error", e.what()}};
     }
-}
-
-bool MCPToolIntegration::disconnect() {
-    try {
-        server_connected_ = false;
-        available_tools_.clear();
-        available_resources_.clear();
-
-        if (ws_connected_ && ws_client_) {
-            websocketpp::lib::error_code ec;
-            ws_client_->close(ws_connection_, websocketpp::close::status::normal, "Client disconnect", ec);
-            ws_connected_ = false;
-        }
-
-        if (ws_thread_ && ws_thread_->joinable()) {
-            ws_thread_->join();
-        }
-
-        ws_client_.reset();
-        ws_thread_.reset();
-
-        logger_->log(LogLevel::INFO, "Disconnected from MCP server");
-        return true;
-    } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "MCP disconnect failed: " + std::string(e.what()));
-        return false;
-    }
+#else
+    return {{"error", "WebSocket support not compiled"}};
+#endif
 }
 
 ToolResult MCPToolIntegration::handle_mcp_response(const nlohmann::json& response) {
@@ -536,7 +528,7 @@ AgentCapabilityConfig load_agent_capability_config() {
     config.enable_advanced_discovery = advanced_discovery_env && std::string(advanced_discovery_env) == "true";
 
     const char* autonomous_integration_env = std::getenv("AGENT_ENABLE_AUTONOMOUS_INTEGRATION");
-    config.enable_autonomous_tool_integration = autonomous_integration_env && std::string(autonomous_integration_env) == "true";
+    config.enable_autonomous_integration = autonomous_integration_env && std::string(autonomous_integration_env) == "true";
 
     const char* max_tools_env = std::getenv("AGENT_MAX_AUTONOMOUS_TOOLS");
     if (max_tools_env) {

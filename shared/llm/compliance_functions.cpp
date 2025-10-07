@@ -462,44 +462,8 @@ FunctionResult ComplianceFunctionLibrary::get_regulatory_updates(const nlohmann:
         // Get real regulatory updates from knowledge base and regulatory monitoring system
         std::vector<nlohmann::json> updates;
 
-        // Query knowledge base for recent regulatory changes
+        // Use knowledge base search to find regulatory information
         if (knowledge_base_) {
-            try {
-                // Get recent regulatory changes from knowledge base
-                auto recent_changes = knowledge_base_->get_recent_changes(limit > 10 ? 10 : limit);
-
-                for (const auto& change : recent_changes) {
-                    if (change.detected_at >= since) {
-                        // Convert regulatory change to update format
-                        nlohmann::json update = {
-                            {"id", change.id},
-                            {"title", change.title},
-                            {"source", change.source},
-                            {"category", determine_regulatory_category(change.title, change.content)},
-                            {"published_date", format_timestamp(change.detected_at)},
-                            {"summary", generate_regulatory_summary(change)},
-                            {"impact_level", assess_regulatory_impact(change)},
-                            {"affected_entities", extract_affected_entities(change)},
-                            {"effective_date", "TBD"}, // Would be parsed from actual regulatory content
-                            {"url", change.content_url}
-                        };
-
-                        // Filter by categories if specified
-                        if (categories.empty() ||
-                            std::find(categories.begin(), categories.end(),
-                                     update["category"].get<std::string>()) != categories.end()) {
-                            updates.push_back(update);
-                        }
-                    }
-                }
-            } catch (const std::exception& e) {
-                logger_->warn("Failed to query knowledge base for regulatory updates: " + std::string(e.what()),
-                             "ComplianceFunctionLibrary", "get_regulatory_updates");
-            }
-        }
-
-        // If no updates from knowledge base, provide fallback with structured search
-        if (updates.empty()) {
             // Build search query for regulatory updates
             std::string search_query = "recent regulatory changes updates compliance";
             if (!categories.empty()) {
@@ -507,7 +471,7 @@ FunctionResult ComplianceFunctionLibrary::get_regulatory_updates(const nlohmann:
             }
 
             if (knowledge_base_) {
-                auto search_results = knowledge_base_->search_similar(search_query, limit);
+                auto search_results = knowledge_base_->search_similar(search_query, static_cast<size_t>(limit));
                 for (const auto& result : search_results) {
                     nlohmann::json update = {
                         {"id", "kb-" + std::to_string(std::hash<std::string>{}(result))},
@@ -676,7 +640,7 @@ FunctionResult ComplianceFunctionLibrary::analyze_transaction(const nlohmann::js
 
                 // Add AI-based recommendations
                 for (const auto& action : risk_assessment.recommended_actions) {
-                    recommendations.push_back("AI Recommended: " + std::string(action));
+                    recommendations.push_back("AI Recommended: " + mitigation_action_to_string(action));
                 }
 
             } catch (const std::exception& e) {
@@ -832,86 +796,113 @@ std::string ComplianceFunctionLibrary::determine_regulatory_category(
     }
 }
 
-std::string ComplianceFunctionLibrary::generate_regulatory_summary(const SimpleRegulatoryChange& change) const {
-    // Generate intelligent summary using content analysis
-    if (!change.content.empty()) {
-        // Extract first meaningful sentence or key points
-        size_t max_length = 200;
-        if (change.content.length() <= max_length) {
-            return change.content;
-        } else {
-            // Find first complete sentence
-            size_t sentence_end = change.content.find_first_of(".!?", max_length);
-            if (sentence_end != std::string::npos) {
-                return change.content.substr(0, sentence_end + 1);
-            } else {
-                return change.content.substr(0, max_length) + "...";
-            }
-        }
-    } else {
-        return change.title + " - regulatory change detected requiring compliance review.";
+std::string ComplianceFunctionLibrary::generate_regulatory_summary(const RegulatoryChange& change) const {
+    // Generate intelligent summary using regulatory change analysis
+    auto analysis = change.get_analysis();
+    if (analysis && !analysis->executive_summary.empty()) {
+        return analysis->executive_summary;
     }
+
+    // Extract summary from metadata
+    const auto& metadata = change.get_metadata();
+    if (!metadata.keywords.empty()) {
+        std::string summary = change.get_title() + " - Affects: " +
+                            metadata.regulatory_body + ". Keywords: ";
+        for (size_t i = 0; i < std::min(metadata.keywords.size(), size_t(3)); ++i) {
+            if (i > 0) summary += ", ";
+            summary += metadata.keywords[i];
+        }
+        return summary;
+    }
+
+    return change.get_title() + " - regulatory change detected requiring compliance review.";
 }
 
-std::string ComplianceFunctionLibrary::assess_regulatory_impact(const SimpleRegulatoryChange& change) const {
-    // Advanced impact assessment using content analysis
-    std::string lower_title = change.title;
-    std::string lower_content = change.content;
-    std::transform(lower_title.begin(), lower_title.end(), lower_title.begin(), ::tolower);
-    std::transform(lower_content.begin(), lower_content.end(), lower_content.begin(), ::tolower);
+std::string ComplianceFunctionLibrary::assess_regulatory_impact(const RegulatoryChange& change) const {
+    // Use analyzed impact level if available
+    auto analysis = change.get_analysis();
+    if (analysis) {
+        return regulens::regulatory_impact_to_string(analysis->impact_level);
+    }
 
-    // High impact keywords
+    // Fallback to keyword-based assessment
+    std::string lower_title = change.get_title();
+    std::transform(lower_title.begin(), lower_title.end(), lower_title.begin(), ::tolower);
+
+    const auto& metadata = change.get_metadata();
+    std::string lower_doc_type = metadata.document_type;
+    std::transform(lower_doc_type.begin(), lower_doc_type.end(), lower_doc_type.begin(), ::tolower);
+
+    // Critical impact keywords
     if (lower_title.find("emergency") != std::string::npos ||
         lower_title.find("immediate") != std::string::npos ||
-        lower_content.find("immediate implementation") != std::string::npos ||
-        lower_content.find("critical") != std::string::npos) {
-        return "Critical";
+        lower_title.find("critical") != std::string::npos) {
+        return "CRITICAL";
     }
 
-    // High impact keywords
+    // High impact - new rules and major changes
     if (lower_title.find("new rule") != std::string::npos ||
         lower_title.find("amendment") != std::string::npos ||
-        lower_content.find("significant change") != std::string::npos ||
-        lower_content.find("major revision") != std::string::npos) {
-        return "High";
+        lower_doc_type.find("rule") != std::string::npos) {
+        return "HIGH";
     }
 
-    // Medium impact keywords
+    // Medium impact - guidance and updates
     if (lower_title.find("guidance") != std::string::npos ||
         lower_title.find("update") != std::string::npos ||
-        lower_content.find("best practice") != std::string::npos) {
-        return "Medium";
+        lower_doc_type.find("guidance") != std::string::npos) {
+        return "MEDIUM";
     }
 
-    return "Low";
+    return "LOW";
 }
 
-nlohmann::json ComplianceFunctionLibrary::extract_affected_entities(const SimpleRegulatoryChange& change) const {
-    // Extract affected entities using intelligent content analysis
+nlohmann::json ComplianceFunctionLibrary::extract_affected_entities(const RegulatoryChange& change) const {
+    // Extract affected entities from metadata and analysis
     nlohmann::json entities = nlohmann::json::array();
-    std::string lower_content = change.content;
-    std::transform(lower_content.begin(), lower_content.end(), lower_content.begin(), ::tolower);
 
-    if (lower_content.find("bank") != std::string::npos ||
-        lower_content.find("financial institution") != std::string::npos) {
+    const auto& metadata = change.get_metadata();
+
+    // Use metadata affected entities if available
+    if (!metadata.affected_entities.empty()) {
+        for (const auto& entity : metadata.affected_entities) {
+            entities.push_back(entity);
+        }
+        return entities;
+    }
+
+    // Analyze title and keywords for affected entities
+    std::string lower_title = change.get_title();
+    std::transform(lower_title.begin(), lower_title.end(), lower_title.begin(), ::tolower);
+
+    std::string keywords_str;
+    for (const auto& keyword : metadata.keywords) {
+        keywords_str += " " + keyword;
+    }
+    std::transform(keywords_str.begin(), keywords_str.end(), keywords_str.begin(), ::tolower);
+
+    std::string combined = lower_title + " " + keywords_str;
+
+    if (combined.find("bank") != std::string::npos ||
+        combined.find("financial institution") != std::string::npos) {
         entities.push_back("banks");
         entities.push_back("financial_institutions");
     }
 
-    if (lower_content.find("investment") != std::string::npos ||
-        lower_content.find("broker") != std::string::npos) {
+    if (combined.find("investment") != std::string::npos ||
+        combined.find("broker") != std::string::npos) {
         entities.push_back("investment_firms");
         entities.push_back("broker_dealers");
     }
 
-    if (lower_content.find("crypto") != std::string::npos ||
-        lower_content.find("digital asset") != std::string::npos) {
+    if (combined.find("crypto") != std::string::npos ||
+        combined.find("digital asset") != std::string::npos) {
         entities.push_back("cryptocurrency_companies");
         entities.push_back("fintech_companies");
     }
 
-    if (lower_content.find("payment") != std::string::npos ||
-        lower_content.find("money service") != std::string::npos) {
+    if (combined.find("payment") != std::string::npos ||
+        combined.find("money service") != std::string::npos) {
         entities.push_back("payment_providers");
         entities.push_back("money_services");
     }

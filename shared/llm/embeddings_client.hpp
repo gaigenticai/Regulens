@@ -245,9 +245,11 @@ private:
 
     EmbeddingModelConfig model_config_;
 
+#ifdef USE_FASTEMBED
     // FastEmbed model instances (one per model for thread safety)
     std::unordered_map<std::string, std::unique_ptr<fastembed::EmbeddingModel>> models_;
     std::unordered_map<std::string, std::unique_ptr<fastembed::Tokenizer>> tokenizers_;
+#endif
 
     mutable std::mutex models_mutex_;
 
@@ -352,7 +354,7 @@ public:
      * @param text Input text
      * @return Estimated token count
      */
-    size_t estimate_token_count(const std::string& text) const;
+    static size_t estimate_token_count(const std::string& text);
 
 private:
     std::shared_ptr<ConfigurationManager> config_;

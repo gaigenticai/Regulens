@@ -528,6 +528,162 @@ size_t streaming_write_callback(void* contents, size_t size, size_t nmemb, void*
     return total_size;
 }
 
+HttpResponse HttpClient::put(const std::string& url,
+                             const std::string& data,
+                             const std::unordered_map<std::string, std::string>& headers) {
+    if (!curl_handle_) {
+        return HttpResponse();
+    }
+
+    HttpResponse response;
+
+    // Set URL
+    curl_easy_setopt(curl_handle_, CURLOPT_URL, url.c_str());
+
+    // Set PUT method
+    curl_easy_setopt(curl_handle_, CURLOPT_CUSTOMREQUEST, "PUT");
+
+    // Set request body
+    curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDS, data.c_str());
+    curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDSIZE, data.size());
+
+    // Set write callback
+    curl_easy_setopt(curl_handle_, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl_handle_, CURLOPT_WRITEDATA, &response);
+
+    // Set headers
+    struct curl_slist* header_list = nullptr;
+    for (const auto& [key, value] : headers) {
+        std::string header = key + ": " + value;
+        header_list = curl_slist_append(header_list, header.c_str());
+    }
+    if (header_list) {
+        curl_easy_setopt(curl_handle_, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    // Perform request
+    CURLcode res = curl_easy_perform(curl_handle_);
+
+    response.success = (res == CURLE_OK);
+
+    if (res == CURLE_OK) {
+        long status_code = 0;
+        curl_easy_getinfo(curl_handle_, CURLINFO_RESPONSE_CODE, &status_code);
+        response.status_code = static_cast<int>(status_code);
+    } else {
+        response.error_message = curl_easy_strerror(res);
+        spdlog::error("HTTP PUT failed: {}", response.error_message);
+    }
+
+    if (header_list) {
+        curl_slist_free_all(header_list);
+    }
+
+    return response;
+}
+
+HttpResponse HttpClient::del(const std::string& url,
+                             const std::unordered_map<std::string, std::string>& headers) {
+    if (!curl_handle_) {
+        return HttpResponse();
+    }
+
+    HttpResponse response;
+
+    // Set URL
+    curl_easy_setopt(curl_handle_, CURLOPT_URL, url.c_str());
+
+    // Set DELETE method
+    curl_easy_setopt(curl_handle_, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+    // Set write callback
+    curl_easy_setopt(curl_handle_, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl_handle_, CURLOPT_WRITEDATA, &response);
+
+    // Set headers
+    struct curl_slist* header_list = nullptr;
+    for (const auto& [key, value] : headers) {
+        std::string header = key + ": " + value;
+        header_list = curl_slist_append(header_list, header.c_str());
+    }
+    if (header_list) {
+        curl_easy_setopt(curl_handle_, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    // Perform request
+    CURLcode res = curl_easy_perform(curl_handle_);
+
+    response.success = (res == CURLE_OK);
+
+    if (res == CURLE_OK) {
+        long status_code = 0;
+        curl_easy_getinfo(curl_handle_, CURLINFO_RESPONSE_CODE, &status_code);
+        response.status_code = static_cast<int>(status_code);
+    } else {
+        response.error_message = curl_easy_strerror(res);
+        spdlog::error("HTTP DELETE failed: {}", response.error_message);
+    }
+
+    if (header_list) {
+        curl_slist_free_all(header_list);
+    }
+
+    return response;
+}
+
+HttpResponse HttpClient::patch(const std::string& url,
+                               const std::string& data,
+                               const std::unordered_map<std::string, std::string>& headers) {
+    if (!curl_handle_) {
+        return HttpResponse();
+    }
+
+    HttpResponse response;
+
+    // Set URL
+    curl_easy_setopt(curl_handle_, CURLOPT_URL, url.c_str());
+
+    // Set PATCH method
+    curl_easy_setopt(curl_handle_, CURLOPT_CUSTOMREQUEST, "PATCH");
+
+    // Set request body
+    curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDS, data.c_str());
+    curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDSIZE, data.size());
+
+    // Set write callback
+    curl_easy_setopt(curl_handle_, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl_handle_, CURLOPT_WRITEDATA, &response);
+
+    // Set headers
+    struct curl_slist* header_list = nullptr;
+    for (const auto& [key, value] : headers) {
+        std::string header = key + ": " + value;
+        header_list = curl_slist_append(header_list, header.c_str());
+    }
+    if (header_list) {
+        curl_easy_setopt(curl_handle_, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    // Perform request
+    CURLcode res = curl_easy_perform(curl_handle_);
+
+    response.success = (res == CURLE_OK);
+
+    if (res == CURLE_OK) {
+        long status_code = 0;
+        curl_easy_getinfo(curl_handle_, CURLINFO_RESPONSE_CODE, &status_code);
+        response.status_code = static_cast<int>(status_code);
+    } else {
+        response.error_message = curl_easy_strerror(res);
+        spdlog::error("HTTP PATCH failed: {}", response.error_message);
+    }
+
+    if (header_list) {
+        curl_slist_free_all(header_list);
+    }
+
+    return response;
+}
 
 } // namespace regulens
 

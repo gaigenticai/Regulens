@@ -51,8 +51,8 @@ bool EmbeddingsClient::initialize() {
     if (!validate_model_config(model_config_)) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
-                ErrorSeverity::ERROR,
+                ErrorCategory::EXTERNAL_API,
+                ErrorSeverity::HIGH,
                 "EmbeddingsClient",
                 "initialize",
                 "Invalid model configuration",
@@ -70,8 +70,8 @@ bool EmbeddingsClient::initialize() {
         }
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
-                ErrorSeverity::ERROR,
+                ErrorCategory::CONFIGURATION,
+                ErrorSeverity::HIGH,
                 "EmbeddingsClient",
                 "initialize",
                 "FastEmbed initialization failed",
@@ -131,8 +131,8 @@ std::optional<EmbeddingResponse> EmbeddingsClient::generate_embeddings(const Emb
                     }
                     if (error_handler_) {
                         error_handler_->report_error(ErrorInfo{
-                            ErrorCategory::EXTERNAL_SERVICE,
-                            ErrorSeverity::ERROR,
+                            ErrorCategory::EXTERNAL_API,
+                            ErrorSeverity::HIGH,
                             "EmbeddingsClient",
                             "generate_embeddings",
                             "FastEmbed embedding generation failed",
@@ -155,7 +155,7 @@ std::optional<EmbeddingResponse> EmbeddingsClient::generate_embeddings(const Emb
             if (error_handler_) {
                 error_handler_->report_error(ErrorInfo{
                     ErrorCategory::CONFIGURATION,
-                    ErrorSeverity::ERROR,
+                    ErrorSeverity::HIGH,
                     "EmbeddingsClient",
                     "generate_embeddings",
                     "FastEmbed model not available",
@@ -173,7 +173,7 @@ std::optional<EmbeddingResponse> EmbeddingsClient::generate_embeddings(const Emb
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::CONFIGURATION,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "EmbeddingsClient",
                 "generate_embeddings",
                 "Embeddings service not configured",
@@ -191,7 +191,7 @@ std::optional<EmbeddingResponse> EmbeddingsClient::generate_embeddings(const Emb
         // Estimate token count (rough approximation)
         response.total_tokens = 0;
         for (const auto& text : request.texts) {
-            response.total_tokens += estimate_token_count(text);
+            response.total_tokens += DocumentProcessor::estimate_token_count(text);
         }
 
         // Add metadata
@@ -212,7 +212,7 @@ std::optional<EmbeddingResponse> EmbeddingsClient::generate_embeddings(const Emb
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "EmbeddingsClient",
                 "generate_embeddings",
                 "Embedding generation failed: " + std::string(e.what()),
@@ -257,6 +257,7 @@ bool EmbeddingsClient::preload_model(const std::string& model_name) {
 }
 
 bool EmbeddingsClient::unload_model(const std::string& model_name) {
+#ifdef USE_FASTEMBED
     std::lock_guard<std::mutex> lock(models_mutex_);
 
     auto it = models_.find(model_name);
@@ -271,6 +272,9 @@ bool EmbeddingsClient::unload_model(const std::string& model_name) {
     }
 
     return false;
+#else
+    return false; // No models to unload without FastEmbed
+#endif
 }
 
 std::vector<std::string> EmbeddingsClient::get_available_models() const {
@@ -431,9 +435,11 @@ bool EmbeddingsClient::initialize_fastembed() {
 }
 
 void EmbeddingsClient::cleanup_fastembed() {
+#ifdef USE_FASTEMBED
     std::lock_guard<std::mutex> lock(models_mutex_);
     models_.clear();
     tokenizers_.clear();
+#endif
 }
 
 bool EmbeddingsClient::generate_fastembed_embeddings(
@@ -457,8 +463,8 @@ bool EmbeddingsClient::generate_fastembed_embeddings(
         }
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::EXTERNAL_SERVICE,
-                ErrorSeverity::ERROR,
+                ErrorCategory::EXTERNAL_API,
+                ErrorSeverity::HIGH,
                 "EmbeddingsClient",
                 "generate_fastembed_embeddings",
                 "FastEmbed API call failed",
@@ -473,12 +479,12 @@ bool EmbeddingsClient::generate_fastembed_embeddings(
 }
 
 
-size_t EmbeddingsClient::estimate_token_count(const std::string& text) const {
+// DocumentProcessor Implementation
+
+size_t DocumentProcessor::estimate_token_count(const std::string& text) {
     // Rough estimation: ~4 characters per token for English text
     return text.length() / 4;
 }
-
-// DocumentProcessor Implementation
 
 DocumentProcessor::DocumentProcessor(std::shared_ptr<ConfigurationManager> config,
                                    StructuredLogger* logger,
@@ -520,7 +526,7 @@ std::vector<DocumentChunk> DocumentProcessor::process_document(
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "DocumentProcessor",
                 "process_document",
                 "Document processing failed: " + std::string(e.what()),
@@ -644,11 +650,6 @@ std::vector<std::string> DocumentProcessor::split_into_paragraphs(const std::str
     }
 
     return paragraphs;
-}
-
-size_t DocumentProcessor::estimate_token_count(const std::string& text) const {
-    // Rough estimation: ~4 characters per token for English text
-    return text.length() / 4;
 }
 
 // Private methods
@@ -807,8 +808,8 @@ bool SemanticSearchEngine::initialize() {
     if (!embeddings_client_ || !doc_processor_) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
-                ErrorSeverity::ERROR,
+                ErrorCategory::CONFIGURATION,
+                ErrorSeverity::HIGH,
                 "SemanticSearchEngine",
                 "initialize",
                 "Missing required dependencies (embeddings client or document processor)"
@@ -881,7 +882,7 @@ bool SemanticSearchEngine::add_document(const std::string& document_text,
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "SemanticSearchEngine",
                 "add_document",
                 "Failed to add document: " + std::string(e.what()),
@@ -966,7 +967,7 @@ std::vector<SemanticSearchResult> SemanticSearchEngine::semantic_search(
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "SemanticSearchEngine",
                 "semantic_search",
                 "Search failed: " + std::string(e.what()),
@@ -1058,14 +1059,15 @@ std::vector<SemanticSearchResult> SemanticSearchEngine::brute_force_search(
         float similarity = EmbeddingsClient::cosine_similarity(query_embedding, chunk_embeddings_[i]);
 
         if (similarity >= threshold) {
-            results.push_back(SemanticSearchResult{
+            SemanticSearchResult result(
                 chunk.document_id,
                 chunk.text,
                 similarity,
                 chunk.chunk_index,
-                chunk.section_title,
-                chunk.metadata
-            });
+                chunk.section_title
+            );
+            result.metadata = chunk.metadata;
+            results.push_back(result);
         }
     }
 

@@ -190,7 +190,8 @@ add_subdirectory(data_ingestion)
 add_subdirectory(regulatory_monitor)
 add_subdirectory(agents)
 # Infrastructure (K8s operator) temporarily disabled for core build
-add_subdirectory(infrastructure)
+# Temporarily disabled due to missing prometheus_client.hpp dependency
+# add_subdirectory(infrastructure)
 add_subdirectory(shared/audit)
 add_subdirectory(shared/event_system)
 add_subdirectory(shared/tool_integration)

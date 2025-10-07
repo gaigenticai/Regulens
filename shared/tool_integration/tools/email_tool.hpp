@@ -123,6 +123,16 @@ private:
 
     // Email address validation
     bool is_valid_email_format(const std::string& email) const;
+    bool validate_local_part(const std::string& local) const;
+    bool validate_domain_part(const std::string& domain) const;
+    bool validate_dot_atom(const std::string& atom) const;
+    bool validate_domain_dot_atom(const std::string& domain) const;
+    bool validate_quoted_string(const std::string& quoted) const;
+    bool validate_domain_literal(const std::string& literal) const;
+    bool validate_ipv4_address(const std::string& ip) const;
+    bool validate_ipv6_address(const std::string& ip) const;
+    bool is_atext(char c) const;
+    bool is_qtext(char c) const;
 };
 
 // Email Tool Factory Function

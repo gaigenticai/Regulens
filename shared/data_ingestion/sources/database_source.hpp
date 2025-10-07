@@ -47,7 +47,8 @@ enum class IncrementalStrategy {
     TIMESTAMP_COLUMN,
     SEQUENCE_ID,
     CHANGE_TRACKING,
-    LOG_BASED
+    LOG_BASED,
+    CDC
 };
 
 struct DatabaseConnectionConfig {
@@ -68,6 +69,7 @@ struct DatabaseConnectionConfig {
 struct DatabaseQuery {
     std::string query_id;
     std::string sql_query;
+    std::string procedure_name; // For stored procedure calls
     QueryType query_type = QueryType::SELECT_BATCH;
     std::unordered_map<std::string, nlohmann::json> parameters;
     int batch_size = 1000;
@@ -79,6 +81,8 @@ struct DatabaseQuery {
 struct IncrementalLoadConfig {
     IncrementalStrategy strategy = IncrementalStrategy::TIMESTAMP_COLUMN;
     std::string incremental_column; // Column for tracking changes
+    std::string timestamp_column; // Column for timestamp-based tracking
+    std::string sequence_column; // Column for sequence-based tracking
     std::string last_value; // Last processed value
     int batch_size = 1000;
     bool include_deletes = false;
@@ -87,6 +91,7 @@ struct IncrementalLoadConfig {
 struct DatabaseSourceConfig {
     DatabaseConnectionConfig connection;
     std::vector<DatabaseQuery> queries;
+    std::vector<std::string> tables; // Tables to monitor/query
     IncrementalLoadConfig incremental_config;
     bool enable_change_tracking = false;
     std::chrono::seconds polling_interval = std::chrono::seconds(300);
@@ -170,6 +175,10 @@ private:
     void record_query_metrics(const DatabaseQuery& query, const std::chrono::microseconds& duration, int rows_affected);
     nlohmann::json get_query_performance_stats();
     std::vector<std::string> identify_slow_queries();
+
+    // Helper methods
+    std::string build_sql_query(const DatabaseQuery& query);
+    nlohmann::json parse_column_value(const std::string& value, const std::string& type);
 
     // Internal state
     DatabaseSourceConfig db_config_;

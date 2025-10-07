@@ -272,11 +272,10 @@ bool DatabaseSource::test_database_connection() {
 
 void DatabaseSource::configure_connection_pool() {
     if (!external_db_pool_) {
-        DatabaseConfig pool_config;
-        pool_config.connection_string = db_config_.connection.connection_string;
-        pool_config.max_connections = db_config_.connection.max_connections;
-
-        external_db_pool_ = std::make_shared<ConnectionPool>(pool_config);
+        external_db_pool_ = std::make_shared<ConnectionPool>(
+            db_config_.connection.connection_string,
+            db_config_.connection.max_connections
+        );
 
         logger_->log(LogLevel::INFO, "Database connection pool configured with " +
                     std::to_string(db_config_.connection.max_connections) + " connections");
@@ -292,7 +291,7 @@ std::shared_ptr<PostgreSQLConnection> DatabaseSource::get_connection() {
         throw std::runtime_error("Connection pool not initialized");
     }
 
-    return external_db_pool_->acquire_connection();
+    return external_db_pool_->create_connection();
 }
 
 std::vector<nlohmann::json> DatabaseSource::execute_select_query(const DatabaseQuery& query) {
@@ -390,7 +389,7 @@ std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::s
         std::vector<std::string> params = {last_sync};
         auto result = connection->execute_query(query, params);
 
-        for (const auto& row : result.rows) {
+        for (const auto& row : result) {
             nlohmann::json json_row;
             for (const auto& field : row) {
                 json_row[field.name()] = field.c_str();
@@ -399,7 +398,7 @@ std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::s
         }
 
         if (!changes.empty()) {
-            last_incremental_values_[table_name] = std::chrono::system_clock::now();
+            last_sync_timestamps_[table_name] = std::chrono::system_clock::now();
         }
 
     } catch (const std::exception& e) {
@@ -532,7 +531,7 @@ bool DatabaseSource::setup_cdc_for_sql_server(const std::string& table_name) {
         std::string enable_cdc_db = "EXEC sys.sp_cdc_enable_db";
         connection->execute_query(enable_cdc_db);
 
-        std::string enable_cdc_table = std::string("EXEC sys.sp_cdc_enable_table ") +
+        std::string enable_cdc_table = "EXEC sys.sp_cdc_enable_table " +
                                       "@source_schema = N'dbo', " +
                                       "@source_name = N'" + table_name + "', " +
                                       "@role_name = NULL";
@@ -565,16 +564,11 @@ std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_postgresql(const st
                           "', NULL, NULL) LIMIT 1000";
         auto result = connection->execute_query(query);
 
-        for (const auto& row : result.rows) {
+        for (const auto& row : result) {
             nlohmann::json change;
-            auto lsn_it = row.find("lsn");
-            auto xid_it = row.find("xid");
-            auto data_it = row.find("data");
-
-            if (lsn_it != row.end()) change["lsn"] = lsn_it->second;
-            if (xid_it != row.end()) change["xid"] = std::stoi(xid_it->second);
-            if (data_it != row.end()) change["data"] = data_it->second;
-
+            change["lsn"] = row["lsn"].c_str();
+            change["xid"] = row["xid"].as<int>();
+            change["data"] = row["data"].c_str();
             changes.push_back(change);
         }
 
@@ -603,10 +597,10 @@ std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_sql_server(const st
                           "sys.fn_cdc_get_max_lsn(), 'all')";
         auto result = connection->execute_query(query);
 
-        for (const auto& row : result.rows) {
+        for (const auto& row : result) {
             nlohmann::json change;
-            for (const auto& [column_name, column_value] : row) {
-                change[column_name] = column_value;
+            for (const auto& field : row) {
+                change[field.name()] = field.c_str();
             }
             changes.push_back(change);
         }
@@ -661,14 +655,13 @@ nlohmann::json DatabaseSource::transform_database_row(const nlohmann::json& row_
 }
 
 std::string DatabaseSource::map_column_name(const std::string& original_name, const std::string& table_name) {
-    // Check if there's a mapping for this table+column combination
-    std::string mapping_key = table_name + "." + original_name;
-    auto it = db_config_.table_mappings.find(mapping_key);
-    if (it != db_config_.table_mappings.end()) {
-        return it->second;
+    if (config_.column_mappings.contains(table_name)) {
+        const auto& mappings = config_.column_mappings[table_name];
+        if (mappings.contains(original_name)) {
+            return mappings[original_name];
+        }
     }
 
-    // Default: convert to lowercase and replace - with _
     std::string mapped = original_name;
     std::transform(mapped.begin(), mapped.end(), mapped.begin(),
         [](char c) { return c == '-' ? '_' : std::tolower(c); });
@@ -696,7 +689,7 @@ nlohmann::json DatabaseSource::convert_database_type(const std::string& value, c
             return value;
         }
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::WARN, "Failed to convert value '" + value + "' to type '" + db_type + "': " + e.what());
+        logger_->warn("Failed to convert value '{}' to type '{}': {}", value, db_type, e.what());
         return value;
     }
 }
@@ -709,7 +702,7 @@ bool DatabaseSource::prepare_statement(const DatabaseQuery& query) {
     }
 
     try {
-        std::string statement_name = "prepared_" + std::to_string(std::hash<std::string>{}(query.sql_query));
+        std::string statement_name = "prepared_" + std::to_string(std::hash<std::string>{}(query.sql));
 
         if (prepared_statements_.find(statement_name) != prepared_statements_.end()) {
             return true;
@@ -728,40 +721,49 @@ bool DatabaseSource::prepare_statement(const DatabaseQuery& query) {
 }
 
 void DatabaseSource::enable_query_caching(const DatabaseQuery& query) {
-    std::string query_hash = std::to_string(std::hash<std::string>{}(query.sql_query));
-    logger_->log(LogLevel::DEBUG, "Enabled caching for query hash: " + query_hash);
+    std::string query_hash = std::to_string(std::hash<std::string>{}(query.sql));
+    cached_queries_[query_hash] = {
+        {"sql", query.sql},
+        {"enabled", true},
+        {"ttl_seconds", query.cache_ttl_seconds},
+        {"last_cached", std::chrono::system_clock::now().time_since_epoch().count()}
+    };
+    logger_->debug("Enabled caching for query hash: {}", query_hash);
 }
 
 nlohmann::json DatabaseSource::get_cached_query_result(const std::string& query_hash) {
-    auto it = query_cache_.find(query_hash);
-    if (it != query_cache_.end()) {
-        auto cache_time_it = cache_timestamps_.find(query_hash);
-        if (cache_time_it != cache_timestamps_.end()) {
-            auto age = std::chrono::system_clock::now() - cache_time_it->second;
-            if (age < std::chrono::seconds(300)) {
-                logger_->log(LogLevel::DEBUG, "Cache hit for query hash: " + query_hash);
-                return it->second;
-            } else {
-                query_cache_.erase(it);
-                cache_timestamps_.erase(cache_time_it);
-                logger_->log(LogLevel::DEBUG, "Cache expired for query hash: " + query_hash);
-            }
+    if (query_results_cache_.contains(query_hash)) {
+        const auto& cached = query_results_cache_[query_hash];
+        auto cached_at = cached["cached_at"].get<long long>();
+        auto ttl = cached["ttl_seconds"].get<int>();
+        auto now = std::chrono::system_clock::now().time_since_epoch().count();
+
+        if (now - cached_at < ttl * 1000000000LL) {
+            logger_->debug("Cache hit for query hash: {}", query_hash);
+            return cached["result"];
+        } else {
+            query_results_cache_.erase(query_hash);
+            logger_->debug("Cache expired for query hash: {}", query_hash);
         }
     }
-    return nlohmann::json();
+    return nullptr;
 }
 
 void DatabaseSource::set_cached_query_result(const std::string& query_hash, const nlohmann::json& result) {
-    query_cache_[query_hash] = result;
-    cache_timestamps_[query_hash] = std::chrono::system_clock::now();
+    if (cached_queries_.contains(query_hash)) {
+        query_results_cache_[query_hash] = {
+            {"result", result},
+            {"cached_at", std::chrono::system_clock::now().time_since_epoch().count()},
+            {"ttl_seconds", cached_queries_[query_hash]["ttl_seconds"]}
+        };
 
-    if (query_cache_.size() > 1000) {
-        auto oldest = query_cache_.begin();
-        query_cache_.erase(oldest);
-        cache_timestamps_.erase(oldest->first);
+        if (query_results_cache_.size() > 1000) {
+            auto oldest = query_results_cache_.begin();
+            query_results_cache_.erase(oldest);
+        }
+
+        logger_->debug("Cached result for query hash: {}", query_hash);
     }
-
-    logger_->log(LogLevel::DEBUG, "Cached result for query hash: " + query_hash);
 }
 
 bool DatabaseSource::handle_connection_error(const std::string& error) {
@@ -773,17 +775,17 @@ bool DatabaseSource::handle_connection_error(const std::string& error) {
 
         int max_retries = 3;
         for (int attempt = 1; attempt <= max_retries; ++attempt) {
-            logger_->log(LogLevel::INFO, "Attempting to reconnect (attempt " + std::to_string(attempt) + "/" + std::to_string(max_retries) + ")");
+            logger_->info("Attempting to reconnect (attempt {}/{})", attempt, max_retries);
 
             std::this_thread::sleep_for(std::chrono::seconds(attempt * 2));
 
-            if (validate_connection()) {
-                logger_->log(LogLevel::INFO, "Reconnection successful");
+            if (test_connection()) {
+                logger_->info("Reconnection successful");
                 return true;
             }
         }
 
-        logger_->log(LogLevel::ERROR, "Failed to reconnect after " + std::to_string(max_retries) + " attempts");
+        logger_->error("Failed to reconnect after {} attempts", max_retries);
         return false;
     }
 
@@ -791,51 +793,59 @@ bool DatabaseSource::handle_connection_error(const std::string& error) {
 }
 
 bool DatabaseSource::handle_query_timeout(const DatabaseQuery& query) {
-    std::string query_substr = query.sql_query.length() > 100 ? query.sql_query.substr(0, 100) : query.sql_query;
-    logger_->log(LogLevel::WARN, "Query timeout for: " + query_substr);
+    logger_->warn("Query timeout for: {}", query.sql.substr(0, 100));
 
-    // Always allow retry for timeout
-    logger_->log(LogLevel::INFO, "Query will be retried");
-    return true;
+    if (query.retry_on_timeout && query.max_retries > 0) {
+        logger_->info("Query will be retried {} times", query.max_retries);
+        return true;
+    }
+
+    logger_->error("Query timeout without retry: {}", query.sql.substr(0, 100));
+    return false;
 }
 
 bool DatabaseSource::retry_failed_query(const DatabaseQuery& query, int attempt) {
-    int max_retries = 3;
-    if (attempt > max_retries) {
-        std::string query_substr = query.sql_query.length() > 100 ? query.sql_query.substr(0, 100) : query.sql_query;
-        logger_->log(LogLevel::ERROR, "Max retries exceeded for query: " + query_substr);
+    if (attempt > query.max_retries) {
+        logger_->error("Max retries exceeded for query: {}", query.sql.substr(0, 100));
         return false;
     }
 
     int backoff_seconds = std::min(attempt * 2, 30);
-    logger_->log(LogLevel::INFO, "Retrying query (attempt " + std::to_string(attempt) + "/" + std::to_string(max_retries) + ") after " + std::to_string(backoff_seconds) + " seconds");
+    logger_->info("Retrying query (attempt {}/{}) after {} seconds",
+                 attempt, query.max_retries, backoff_seconds);
 
     std::this_thread::sleep_for(std::chrono::seconds(backoff_seconds));
 
     try {
-        auto connection = get_connection();
-        auto result = connection->execute_query(query.sql_query);
-
-        logger_->log(LogLevel::INFO, "Query retry successful on attempt " + std::to_string(attempt));
+        
+        auto result = connection->execute_query(query.sql);
+        
+        logger_->info("Query retry successful on attempt {}", attempt);
         return true;
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::WARN, "Query retry failed on attempt " + std::to_string(attempt) + ": " + e.what());
+        logger_->warn("Query retry failed on attempt {}: {}", attempt, e.what());
         return false;
     }
 }
 
 void DatabaseSource::record_query_metrics(const DatabaseQuery& query, const std::chrono::microseconds& duration, int rows_affected) {
     total_queries_executed_++;
-    total_query_time_ += duration;
+    total_rows_ingested_ += rows_affected;
 
-    if (duration.count() > 0) {
-        std::string query_substr = query.sql_query.length() > 200 ? query.sql_query.substr(0, 200) : query.sql_query;
-        logger_->log(LogLevel::DEBUG, "Query took " + std::to_string(duration.count()) + " microseconds, affected " + std::to_string(rows_affected) + " rows");
+    query_metrics_.push_back({
+        {"sql", query.sql.substr(0, 200)},
+        {"duration_microseconds", duration.count()},
+        {"rows_affected", rows_affected},
+        {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+    });
+
+    if (query_metrics_.size() > 10000) {
+        query_metrics_.erase(query_metrics_.begin(), query_metrics_.begin() + 1000);
     }
 
     if (duration.count() > 5000000) {
-        std::string query_substr = query.sql_query.length() > 100 ? query.sql_query.substr(0, 100) : query.sql_query;
-        logger_->log(LogLevel::WARN, "Slow query detected (" + std::to_string(duration.count() / 1000) + " ms): " + query_substr);
+        logger_->warn("Slow query detected ({} ms): {}",
+                     duration.count() / 1000, query.sql.substr(0, 100));
     }
 }
 
@@ -862,9 +872,11 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
             return slow_queries;
         }
 
+        pqxx::work txn(*conn);
+
         // Query PostgreSQL's pg_stat_statements for slow queries
         // This requires pg_stat_statements extension to be enabled
-        auto result = conn->execute_query(R"(
+        auto result = txn.exec(R"(
             SELECT query,
                    calls,
                    total_exec_time,
@@ -872,23 +884,16 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
                    max_exec_time,
                    stddev_exec_time
             FROM pg_stat_statements
-            WHERE mean_exec_time > 1000
+            WHERE mean_exec_time > 1000  -- Queries taking more than 1 second on average
             ORDER BY mean_exec_time DESC
             LIMIT 50
         )");
 
-        for (const auto& row : result.rows) {
-            auto query_it = row.find("query");
-            auto mean_it = row.find("mean_exec_time");
-            auto max_it = row.find("max_exec_time");
-            auto calls_it = row.find("calls");
-
-            if (query_it == row.end()) continue;
-
-            std::string query = query_it->second;
-            double mean_time = mean_it != row.end() ? std::stod(mean_it->second) : 0.0;
-            double max_time = max_it != row.end() ? std::stod(max_it->second) : 0.0;
-            int64_t calls = calls_it != row.end() ? std::stoll(calls_it->second) : 0;
+        for (const auto& row : result) {
+            std::string query = row["query"].c_str();
+            double mean_time = row["mean_exec_time"].as<double>();
+            double max_time = row["max_exec_time"].as<double>();
+            int64_t calls = row["calls"].as<int64_t>();
 
             std::string slow_query_info = "Query: " + query.substr(0, 100) +
                                          (query.length() > 100 ? "..." : "") +
@@ -999,8 +1004,9 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
         logger_->log(LogLevel::INFO, "Identified " + std::to_string(slow_queries.size()) +
                     " slow or problematic queries");
 
-    } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "SQL error identifying slow queries: " + std::string(e.what()));
+    } catch (const pqxx::sql_error& e) {
+        logger_->log(LogLevel::ERROR, "SQL error identifying slow queries: " +
+                    std::string(e.what()) + " (query: " + std::string(e.query()) + ")");
 
         // If pg_stat_statements is not available, return basic info
         if (std::string(e.what()).find("pg_stat_statements") != std::string::npos) {
@@ -1008,8 +1014,9 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
                                   "Run 'CREATE EXTENSION pg_stat_statements;' to enable query monitoring.");
             logger_->log(LogLevel::WARN, "pg_stat_statements extension not available");
         }
-    } catch (...) {
-        logger_->log(LogLevel::ERROR, "Unknown exception identifying slow queries");
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception identifying slow queries: " + std::string(e.what()));
     }
 
     return slow_queries;

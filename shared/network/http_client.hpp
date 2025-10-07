@@ -61,6 +61,37 @@ public:
                      const std::unordered_map<std::string, std::string>& headers = {});
 
     /**
+     * @brief Perform PUT request
+     * @param url Target URL
+     * @param data Request body data
+     * @param headers Optional custom headers
+     * @return HTTP response
+     */
+    HttpResponse put(const std::string& url,
+                     const std::string& data,
+                     const std::unordered_map<std::string, std::string>& headers = {});
+
+    /**
+     * @brief Perform DELETE request
+     * @param url Target URL
+     * @param headers Optional custom headers
+     * @return HTTP response
+     */
+    HttpResponse del(const std::string& url,
+                     const std::unordered_map<std::string, std::string>& headers = {});
+
+    /**
+     * @brief Perform PATCH request
+     * @param url Target URL
+     * @param data Request body data
+     * @param headers Optional custom headers
+     * @return HTTP response
+     */
+    HttpResponse patch(const std::string& url,
+                       const std::string& data,
+                       const std::unordered_map<std::string, std::string>& headers = {});
+
+    /**
      * @brief Set connection timeout
      * @param seconds Timeout in seconds
      */

@@ -52,6 +52,13 @@ struct ScrapingRule {
     std::unordered_map<std::string, std::string> transformations;
 };
 
+struct ContentSnapshot {
+    std::string url;
+    std::string content;
+    std::string content_hash;
+    std::chrono::system_clock::time_point timestamp;
+};
+
 struct WebScrapingConfig {
     std::string base_url;
     std::string start_url;
@@ -68,14 +75,24 @@ struct WebScrapingConfig {
     std::chrono::milliseconds delay_between_requests = std::chrono::milliseconds(1000);
     bool randomize_delays = true;
     int max_concurrent_requests = 1;
+    long request_timeout_seconds = 30;
+
+    // URL filtering
+    std::vector<std::string> url_patterns_whitelist;
+    std::vector<std::string> url_patterns_blacklist;
+    bool respect_robots_txt = true;
 
     // Change detection
     std::chrono::hours content_retention_period = std::chrono::hours(24);
     double similarity_threshold = 0.95; // For structure comparison
     std::vector<std::string> keywords_to_monitor;
+    std::vector<std::string> change_detection_keywords;
+    std::vector<std::string> change_detection_patterns;
 
     // Error handling
     int max_retries_per_page = 3;
+    int max_retries = 3;
+    int max_snapshot_history = 1000;
     std::chrono::seconds retry_delay = std::chrono::seconds(5);
     bool follow_redirects = true;
     int max_redirect_depth = 3;
@@ -154,12 +171,18 @@ private:
     nlohmann::json extract_page_metadata(const std::string& content, const std::string& url);
     std::vector<std::string> extract_keywords(const std::string& content);
     std::chrono::system_clock::time_point extract_publication_date(const std::string& content);
+    std::string extract_title(const std::string& content);
+    std::string extract_meta_description(const std::string& content);
+    std::vector<nlohmann::json> extract_documents(const std::string& content);
 
     // Internal state
     WebScrapingConfig scraping_config_;
     bool connected_;
     std::unordered_map<std::string, std::string> last_known_hashes_;
+    std::unordered_map<std::string, std::unordered_map<std::string, int>> last_known_structures_;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> last_request_times_;
+    std::unordered_map<std::string, std::vector<std::string>> robots_txt_cache_; // base_url -> disallowed paths
+    std::unordered_map<std::string, ContentSnapshot> content_snapshots_; // url -> snapshot
     int consecutive_failures_;
 
     // Performance tracking

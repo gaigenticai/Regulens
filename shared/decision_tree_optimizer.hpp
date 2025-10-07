@@ -236,7 +236,11 @@ struct DecisionTreeConfig {
     struct {
         double topsis_distance_p = 2.0;  // p-norm for TOPSIS
         double electre_threshold = 0.7;  // Concordance threshold for ELECTRE
+        double electre_indifference_threshold = 0.05;  // Indifference threshold for ELECTRE
+        double electre_preference_threshold = 0.15;  // Preference threshold for ELECTRE
+        double electre_veto_threshold = 0.50;  // Veto threshold for ELECTRE
         double promethee_preference_threshold = 0.1;  // Preference threshold for PROMETHEE
+        double promethee_indifference_threshold = 0.05;  // Indifference threshold for PROMETHEE
         double vikor_v_parameter = 0.5;  // Weight for group utility in VIKOR (0-1)
     } mcda_params;
 

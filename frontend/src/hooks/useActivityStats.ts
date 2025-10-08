@@ -26,12 +26,37 @@ export const useActivityStats = (): UseActivityStatsReturn => {
   } = useQuery({
     queryKey: ['activity-stats'],
     queryFn: async () => {
-      const data = await apiClient.getActivityStats();
-      return data;
+      try {
+        const data = await apiClient.getActivityStats();
+        console.log('[ActivityStats] Successfully fetched stats:', data);
+        return data;
+      } catch (error) {
+        console.warn('[ActivityStats] Failed to fetch stats, using fallback:', error);
+        // Return fallback stats instead of throwing
+        return {
+          total: 0,
+          byType: {
+            regulatory_change: 0,
+            decision_made: 0,
+            data_ingestion: 0,
+            agent_action: 0,
+            compliance_alert: 0
+          },
+          byPriority: {
+            low: 0,
+            medium: 0,
+            high: 0,
+            critical: 0
+          },
+          last24Hours: 0
+        };
+      }
     },
     refetchInterval: 30000, // Refetch every 30 seconds
     refetchOnWindowFocus: true,
     staleTime: 10000, // 10 seconds
+    retry: 2, // Retry up to 2 times
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
   });
 
   return {

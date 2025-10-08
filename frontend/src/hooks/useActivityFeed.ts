@@ -38,12 +38,30 @@ export const useActivityFeed = (
   } = useQuery({
     queryKey: ['activity-feed', limit],
     queryFn: async () => {
-      const data = await apiClient.getRecentActivity(limit);
-      return data;
+      try {
+        const data = await apiClient.getRecentActivity(limit);
+        console.log('[ActivityFeed] Successfully fetched', data.length, 'activities');
+        return data;
+      } catch (error) {
+        console.error('[ActivityFeed] Failed to fetch activities:', error);
+        throw error;
+      }
     },
     refetchInterval: enableRealtime ? pollingInterval : false,
     refetchOnWindowFocus: true,
     staleTime: 5000, // 5 seconds
+    retry: (failureCount, error: any) => {
+      // Don't retry indefinitely for network errors
+      if (failureCount >= 3) return false;
+      
+      // Don't retry for 4xx errors (client errors)
+      if (error?.response?.status >= 400 && error?.response?.status < 500) {
+        return false;
+      }
+      
+      return true;
+    },
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
   });
 
   // WebSocket connection for real-time updates

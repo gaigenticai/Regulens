@@ -91,17 +91,24 @@ struct DataIngestionConfig {
     nlohmann::json validation_rules;
 };
 
+// Forward declaration
+struct DataRecord;
+
 struct IngestionBatch {
     std::string batch_id;
     std::string source_id;
+    std::string pipeline_id;
     IngestionStatus status;
     std::chrono::system_clock::time_point start_time;
     std::chrono::system_clock::time_point end_time;
+    std::chrono::system_clock::time_point batch_start_time;
+    std::chrono::system_clock::time_point batch_end_time;
     int records_processed = 0;
     int records_succeeded = 0;
     int records_failed = 0;
     std::vector<nlohmann::json> raw_data;
     std::vector<nlohmann::json> processed_data;
+    std::vector<DataRecord> data_records;
     std::vector<std::string> errors;
     nlohmann::json metadata;
 };
@@ -113,7 +120,9 @@ struct DataRecord {
     nlohmann::json data;
     std::chrono::system_clock::time_point ingested_at;
     std::chrono::system_clock::time_point processed_at;
+    std::chrono::system_clock::time_point last_updated;
     std::string processing_pipeline;
+    std::string pipeline_id;
     nlohmann::json metadata;
     std::vector<std::string> tags;
 };
@@ -265,36 +274,7 @@ protected:
     StructuredLogger* logger_;
 };
 
-// Metrics and Monitoring
-class IngestionMetrics {
-public:
-    IngestionMetrics(StructuredLogger* logger);
-
-    void record_batch_processed(const std::string& source_id, const IngestionBatch& batch);
-    void record_ingestion_error(const std::string& source_id, const std::string& error);
-    void record_source_health(const std::string& source_id, bool healthy);
-
-    nlohmann::json get_source_metrics(const std::string& source_id) const;
-    nlohmann::json get_global_metrics() const;
-    std::vector<std::string> get_failing_sources() const;
-
-private:
-    StructuredLogger* logger_;
-    mutable std::mutex metrics_mutex_;
-
-    struct SourceMetrics {
-        int64_t total_batches = 0;
-        int64_t successful_batches = 0;
-        int64_t failed_batches = 0;
-        int64_t total_records = 0;
-        int64_t successful_records = 0;
-        int64_t failed_records = 0;
-        std::chrono::system_clock::time_point last_successful_batch;
-        bool is_healthy = true;
-        std::vector<std::string> recent_errors;
-    };
-
-    std::unordered_map<std::string, SourceMetrics> source_metrics_;
-};
+// Metrics and Monitoring (forward declaration - full definition in ingestion_metrics.hpp)
+class IngestionMetrics;
 
 } // namespace regulens

@@ -20,12 +20,8 @@ target_include_directories(resilience
 )
 
 # Link dependencies
-target_link_libraries(resilience
-    PUBLIC
-        config
-        logging
-        error_handler
-)
+# Note: config, logging, error_handler are part of regulens_shared
+# No external link dependencies needed for resilience
 
 # Set library properties
 set_target_properties(resilience PROPERTIES

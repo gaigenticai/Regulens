@@ -79,7 +79,7 @@ std::vector<RegulatoryChange> SecEdgarSource::check_for_changes() {
             }
         }
 
-        logger_->info("SEC EDGAR check completed, found {} new changes", changes.size());
+        logger_->info("SEC EDGAR check completed, found {} new changes", std::to_string(changes.size()));
 
     } catch (const std::exception& e) {
         logger_->error("Error checking SEC EDGAR for changes: {}", e.what());
@@ -111,7 +111,7 @@ bool SecEdgarSource::test_connectivity() {
             logger_->info("SEC EDGAR connectivity test successful");
             return true;
         } else {
-            logger_->warn("SEC EDGAR connectivity test failed with status: {}", response.status_code);
+            logger_->warn("SEC EDGAR connectivity test failed with status: {}", std::to_string(response.status_code));
             return false;
         }
     } catch (const std::exception& e) {
@@ -192,17 +192,17 @@ std::optional<RegulatoryChange> SecEdgarSource::process_filing(const nlohmann::j
         // Build SEC EDGAR URL
         std::string url = base_url_ + "/filings/" + accession;
 
-        // Create regulatory change metadata
+        // Create metadata
         RegulatoryChangeMetadata metadata;
         metadata.regulatory_body = "SEC";
         metadata.document_type = form_type;
-        metadata.severity = determine_severity(form_type);
-        metadata.effective_date = parse_filing_date(filing_date);
+        metadata.document_number = accession;
         metadata.keywords = extract_keywords(filing);
-        metadata.summary = generate_filing_summary(filing);
+        metadata.custom_fields["summary"] = generate_filing_summary(filing);
+        metadata.custom_fields["filing_date"] = filing_date;
 
-        RegulatoryChange change(accession, title, url, metadata);
-        return change;
+        // Create regulatory change
+        return RegulatoryChange(accession, title, url, metadata);
 
     } catch (const std::exception& e) {
         logger_->error("Failed to process SEC filing: {}", e.what());
@@ -268,7 +268,7 @@ void SecEdgarSource::update_last_processed_filing(const std::string& accession) 
 }
 
 // Production HTTP request implementation using HttpClient
-HttpResponse SecEdgarSource::make_http_request(const std::string& url, const std::string& method) {
+SecEdgarSource::HttpResponse SecEdgarSource::make_http_request(const std::string& url, const std::string& method) {
     try {
         // Use HttpClient for production-grade HTTP requests
         HttpClient http_client;
@@ -280,11 +280,7 @@ HttpResponse SecEdgarSource::make_http_request(const std::string& url, const std
             result.status_code = response.status_code;
 
             // Extract response body
-            if (response.body) {
-                result.body = *response.body;
-            } else {
-                result.body = "{}"; // Default empty JSON
-            }
+            result.body = response.body;
 
             return result;
 
@@ -331,7 +327,7 @@ std::vector<RegulatoryChange> FcaRegulatorySource::check_for_changes() {
             }
         }
 
-        logger_->info("FCA Regulatory check completed, found {} new changes", changes.size());
+        logger_->info("FCA Regulatory check completed, found {} new changes", std::to_string(changes.size()));
 
     } catch (const std::exception& e) {
         logger_->error("Error checking FCA Regulatory for changes: {}", e.what());
@@ -363,7 +359,7 @@ bool FcaRegulatorySource::test_connectivity() {
             logger_->info("FCA Regulatory connectivity test successful");
             return true;
         } else {
-            logger_->warn("FCA Regulatory connectivity test failed with status: {}", response.status_code);
+            logger_->warn("FCA Regulatory connectivity test failed with status: {}", std::to_string(response.status_code));
             return false;
         }
     } catch (const std::exception& e) {
@@ -425,17 +421,17 @@ std::optional<RegulatoryChange> FcaRegulatorySource::process_update(const nlohma
             url = base_url_ + "/updates/" + update_id;
         }
 
-        // Create regulatory change metadata
+        // Create metadata
         RegulatoryChangeMetadata metadata;
         metadata.regulatory_body = "FCA";
         metadata.document_type = update_type;
-        metadata.severity = determine_fca_severity(update_type);
-        metadata.effective_date = parse_publish_date(publish_date);
+        metadata.document_number = "fca_" + update_id;
         metadata.keywords = extract_fca_keywords(update);
-        metadata.summary = generate_fca_summary(update);
+        metadata.custom_fields["summary"] = generate_fca_summary(update);
+        metadata.custom_fields["publish_date"] = publish_date;
 
-        RegulatoryChange change("fca_" + update_id, title, url, metadata);
-        return change;
+        // Create regulatory change
+        return RegulatoryChange("fca_" + update_id, title, url, metadata);
 
     } catch (const std::exception& e) {
         logger_->error("Failed to process FCA update: {}", e.what());
@@ -517,7 +513,7 @@ void FcaRegulatorySource::update_last_timestamp(const std::string& timestamp) {
 }
 
 // HTTP request implementation using HttpClient
-HttpResponse FcaRegulatorySource::make_http_request(const std::string& url, const std::string& method) {
+FcaRegulatorySource::HttpResponse FcaRegulatorySource::make_http_request(const std::string& url, const std::string& method) {
     try {
         HttpClient http_client;
 
@@ -526,12 +522,7 @@ HttpResponse FcaRegulatorySource::make_http_request(const std::string& url, cons
 
             HttpResponse result;
             result.status_code = response.status_code;
-
-            if (response.body) {
-                result.body = *response.body;
-            } else {
-                result.body = "{}";
-            }
+            result.body = response.body;
 
             return result;
 
@@ -550,15 +541,15 @@ HttpResponse FcaRegulatorySource::make_http_request(const std::string& url, cons
 bool EcbAnnouncementsSource::initialize() {
     try {
         // ECB RSS feed endpoint
-        std::string ecb_feed_url = config_manager_->get_string("REGULENS_ECB_FEED_URL")
+        std::string ecb_feed_url = config_->get_string("REGULENS_ECB_FEED_URL")
             .value_or("https://www.ecb.europa.eu/rss/press.xml");
 
         logger_->info("Initializing ECB Announcements source with feed: " + ecb_feed_url);
 
         // Test connectivity to ECB feed
-        auto http_response = make_http_request(ecb_feed_url, "GET", "", {});
-        if (http_response.first != 200) {
-            logger_->error("Failed to connect to ECB feed, HTTP status: " + std::to_string(http_response.first));
+        auto http_response = this->make_http_request(ecb_feed_url, "GET");
+        if (http_response.status_code != 200) {
+            logger_->error("Failed to connect to ECB feed, HTTP status: " + std::to_string(http_response.status_code));
             return false;
         }
 
@@ -574,16 +565,16 @@ std::vector<RegulatoryChange> EcbAnnouncementsSource::check_for_changes() {
     std::vector<RegulatoryChange> changes;
 
     try {
-        std::string ecb_feed_url = config_manager_->get_string("REGULENS_ECB_FEED_URL")
+        std::string ecb_feed_url = config_->get_string("REGULENS_ECB_FEED_URL")
             .value_or("https://www.ecb.europa.eu/rss/press.xml");
 
-        auto http_response = make_http_request(ecb_feed_url, "GET", "", {});
-        if (http_response.first != 200) {
-            logger_->error("Failed to fetch ECB feed, HTTP status: " + std::to_string(http_response.first));
+        auto http_response = this->make_http_request(ecb_feed_url, "GET");
+        if (http_response.status_code != 200) {
+            logger_->error("Failed to fetch ECB feed, HTTP status: " + std::to_string(http_response.status_code));
             return changes;
         }
 
-        std::string rss_content = http_response.second;
+        std::string rss_content = http_response.body;
 
         // Parse RSS/XML content
         // Production: Use libxml2 or similar XML parser
@@ -596,61 +587,76 @@ std::vector<RegulatoryChange> EcbAnnouncementsSource::check_for_changes() {
 
             std::string item_content = rss_content.substr(pos, end_pos - pos + 7);
 
-            RegulatoryChange change;
-            change.source = "ECB";
-            change.detected_at = std::chrono::system_clock::now();
+            // Extract all data fields first
+            std::string title;
+            std::string description;
+            std::string link;
+            std::string pub_date_str;
 
             // Extract title
             size_t title_start = item_content.find("<title>");
             size_t title_end = item_content.find("</title>");
             if (title_start != std::string::npos && title_end != std::string::npos) {
-                change.title = item_content.substr(title_start + 7, title_end - title_start - 7);
+                title = item_content.substr(title_start + 7, title_end - title_start - 7);
             }
 
             // Extract description
             size_t desc_start = item_content.find("<description>");
             size_t desc_end = item_content.find("</description>");
             if (desc_start != std::string::npos && desc_end != std::string::npos) {
-                change.description = item_content.substr(desc_start + 13, desc_end - desc_start - 13);
+                description = item_content.substr(desc_start + 13, desc_end - desc_start - 13);
             }
 
             // Extract link/URL
             size_t link_start = item_content.find("<link>");
             size_t link_end = item_content.find("</link>");
             if (link_start != std::string::npos && link_end != std::string::npos) {
-                change.content_url = item_content.substr(link_start + 6, link_end - link_start - 6);
+                link = item_content.substr(link_start + 6, link_end - link_start - 6);
             }
 
             // Extract publication date
             size_t pubdate_start = item_content.find("<pubDate>");
             size_t pubdate_end = item_content.find("</pubDate>");
             if (pubdate_start != std::string::npos && pubdate_end != std::string::npos) {
-                std::string pub_date_str = item_content.substr(pubdate_start + 9, pubdate_end - pubdate_start - 9);
-                // Production: Parse RFC 822 date format properly
-                change.published_at = std::chrono::system_clock::now();
+                pub_date_str = item_content.substr(pubdate_start + 9, pubdate_end - pubdate_start - 9);
+            }
+
+            // Determine document type based on content
+            std::string document_type = "announcement";
+            if (title.find("regulation") != std::string::npos ||
+                title.find("directive") != std::string::npos) {
+                document_type = "regulation";
+            } else if (title.find("guidance") != std::string::npos) {
+                document_type = "guidance";
+            }
+
+            // Extract keywords from title and description
+            std::vector<std::string> keywords = {"ECB", "European Central Bank"};
+            if (title.find("regulation") != std::string::npos || description.find("regulation") != std::string::npos) {
+                keywords.push_back("regulation");
+            }
+            if (title.find("guidance") != std::string::npos || description.find("guidance") != std::string::npos) {
+                keywords.push_back("guidance");
+            }
+            if (title.find("monetary") != std::string::npos || description.find("monetary") != std::string::npos) {
+                keywords.push_back("monetary policy");
             }
 
             // Generate unique ID
-            change.id = "ecb_" + std::to_string(std::hash<std::string>{}(change.title + change.content_url));
+            std::string source_id = "ecb_" + std::to_string(std::hash<std::string>{}(title + link));
 
-            // Classify change type and severity based on content
-            if (change.title.find("regulation") != std::string::npos ||
-                change.title.find("directive") != std::string::npos) {
-                change.change_type = "rule";
-                change.severity = "HIGH";
-            } else if (change.title.find("guidance") != std::string::npos) {
-                change.change_type = "guidance";
-                change.severity = "MEDIUM";
-            } else {
-                change.change_type = "policy";
-                change.severity = "LOW";
-            }
+            // Create metadata
+            RegulatoryChangeMetadata metadata;
+            metadata.regulatory_body = "ECB";
+            metadata.document_type = document_type;
+            metadata.keywords = keywords;
+            metadata.custom_fields["summary"] = description;
+            metadata.custom_fields["publish_date"] = pub_date_str;
+            metadata.custom_fields["source_type"] = "rss";
+            metadata.custom_fields["feed_url"] = ecb_feed_url;
 
-            change.metadata = {
-                {"source_type", "rss"},
-                {"feed_url", ecb_feed_url},
-                {"parser_version", "1.0"}
-            };
+            // Create regulatory change using constructor
+            RegulatoryChange change(source_id, title, link, metadata);
 
             changes.push_back(change);
             pos = end_pos + 7;
@@ -668,9 +674,9 @@ std::vector<RegulatoryChange> EcbAnnouncementsSource::check_for_changes() {
 nlohmann::json EcbAnnouncementsSource::get_configuration() const {
     return {
         {"source_id", get_source_id()},
-        {"source_name", get_source_name()},
+        {"source_name", get_name()},
         {"source_type", "ECB_ANNOUNCEMENTS"},
-        {"feed_url", config_manager_->get_string("REGULENS_ECB_FEED_URL").value_or("https://www.ecb.europa.eu/rss/press.xml")},
+        {"feed_url", config_->get_string("REGULENS_ECB_FEED_URL").value_or("https://www.ecb.europa.eu/rss/press.xml")},
         {"check_interval_seconds", get_check_interval().count()},
         {"active", is_active()}
     };
@@ -678,22 +684,47 @@ nlohmann::json EcbAnnouncementsSource::get_configuration() const {
 
 bool EcbAnnouncementsSource::test_connectivity() {
     try {
-        std::string ecb_feed_url = config_manager_->get_string("REGULENS_ECB_FEED_URL")
+        std::string ecb_feed_url = config_->get_string("REGULENS_ECB_FEED_URL")
             .value_or("https://www.ecb.europa.eu/rss/press.xml");
 
-        auto http_response = make_http_request(ecb_feed_url, "GET", "", {});
-        bool connected = (http_response.first == 200);
+        auto http_response = this->make_http_request(ecb_feed_url, "GET");
+        bool connected = (http_response.status_code == 200);
 
         if (connected) {
             logger_->info("ECB connectivity test: SUCCESS");
         } else {
-            logger_->warn("ECB connectivity test: FAILED (HTTP " + std::to_string(http_response.first) + ")");
+            logger_->warn("ECB connectivity test: FAILED (HTTP " + std::to_string(http_response.status_code) + ")");
         }
 
         return connected;
     } catch (const std::exception& e) {
         logger_->error("ECB connectivity test exception: " + std::string(e.what()));
         return false;
+    }
+}
+
+// HTTP request implementation using HttpClient
+EcbAnnouncementsSource::HttpResponse EcbAnnouncementsSource::make_http_request(const std::string& url, const std::string& method) {
+    try {
+        HttpClient http_client;
+
+        if (method == "GET") {
+            auto response = http_client.get(url);
+
+            HttpResponse result;
+            result.status_code = response.status_code;
+            result.body = response.body;
+
+            return result;
+
+        } else {
+            logger_->error("Unsupported HTTP method: {}", method);
+            return {405, "{}"};
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("HTTP request failed: {}", e.what());
+        return {500, "{}"};
     }
 }
 
@@ -711,14 +742,9 @@ bool CustomFeedSource::initialize() {
         logger_->info("Initializing custom feed source: " + feed_url + " (type: " + feed_type + ")");
 
         // Test connectivity
-        std::unordered_map<std::string, std::string> headers;
-        if (feed_config_.contains("auth_token")) {
-            headers["Authorization"] = "Bearer " + feed_config_["auth_token"].get<std::string>();
-        }
-
-        auto http_response = make_http_request(feed_url, "GET", "", headers);
-        if (http_response.first != 200) {
-            logger_->error("Failed to connect to custom feed, HTTP status: " + std::to_string(http_response.first));
+        auto http_response = make_http_request(feed_url, "GET");
+        if (http_response.status_code != 200) {
+            logger_->error("Failed to connect to custom feed, HTTP status: " + std::to_string(http_response.status_code));
             return false;
         }
 
@@ -741,18 +767,13 @@ std::vector<RegulatoryChange> CustomFeedSource::check_for_changes() {
         std::string feed_url = feed_config_["feed_url"];
         std::string feed_type = feed_config_.value("feed_type", "rss");
 
-        std::unordered_map<std::string, std::string> headers;
-        if (feed_config_.contains("auth_token")) {
-            headers["Authorization"] = "Bearer " + feed_config_["auth_token"].get<std::string>();
-        }
-
-        auto http_response = make_http_request(feed_url, "GET", "", headers);
-        if (http_response.first != 200) {
-            logger_->error("Failed to fetch custom feed, HTTP status: " + std::to_string(http_response.first));
+        auto http_response = make_http_request(feed_url, "GET");
+        if (http_response.status_code != 200) {
+            logger_->error("Failed to fetch custom feed, HTTP status: " + std::to_string(http_response.status_code));
             return changes;
         }
 
-        std::string feed_content = http_response.second;
+        std::string feed_content = http_response.body;
 
         if (feed_type == "rss" || feed_type == "atom") {
             // Parse RSS/Atom feed
@@ -766,10 +787,6 @@ std::vector<RegulatoryChange> CustomFeedSource::check_for_changes() {
 
                 std::string item_content = feed_content.substr(pos, end_pos - pos + item_end_tag.length());
 
-                RegulatoryChange change;
-                change.source = feed_config_.value("source_name", "CustomFeed");
-                change.detected_at = std::chrono::system_clock::now();
-
                 // Extract title
                 auto extract_xml_tag = [](const std::string& content, const std::string& tag) -> std::string {
                     size_t start = content.find("<" + tag + ">");
@@ -780,20 +797,28 @@ std::vector<RegulatoryChange> CustomFeedSource::check_for_changes() {
                     return "";
                 };
 
-                change.title = extract_xml_tag(item_content, "title");
-                change.description = extract_xml_tag(item_content, feed_type == "atom" ? "summary" : "description");
-                change.content_url = extract_xml_tag(item_content, "link");
+                std::string title = extract_xml_tag(item_content, "title");
+                std::string description = extract_xml_tag(item_content, feed_type == "atom" ? "summary" : "description");
+                std::string content_url = extract_xml_tag(item_content, "link");
 
-                change.id = get_source_id() + "_" + std::to_string(std::hash<std::string>{}(change.title + change.content_url));
-                change.change_type = feed_config_.value("default_change_type", "policy");
-                change.severity = feed_config_.value("default_severity", "MEDIUM");
-                change.published_at = std::chrono::system_clock::now();
+                std::string source_id = get_source_id() + "_" + std::to_string(std::hash<std::string>{}(title + content_url));
+                std::string change_type = feed_config_.value("default_change_type", "policy");
+                std::string severity = feed_config_.value("default_severity", "MEDIUM");
 
-                change.metadata = {
-                    {"source_type", feed_type},
-                    {"feed_url", feed_url},
-                    {"custom_source", true}
-                };
+                // Create metadata
+                RegulatoryChangeMetadata metadata;
+                metadata.regulatory_body = feed_config_.value("source_name", "CustomFeed");
+                metadata.document_type = change_type;
+                metadata.document_number = source_id;
+                metadata.keywords = {feed_type, "custom_feed"};
+                metadata.custom_fields["source_type"] = feed_type;
+                metadata.custom_fields["feed_url"] = feed_url;
+                metadata.custom_fields["custom_source"] = "true";
+                metadata.custom_fields["description"] = description;
+                metadata.custom_fields["severity"] = severity;
+
+                // Create regulatory change using constructor
+                RegulatoryChange change(source_id, title, content_url, metadata);
 
                 changes.push_back(change);
                 pos = end_pos + item_end_tag.length();
@@ -806,17 +831,35 @@ std::vector<RegulatoryChange> CustomFeedSource::check_for_changes() {
 
                 if (json_data.contains(items_key) && json_data[items_key].is_array()) {
                     for (const auto& item : json_data[items_key]) {
-                        RegulatoryChange change;
-                        change.source = feed_config_.value("source_name", "CustomFeed");
-                        change.detected_at = std::chrono::system_clock::now();
-                        change.title = item.value("title", "");
-                        change.description = item.value("description", "");
-                        change.content_url = item.value("url", "");
-                        change.id = get_source_id() + "_" + std::to_string(std::hash<std::string>{}(change.title + change.content_url));
-                        change.change_type = item.value("type", feed_config_.value("default_change_type", "policy"));
-                        change.severity = item.value("severity", feed_config_.value("default_severity", "MEDIUM"));
-                        change.published_at = std::chrono::system_clock::now();
-                        change.metadata = item;
+                        std::string title = item.value("title", "");
+                        std::string description = item.value("description", "");
+                        std::string content_url = item.value("url", "");
+                        std::string source_id = get_source_id() + "_" + std::to_string(std::hash<std::string>{}(title + content_url));
+                        std::string change_type = item.value("type", feed_config_.value("default_change_type", "policy"));
+                        std::string severity = item.value("severity", feed_config_.value("default_severity", "MEDIUM"));
+
+                        // Create metadata
+                        RegulatoryChangeMetadata metadata;
+                        metadata.regulatory_body = feed_config_.value("source_name", "CustomFeed");
+                        metadata.document_type = change_type;
+                        metadata.document_number = source_id;
+                        metadata.keywords = {"json", "custom_feed"};
+                        metadata.custom_fields["source_type"] = "json";
+                        metadata.custom_fields["feed_url"] = feed_url;
+                        metadata.custom_fields["description"] = description;
+                        metadata.custom_fields["severity"] = severity;
+
+                        // Add any additional fields from the item
+                        for (const auto& [key, value] : item.items()) {
+                            if (key != "title" && key != "description" && key != "url" && key != "type" && key != "severity") {
+                                if (value.is_string()) {
+                                    metadata.custom_fields[key] = value.get<std::string>();
+                                }
+                            }
+                        }
+
+                        // Create regulatory change using constructor
+                        RegulatoryChange change(source_id, title, content_url, metadata);
 
                         changes.push_back(change);
                     }
@@ -838,7 +881,7 @@ std::vector<RegulatoryChange> CustomFeedSource::check_for_changes() {
 nlohmann::json CustomFeedSource::get_configuration() const {
     auto config = feed_config_;
     config["source_id"] = get_source_id();
-    config["source_name"] = get_source_name();
+    config["source_name"] = get_name();
     config["active"] = is_active();
     return config;
 }
@@ -850,24 +893,45 @@ bool CustomFeedSource::test_connectivity() {
         }
 
         std::string feed_url = feed_config_["feed_url"];
-        std::unordered_map<std::string, std::string> headers;
-        if (feed_config_.contains("auth_token")) {
-            headers["Authorization"] = "Bearer " + feed_config_["auth_token"].get<std::string>();
-        }
 
-        auto http_response = make_http_request(feed_url, "GET", "", headers);
-        bool connected = (http_response.first == 200);
+        auto http_response = make_http_request(feed_url, "GET");
+        bool connected = (http_response.status_code == 200);
 
         if (connected) {
             logger_->info("Custom feed connectivity test: SUCCESS");
         } else {
-            logger_->warn("Custom feed connectivity test: FAILED (HTTP " + std::to_string(http_response.first) + ")");
+            logger_->warn("Custom feed connectivity test: FAILED (HTTP " + std::to_string(http_response.status_code) + ")");
         }
 
         return connected;
     } catch (const std::exception& e) {
         logger_->error("Custom feed connectivity test exception: " + std::string(e.what()));
         return false;
+    }
+}
+
+// HTTP request implementation using HttpClient
+CustomFeedSource::HttpResponse CustomFeedSource::make_http_request(const std::string& url, const std::string& method) {
+    try {
+        HttpClient http_client;
+
+        if (method == "GET") {
+            auto response = http_client.get(url);
+
+            HttpResponse result;
+            result.status_code = response.status_code;
+            result.body = response.body;
+
+            return result;
+
+        } else {
+            logger_->error("Unsupported HTTP method: {}", method);
+            return {405, "{}"};
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("HTTP request failed: {}", e.what());
+        return {500, "{}"};
     }
 }
 
@@ -883,12 +947,10 @@ bool WebScrapingSource::initialize() {
         logger_->info("Initializing web scraping source: " + target_url);
 
         // Test connectivity
-        auto http_response = make_http_request(target_url, "GET", "", {
-            {"User-Agent", "Regulens-Compliance-Monitor/1.0"}
-        });
+        auto http_response = make_http_request(target_url, "GET");
 
-        if (http_response.first != 200) {
-            logger_->error("Failed to connect to scraping target, HTTP status: " + std::to_string(http_response.first));
+        if (http_response.status_code != 200) {
+            logger_->error("Failed to connect to scraping target, HTTP status: " + std::to_string(http_response.status_code));
             return false;
         }
 
@@ -899,9 +961,9 @@ bool WebScrapingSource::initialize() {
             target_url.substr(0, domain_end) : target_url;
 
         std::string robots_url = base_url + "/robots.txt";
-        auto robots_response = make_http_request(robots_url, "GET", "", {});
+        auto robots_response = make_http_request(robots_url, "GET");
 
-        if (robots_response.first == 200) {
+        if (robots_response.status_code == 200) {
             // Production: Parse robots.txt and check if scraping is allowed
             logger_->info("robots.txt found and will be respected");
         }
@@ -924,16 +986,14 @@ std::vector<RegulatoryChange> WebScrapingSource::check_for_changes() {
 
         std::string target_url = scraping_config_["target_url"];
 
-        auto http_response = make_http_request(target_url, "GET", "", {
-            {"User-Agent", "Regulens-Compliance-Monitor/1.0"}
-        });
+        auto http_response = make_http_request(target_url, "GET");
 
-        if (http_response.first != 200) {
-            logger_->error("Failed to scrape target, HTTP status: " + std::to_string(http_response.first));
+        if (http_response.status_code != 200) {
+            logger_->error("Failed to scrape target, HTTP status: " + std::to_string(http_response.status_code));
             return changes;
         }
 
-        std::string html_content = http_response.second;
+        std::string html_content = http_response.body;
 
         // Production: Use HTML parser (libxml2, gumbo-parser, or similar)
         // For now, use basic pattern matching for common regulatory page structures
@@ -943,24 +1003,22 @@ std::vector<RegulatoryChange> WebScrapingSource::check_for_changes() {
         std::string title_selector = scraping_config_.value("title_selector", "h1");
 
         // Basic extraction (production would use proper HTML parser)
-        RegulatoryChange change;
-        change.source = scraping_config_.value("source_name", "WebScraping");
-        change.detected_at = std::chrono::system_clock::now();
-        change.content_url = target_url;
+        std::string title;
+        std::string description;
 
         // Extract title from HTML
         size_t title_start = html_content.find("<" + title_selector + ">");
         size_t title_end = html_content.find("</" + title_selector + ">");
         if (title_start != std::string::npos && title_end != std::string::npos) {
-            change.title = html_content.substr(title_start + title_selector.length() + 2,
+            title = html_content.substr(title_start + title_selector.length() + 2,
                                               title_end - title_start - title_selector.length() - 2);
 
             // Remove HTML tags from title
             size_t tag_pos = 0;
-            while ((tag_pos = change.title.find("<")) != std::string::npos) {
-                size_t tag_end = change.title.find(">", tag_pos);
+            while ((tag_pos = title.find("<")) != std::string::npos) {
+                size_t tag_end = title.find(">", tag_pos);
                 if (tag_end != std::string::npos) {
-                    change.title.erase(tag_pos, tag_end - tag_pos + 1);
+                    title.erase(tag_pos, tag_end - tag_pos + 1);
                 } else {
                     break;
                 }
@@ -974,37 +1032,45 @@ std::vector<RegulatoryChange> WebScrapingSource::check_for_changes() {
             std::string raw_content = html_content.substr(content_start, content_end - content_start);
 
             // Extract text (remove HTML tags) - production would use proper HTML-to-text converter
-            change.description = raw_content;
+            description = raw_content;
             size_t tag_pos = 0;
-            while ((tag_pos = change.description.find("<")) != std::string::npos) {
-                size_t tag_end = change.description.find(">", tag_pos);
+            while ((tag_pos = description.find("<")) != std::string::npos) {
+                size_t tag_end = description.find(">", tag_pos);
                 if (tag_end != std::string::npos) {
-                    change.description.erase(tag_pos, tag_end - tag_pos + 1);
+                    description.erase(tag_pos, tag_end - tag_pos + 1);
                 } else {
                     break;
                 }
             }
 
             // Limit description length
-            if (change.description.length() > 500) {
-                change.description = change.description.substr(0, 500) + "...";
+            if (description.length() > 500) {
+                description = description.substr(0, 500) + "...";
             }
         }
 
-        change.id = get_source_id() + "_" + std::to_string(std::hash<std::string>{}(change.title + target_url));
-        change.change_type = scraping_config_.value("default_change_type", "policy");
-        change.severity = scraping_config_.value("default_severity", "MEDIUM");
-        change.published_at = std::chrono::system_clock::now();
+        std::string source_id = get_source_id() + "_" + std::to_string(std::hash<std::string>{}(title + target_url));
+        std::string change_type = scraping_config_.value("default_change_type", "policy");
+        std::string severity = scraping_config_.value("default_severity", "MEDIUM");
 
-        change.metadata = {
-            {"source_type", "web_scraping"},
-            {"target_url", target_url},
-            {"scraping_method", "http_client"},
-            {"extracted_at", std::chrono::duration_cast<std::chrono::milliseconds>(
-                change.detected_at.time_since_epoch()).count()}
-        };
+        // Create metadata
+        RegulatoryChangeMetadata metadata;
+        metadata.regulatory_body = scraping_config_.value("source_name", "WebScraping");
+        metadata.document_type = change_type;
+        metadata.document_number = source_id;
+        metadata.keywords = {"web_scraping"};
+        metadata.custom_fields["source_type"] = "web_scraping";
+        metadata.custom_fields["target_url"] = target_url;
+        metadata.custom_fields["scraping_method"] = "http_client";
+        metadata.custom_fields["description"] = description;
+        metadata.custom_fields["severity"] = severity;
+        metadata.custom_fields["extracted_at"] = std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
 
-        if (!change.title.empty()) {
+        // Create regulatory change using constructor
+        if (!title.empty()) {
+            RegulatoryChange change(source_id, title, target_url, metadata);
             changes.push_back(change);
         }
 
@@ -1020,7 +1086,7 @@ std::vector<RegulatoryChange> WebScrapingSource::check_for_changes() {
 nlohmann::json WebScrapingSource::get_configuration() const {
     auto config = scraping_config_;
     config["source_id"] = get_source_id();
-    config["source_name"] = get_source_name();
+    config["source_name"] = get_name();
     config["active"] = is_active();
     return config;
 }
@@ -1033,22 +1099,45 @@ bool WebScrapingSource::test_connectivity() {
 
         std::string target_url = scraping_config_["target_url"];
 
-        auto http_response = make_http_request(target_url, "GET", "", {
-            {"User-Agent", "Regulens-Compliance-Monitor/1.0"}
-        });
+        auto http_response = make_http_request(target_url, "GET");
 
-        bool connected = (http_response.first == 200);
+        bool connected = (http_response.status_code == 200);
 
         if (connected) {
             logger_->info("Web scraping connectivity test: SUCCESS");
         } else {
-            logger_->warn("Web scraping connectivity test: FAILED (HTTP " + std::to_string(http_response.first) + ")");
+            logger_->warn("Web scraping connectivity test: FAILED (HTTP " + std::to_string(http_response.status_code) + ")");
         }
 
         return connected;
     } catch (const std::exception& e) {
         logger_->error("Web scraping connectivity test exception: " + std::string(e.what()));
         return false;
+    }
+}
+
+// HTTP request implementation using HttpClient
+WebScrapingSource::HttpResponse WebScrapingSource::make_http_request(const std::string& url, const std::string& method) {
+    try {
+        HttpClient http_client;
+
+        if (method == "GET") {
+            auto response = http_client.get(url);
+
+            HttpResponse result;
+            result.status_code = response.status_code;
+            result.body = response.body;
+
+            return result;
+
+        } else {
+            logger_->error("Unsupported HTTP method: {}", method);
+            return {405, "{}"};
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("HTTP request failed: {}", e.what());
+        return {500, "{}"};
     }
 }
 

@@ -172,6 +172,13 @@ private:
     // Caching for performance
     nlohmann::json get_cached_enrichment(const std::string& cache_key);
     void set_cached_enrichment(const std::string& cache_key, const nlohmann::json& data);
+
+    // Helper methods
+    std::string generate_batch_id();
+    bool is_encrypted_field(const nlohmann::json& value);
+    bool is_base64_encoded(const std::string& str);
+    bool has_personal_data(const nlohmann::json& data);
+    bool validate_field_type(const nlohmann::json& value, const std::string& expected_type);
     void cleanup_expired_cache();
 
     // Internal state

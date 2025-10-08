@@ -271,7 +271,7 @@ bool DatabaseSource::test_database_connection() {
 }
 
 void DatabaseSource::configure_connection_pool() {
-    if (!external_db_pool_) {
+    if (!external_external_db_pool_) {
         DatabaseConfig pool_config;
         pool_config.host = db_config_.connection.host;
         pool_config.port = db_config_.connection.port;
@@ -280,7 +280,7 @@ void DatabaseSource::configure_connection_pool() {
         pool_config.password = db_config_.connection.password;
         pool_config.max_connections = db_config_.connection.max_connections;
 
-        external_db_pool_ = std::make_shared<ConnectionPool>(pool_config);
+        external_external_db_pool_ = std::make_shared<ConnectionPool>(pool_config);
 
         logger_->log(LogLevel::INFO, "Database connection pool configured with " +
                     std::to_string(db_config_.connection.max_connections) + " connections");
@@ -288,15 +288,15 @@ void DatabaseSource::configure_connection_pool() {
 }
 
 std::shared_ptr<PostgreSQLConnection> DatabaseSource::get_connection() {
-    if (!external_db_pool_) {
+    if (!external_external_db_pool_) {
         configure_connection_pool();
     }
 
-    if (!external_db_pool_) {
+    if (!external_external_db_pool_) {
         throw std::runtime_error("Connection pool not initialized");
     }
 
-    return external_db_pool_->get_connection();
+    return external_external_db_pool_->get_connection();
 }
 
 std::vector<nlohmann::json> DatabaseSource::execute_select_query(const DatabaseQuery& query) {
@@ -396,17 +396,14 @@ std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::s
 
         for (const auto& row : result.rows) {
             nlohmann::json json_row;
-            for (const auto& [column_name, column_value] : row) {
-                json_row[column_name] = column_value;
+            for (const auto& field : row) {
+                json_row[field.name()] = field.c_str();
             }
             changes.push_back(json_row);
         }
 
         if (!changes.empty()) {
-            // Store the timestamp as a string for persistence
-            last_incremental_values_[table_name] = std::to_string(
-                std::chrono::system_clock::now().time_since_epoch().count()
-            );
+            last_incremental_values_[table_name] = std::chrono::system_clock::now();
         }
 
     } catch (const std::exception& e) {
@@ -863,7 +860,7 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
     }
 
     try {
-        auto conn = external_db_pool_->get_connection();
+        auto conn = external_db_pool_->acquire_connection();
         if (!conn) {
             logger_->log(LogLevel::ERROR, "Failed to acquire database connection");
             return slow_queries;
@@ -909,7 +906,7 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
         }
 
         // Also check for currently running long queries
-        auto long_running = conn->execute_query(R"(
+        auto long_running = txn.exec(R"(
             SELECT pid,
                    now() - query_start AS duration,
                    query,
@@ -921,18 +918,11 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
             ORDER BY duration DESC
         )");
 
-        for (const auto& row : long_running.rows) {
-            auto pid_it = row.find("pid");
-            auto duration_it = row.find("duration");
-            auto query_it = row.find("query");
-            auto state_it = row.find("state");
-
-            if (pid_it == row.end() || query_it == row.end()) continue;
-
-            int pid = pid_it != row.end() ? std::stoi(pid_it->second) : 0;
-            std::string duration = duration_it != row.end() ? duration_it->second : "unknown";
-            std::string query = query_it->second;
-            std::string state = state_it != row.end() ? state_it->second : "unknown";
+        for (const auto& row : long_running) {
+            int pid = row["pid"].as<int>();
+            std::string duration = row["duration"].c_str();
+            std::string query = row["query"].c_str();
+            std::string state = row["state"].c_str();
 
             std::string running_query_info = "Long-running (PID: " + std::to_string(pid) +
                                             "): " + query.substr(0, 100) +
@@ -946,7 +936,7 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
         }
 
         // Check for queries with high I/O
-        auto io_intensive = conn->execute_query(R"(
+        auto io_intensive = txn.exec(R"(
             SELECT query,
                    calls,
                    shared_blks_read + shared_blks_written AS total_io,
@@ -957,18 +947,11 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
             LIMIT 20
         )");
 
-        for (const auto& row : io_intensive.rows) {
-            auto query_it = row.find("query");
-            auto total_io_it = row.find("total_io");
-            auto io_per_call_it = row.find("io_per_call");
-            auto calls_it = row.find("calls");
-
-            if (query_it == row.end()) continue;
-
-            std::string query = query_it->second;
-            int64_t total_io = total_io_it != row.end() ? std::stoll(total_io_it->second) : 0;
-            int64_t io_per_call = io_per_call_it != row.end() ? std::stoll(io_per_call_it->second) : 0;
-            int64_t calls = calls_it != row.end() ? std::stoll(calls_it->second) : 0;
+        for (const auto& row : io_intensive) {
+            std::string query = row["query"].c_str();
+            int64_t total_io = row["total_io"].as<int64_t>();
+            int64_t io_per_call = row["io_per_call"].as<int64_t>();
+            int64_t calls = row["calls"].as<int64_t>();
 
             std::string io_query_info = "High I/O query: " + query.substr(0, 100) +
                                        (query.length() > 100 ? "..." : "") +
@@ -982,7 +965,7 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
         }
 
         // Check for queries that might benefit from indexes
-        auto missing_indexes = conn->execute_query(R"(
+        auto missing_indexes = txn.exec(R"(
             SELECT schemaname,
                    tablename,
                    seq_scan,
@@ -996,18 +979,12 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
             LIMIT 10
         )");
 
-        for (const auto& row : missing_indexes.rows) {
-            auto schema_it = row.find("schemaname");
-            auto table_it = row.find("tablename");
-            auto seq_scan_it = row.find("seq_scan");
-            auto avg_seq_tup_it = row.find("avg_seq_tup");
-
-            if (schema_it == row.end() || table_it == row.end()) continue;
-
-            std::string schema = schema_it->second;
-            std::string table = table_it->second;
-            int64_t seq_scan = seq_scan_it != row.end() ? std::stoll(seq_scan_it->second) : 0;
-            int64_t avg_seq_tup = avg_seq_tup_it != row.end() ? std::stoll(avg_seq_tup_it->second) : 0;
+        for (const auto& row : missing_indexes) {
+            std::string schema = row["schemaname"].c_str();
+            std::string table = row["tablename"].c_str();
+            int64_t seq_scan = row["seq_scan"].as<int64_t>();
+            int64_t seq_tup_read = row["seq_tup_read"].as<int64_t>();
+            int64_t avg_seq_tup = row["avg_seq_tup"].as<int64_t>();
 
             std::string index_recommendation = "Table " + schema + "." + table +
                                               " may need index | Sequential scans: " +
@@ -1021,7 +998,7 @@ std::vector<std::string> DatabaseSource::identify_slow_queries() {
         }
 
         
-        external_db_pool_->return_connection(std::move(conn));
+        external_db_pool_->release_connection(std::move(conn));
 
         logger_->log(LogLevel::INFO, "Identified " + std::to_string(slow_queries.size()) +
                     " slow or problematic queries");

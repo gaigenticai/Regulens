@@ -41,7 +41,7 @@ bool PostgreSQLStorageAdapter::store_batch(const IngestionBatch& batch) {
             std::to_string(batch.records_processed),
             std::to_string(batch.records_succeeded),
             std::to_string(batch.records_failed),
-            std::to_string(static_cast<int>(batch.status)),
+            batch.status,
             batch.metadata.dump()
         };
         conn->execute_query(
@@ -59,17 +59,6 @@ bool PostgreSQLStorageAdapter::store_batch(const IngestionBatch& batch) {
 
         // Insert individual records if available
         for (const auto& record : batch.data_records) {
-            std::vector<std::string> record_params = {
-                record.record_id,
-                record.source_id,
-                std::to_string(static_cast<int>(record.quality)),
-                record.data.dump(),
-                std::to_string(std::chrono::system_clock::to_time_t(record.ingested_at)),
-                std::to_string(std::chrono::system_clock::to_time_t(record.last_updated)),
-                record.pipeline_id,
-                record.metadata.dump(),
-                nlohmann::json(record.tags).dump()
-            };
             conn->execute_query(
                 "INSERT INTO data_records (record_id, source_id, quality_score, data_content, "
                 "ingested_at, last_updated, pipeline_id, metadata, tags) "
@@ -80,7 +69,15 @@ bool PostgreSQLStorageAdapter::store_batch(const IngestionBatch& batch) {
                 "last_updated = EXCLUDED.last_updated, "
                 "metadata = EXCLUDED.metadata, "
                 "tags = EXCLUDED.tags",
-                record_params
+                record.record_id,
+                record.source_id,
+                static_cast<int>(record.quality),
+                record.data.dump(),
+                std::chrono::system_clock::to_time_t(record.ingested_at),
+                std::chrono::system_clock::to_time_t(record.last_updated),
+                record.pipeline_id,
+                record.metadata.dump(),
+                nlohmann::json(record.tags)
             );
         }
 
@@ -98,7 +95,12 @@ bool PostgreSQLStorageAdapter::store_batch(const IngestionBatch& batch) {
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR,
                     "PostgreSQL error storing batch " + batch.batch_id + ": " +
-                    std::string(e.what()));
+                    std::string(e.what()) + ")");
+        ++failed_operations_;
+        return false;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception storing batch " + batch.batch_id + ": " + std::string(e.what()));
         ++failed_operations_;
         return false;
     }
@@ -125,29 +127,26 @@ std::vector<DataRecord> PostgreSQLStorageAdapter::retrieve_records(
 
         // Using PostgreSQLConnection directly
 
-        std::vector<std::string> query_params = {
-            source_id,
-            std::to_string(std::chrono::system_clock::to_time_t(start_time)),
-            std::to_string(std::chrono::system_clock::to_time_t(end_time))
-        };
         auto result = conn->execute_query(
             "SELECT record_id, source_id, quality_score, data_content, ingested_at, "
             "last_updated, pipeline_id, metadata, tags "
             "FROM data_records "
             "WHERE source_id = $1 AND ingested_at BETWEEN $2 AND $3 "
             "ORDER BY ingested_at DESC",
-            query_params
+            source_id,
+            std::chrono::system_clock::to_time_t(start_time),
+            std::chrono::system_clock::to_time_t(end_time)
         );
 
-        for (const auto& row : result.rows) {
+        for (const auto& row : result) {
             DataRecord record;
-            record.record_id = row.at("record_id");
-            record.source_id = row.at("source_id");
-            record.quality = static_cast<DataQuality>(std::stoi(row.at("quality_score")));
+            record.record_id = row["record_id"].c_str();
+            record.source_id = row["source_id"].c_str();
+            record.quality = static_cast<DataQuality>(row["quality_score"].as<int>());
 
             // Parse JSONB data
             try {
-                record.data = nlohmann::json::parse(row.at("data_content"));
+                record.data = nlohmann::json::parse(row["data_content"].c_str());
             } catch (const nlohmann::json::exception& e) {
                 logger_->log(LogLevel::WARN,
                             "Failed to parse data_content for record " + record.record_id +
@@ -155,19 +154,19 @@ std::vector<DataRecord> PostgreSQLStorageAdapter::retrieve_records(
                 record.data = nlohmann::json::object();
             }
 
-            record.ingested_at = std::chrono::system_clock::from_time_t(std::stoll(row.at("ingested_at")));
-            record.last_updated = std::chrono::system_clock::from_time_t(std::stoll(row.at("last_updated")));
-            record.pipeline_id = row.at("pipeline_id");
+            record.ingested_at = std::chrono::system_clock::from_time_t(row["ingested_at"].as<time_t>());
+            record.last_updated = std::chrono::system_clock::from_time_t(row["last_updated"].as<time_t>());
+            record.pipeline_id = row["pipeline_id"].c_str();
 
             // Parse metadata
             try {
-                record.metadata = nlohmann::json::parse(row.at("metadata"));
+                record.metadata = nlohmann::json::parse(row["metadata"].c_str());
             } catch (const nlohmann::json::exception&) {
                 record.metadata = nlohmann::json::object();
             }
 
             // Parse tags (PostgreSQL array to vector)
-            std::string tags_str = row.at("tags");
+            std::string tags_str = row["tags"].c_str();
             // Parse PostgreSQL array format: {tag1,tag2,tag3}
             if (!tags_str.empty() && tags_str.front() == '{' && tags_str.back() == '}') {
                 std::string tags_content = tags_str.substr(1, tags_str.length() - 2);
@@ -194,7 +193,11 @@ std::vector<DataRecord> PostgreSQLStorageAdapter::retrieve_records(
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR,
-                    "PostgreSQL error retrieving records: " + std::string(e.what()));
+                    "PostgreSQL error retrieving records: " + std::string(e.what()) +
+                    " (query: " + std::string(e.query()) + ")");
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception retrieving records: " + std::string(e.what()));
     }
 
     return records;
@@ -215,28 +218,35 @@ bool PostgreSQLStorageAdapter::update_record_quality(const std::string& record_i
 
         // Using PostgreSQLConnection directly
 
-        std::vector<std::string> update_params = {
-            std::to_string(static_cast<int>(quality)),
-            std::to_string(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())),
-            record_id
-        };
         auto result = conn->execute_query(
             "UPDATE data_records SET quality_score = $1, last_updated = $2 WHERE record_id = $3",
-            update_params
+            static_cast<int>(quality),
+            std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()),
+            record_id
         );
 
         // Transaction auto-committed
         db_pool_->return_connection(std::move(conn));
 
-        // Assume success if no exception thrown
-        logger_->log(LogLevel::DEBUG,
-                    "Updated quality for record " + record_id + " to " +
-                    std::to_string(static_cast<int>(quality)));
-        return true;
+        if (result.affected_rows() > 0) {
+            logger_->log(LogLevel::DEBUG,
+                        "Updated quality for record " + record_id + " to " +
+                        std::to_string(static_cast<int>(quality)));
+            return true;
+        } else {
+            logger_->log(LogLevel::WARN,
+                        "No record found with ID " + record_id);
+            return false;
+        }
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR,
-                    "PostgreSQL error updating record quality: " + std::string(e.what()));
+                    "PostgreSQL error updating record quality: " + std::string(e.what()) +
+                    " (query: " + std::string(e.query()) + ")");
+        return false;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception updating record quality: " + std::string(e.what()));
         return false;
     }
 }
@@ -322,7 +332,11 @@ bool PostgreSQLStorageAdapter::create_table_if_not_exists(const std::string& tab
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR,
                     "PostgreSQL error creating table " + table_name + ": " +
-                    std::string(e.what()));
+                    std::string(e.what()) + ")");
+        return false;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR,
+                    "Exception creating table " + table_name + ": " + std::string(e.what()));
         return false;
     }
 }

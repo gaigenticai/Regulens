@@ -24,10 +24,6 @@ target_include_directories(metrics
 # Link dependencies
 target_link_libraries(metrics
     PUBLIC
-        config
-        logging
-        error_handler
-        resilience
         CURL::libcurl
 )
 

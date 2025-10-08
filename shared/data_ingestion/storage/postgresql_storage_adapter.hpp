@@ -76,6 +76,7 @@ struct StorageOperation {
     int records_processed = 0;
     int records_succeeded = 0;
     int records_failed = 0;
+    IngestionStatus status = IngestionStatus::PENDING;
     std::vector<std::string> errors;
     nlohmann::json metadata;
 };

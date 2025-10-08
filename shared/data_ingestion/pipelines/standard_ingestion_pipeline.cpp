@@ -699,8 +699,8 @@ bool StandardIngestionPipeline::should_skip_stage(PipelineStage stage, const nlo
             break;
         }
 
-        case PipelineStage::STORAGE: {
-            // Never skip storage stage - this is critical
+        case PipelineStage::STORAGE_PREPARATION: {
+            // Never skip storage preparation stage - this is critical
             return false;
         }
 

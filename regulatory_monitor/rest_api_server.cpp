@@ -18,13 +18,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <csignal>
+#include <unordered_set>
+#include <iomanip>
+#include <fstream>
 
 // Production HMAC signature support
 #ifdef __APPLE__
 #include <CommonCrypto/CommonHMAC.h>
+#include <CommonCrypto/CommonDigest.h>
+#include <CommonCrypto/CommonKeyDerivation.h>
 #else
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/sha.h>
 #endif
 
 namespace regulens {
@@ -767,7 +773,7 @@ bool RESTAPIServer::validate_api_key(const std::string& api_key) {
     }
 
     try {
-        auto connection = db_pool_->acquire_connection();
+        auto connection = db_pool_->get_connection();
         if (!connection) {
             logger_->error("No database connection for API key validation");
             return false;
@@ -783,26 +789,30 @@ bool RESTAPIServer::validate_api_key(const std::string& api_key) {
         auto result = connection->execute_query(query, {api_key_hash});
 
         if (result.rows.empty()) {
+            db_pool_->return_connection(connection);
             return false; // API key not found
         }
 
         const auto& row = result.rows[0];
 
         // Check if key is active
-        if (row["is_active"] != "true" && row["is_active"] != "1") {
+        if (row.at("is_active") != "true" && row.at("is_active") != "1") {
+            db_pool_->return_connection(connection);
             return false;
         }
 
         // Check expiration
-        if (!row["expires_at"].empty()) {
-            long long expires_at = std::stoll(row["expires_at"]);
+        if (!row.at("expires_at").empty()) {
+            long long expires_at = std::stoll(row.at("expires_at"));
             auto exp_time = std::chrono::system_clock::time_point(std::chrono::seconds(expires_at));
 
             if (std::chrono::system_clock::now() > exp_time) {
+                db_pool_->return_connection(connection);
                 return false; // Key expired
             }
         }
 
+        db_pool_->return_connection(connection);
         return true;
 
     } catch (const std::exception& e) {
@@ -929,47 +939,51 @@ bool RESTAPIServer::validate_refresh_token(const std::string& token) {
         return false; // Token too short - likely invalid
     }
 
-    // Query database for token validity
-    if (db_connection_) {
-        try {
-            auto query = "SELECT user_id, expires_at, revoked FROM refresh_tokens "
-                        "WHERE token_hash = $1";
-
-            // Hash the token for secure lookup
-            std::string token_hash = compute_sha256_hash(token);
-
-            auto result = db_connection_->execute_query(query, {token_hash});
-
-            if (result.rows.empty()) {
-                return false; // Token not found
-            }
-
-            const auto& row = result.rows[0];
-
-            // Check if token is revoked
-            if (row["revoked"] == "true" || row["revoked"] == "1") {
-                return false;
-            }
-
-            // Check expiration
-            long long expires_at = std::stoll(row["expires_at"]);
-            auto exp_time = std::chrono::system_clock::time_point(std::chrono::seconds(expires_at));
-
-            if (std::chrono::system_clock::now() > exp_time) {
-                return false; // Token expired
-            }
-
-            return true;
-
-        } catch (const std::exception& e) {
-            logger_->error("Failed to validate refresh token: {}", e.what());
+    try {
+        // Get connection from pool
+        auto connection = db_pool_->get_connection();
+        if (!connection) {
+            logger_->error("Cannot validate refresh token: database unavailable");
             return false;
         }
-    }
 
-    // If no database connection, reject the token for security
-    logger_->error("Cannot validate refresh token: database unavailable");
-    return false;
+        auto query = "SELECT user_id, expires_at, revoked FROM refresh_tokens "
+                    "WHERE token_hash = $1";
+
+        // Hash the token for secure lookup
+        std::string token_hash = compute_sha256_hash(token);
+
+        auto result = connection->execute_query(query, {token_hash});
+
+        if (result.rows.empty()) {
+            db_pool_->return_connection(connection);
+            return false; // Token not found
+        }
+
+        const auto& row = result.rows[0];
+
+        // Check if token is revoked
+        if (row.at("revoked") == "true" || row.at("revoked") == "1") {
+            db_pool_->return_connection(connection);
+            return false;
+        }
+
+        // Check expiration
+        long long expires_at = std::stoll(row.at("expires_at"));
+        auto exp_time = std::chrono::system_clock::time_point(std::chrono::seconds(expires_at));
+
+        if (std::chrono::system_clock::now() > exp_time) {
+            db_pool_->return_connection(connection);
+            return false; // Token expired
+        }
+
+        db_pool_->return_connection(connection);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to validate refresh token: {}", e.what());
+        return false;
+    }
 }
 
 std::string RESTAPIServer::generate_hmac_signature(const std::string& message) {
@@ -999,18 +1013,20 @@ std::string RESTAPIServer::generate_hmac_signature(const std::string& message) {
     }
     
     // Create HMAC-SHA256 using OpenSSL
-    unsigned char digest[EVP_MAX_MD_SIZE];
-    unsigned int digest_len = 0;
-    
     #ifdef __APPLE__
-    // macOS OpenSSL implementation
-    CCHmac(kCCHmacAlgSHA256, 
+    // macOS implementation using CommonCrypto
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    unsigned int digest_len = CC_SHA256_DIGEST_LENGTH;
+
+    CCHmac(kCCHmacAlgSHA256,
            jwt_secret.c_str(), jwt_secret.length(),
            message.c_str(), message.length(),
            digest);
-    digest_len = CC_SHA256_DIGEST_LENGTH;
     #else
     // Linux OpenSSL implementation
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len = 0;
+
     HMAC(EVP_sha256(),
          jwt_secret.c_str(), jwt_secret.length(),
          reinterpret_cast<const unsigned char*>(message.c_str()), message.length(),
@@ -1089,7 +1105,7 @@ std::string RESTAPIServer::compute_sha256_hash(const std::string& input) {
 
 bool RESTAPIServer::authenticate_user(const std::string& username, const std::string& password) {
     try {
-        auto connection = db_pool_->acquire_connection();
+        auto connection = db_pool_->get_connection();
         if (!connection) {
             logger_->error("No database connection for authentication");
             return false;
@@ -1099,41 +1115,96 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
         auto query = "SELECT password_hash, is_active, failed_login_attempts "
                     "FROM users WHERE username = $1";
 
-        auto result = connection->execute_query(query, {username});
+        auto query_result = connection->execute_query(query, {username});
 
-        if (result.rows.empty()) {
+        if (query_result.rows.empty()) {
             // User not found - use constant time to prevent user enumeration
             std::string dummy_hash = "$2b$12$dummyhashtopreventtimingattacks";
             compute_sha256_hash(password); // Dummy operation for constant time
+            db_pool_->return_connection(connection);
             return false;
         }
 
-        const auto& row = result.rows[0];
+        const auto& row = query_result.rows[0];
 
         // Check if account is active
-        if (row["is_active"] != "true" && row["is_active"] != "1") {
+        if (row.at("is_active") != "true" && row.at("is_active") != "1") {
             logger_->warn("Login attempt for inactive account: {}", username);
+            db_pool_->return_connection(connection);
             return false;
         }
 
         // Check failed login attempts for account lockout
-        int failed_attempts = std::stoi(row["failed_login_attempts"]);
+        int failed_attempts = std::stoi(row.at("failed_login_attempts"));
         if (failed_attempts >= 5) {
             logger_->warn("Account locked due to failed login attempts: {}", username);
+            db_pool_->return_connection(connection);
             return false;
         }
 
-        // Verify password using bcrypt or similar
-        std::string stored_hash = row["password_hash"];
-        std::string password_hash = compute_password_hash(password);
+        // Verify password using PBKDF2
+        std::string stored_hash = row.at("password_hash");
 
-        if (password_hash == stored_hash) {
+        // Parse stored hash format: "pbkdf2_sha256$iterations$salt$hash"
+        std::vector<std::string> hash_parts;
+        std::stringstream hash_ss(stored_hash);
+        std::string hash_part;
+        while (std::getline(hash_ss, hash_part, '$')) {
+            hash_parts.push_back(hash_part);
+        }
+
+        bool password_valid = false;
+        if (hash_parts.size() == 4 && hash_parts[0] == "pbkdf2_sha256") {
+            try {
+                int iterations = std::stoi(hash_parts[1]);
+                std::string salt_b64 = hash_parts[2];
+                std::string expected_hash_b64 = hash_parts[3];
+
+                // Decode salt
+                std::string salt = base64_decode(salt_b64);
+
+                // Derive key with same parameters
+                constexpr int key_length = 32;
+                unsigned char derived_key[key_length];
+
+                #ifdef __APPLE__
+                CCKeyDerivationPBKDF(kCCPBKDF2,
+                                    password.c_str(), password.length(),
+                                    reinterpret_cast<const uint8_t*>(salt.c_str()), salt.length(),
+                                    kCCPRFHmacAlgSHA256,
+                                    static_cast<unsigned int>(iterations),
+                                    derived_key, key_length);
+                #else
+                PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
+                                 reinterpret_cast<const unsigned char*>(salt.c_str()), salt.length(),
+                                 iterations,
+                                 EVP_sha256(),
+                                 key_length, derived_key);
+                #endif
+
+                std::string computed_hash_b64 = base64_encode(std::string(reinterpret_cast<char*>(derived_key), key_length));
+
+                // Constant-time comparison to prevent timing attacks
+                if (computed_hash_b64.length() == expected_hash_b64.length()) {
+                    unsigned char cmp_result = 0;
+                    for (size_t i = 0; i < computed_hash_b64.length(); ++i) {
+                        cmp_result |= computed_hash_b64[i] ^ expected_hash_b64[i];
+                    }
+                    password_valid = (cmp_result == 0);
+                }
+            } catch (...) {
+                password_valid = false;
+            }
+        }
+
+        if (password_valid) {
             // Reset failed login counter on successful authentication
             auto update_query = "UPDATE users SET failed_login_attempts = 0, "
                                "last_login = NOW() WHERE username = $1";
             connection->execute_query(update_query, {username});
 
             logger_->info("Successful authentication for user: {}", username);
+            db_pool_->return_connection(connection);
             return true;
         } else {
             // Increment failed login counter
@@ -1142,6 +1213,7 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
             connection->execute_query(update_query, {username});
 
             logger_->warn("Failed authentication attempt for user: {}", username);
+            db_pool_->return_connection(connection);
             return false;
         }
 
@@ -1198,73 +1270,6 @@ std::string RESTAPIServer::compute_password_hash(const std::string& password) {
     std::string hash_b64 = base64_encode(std::string(reinterpret_cast<char*>(derived_key), key_length));
 
     return "pbkdf2_sha256$" + std::to_string(iterations) + "$" + salt_b64 + "$" + hash_b64;
-}
-
-bool RESTAPIServer::verify_password_hash(const std::string& password, const std::string& stored_hash) {
-    // Parse stored hash format: "pbkdf2_sha256$iterations$salt$hash"
-    std::vector<std::string> parts;
-    std::stringstream ss(stored_hash);
-    std::string part;
-
-    while (std::getline(ss, part, '$')) {
-        parts.push_back(part);
-    }
-
-    if (parts.size() != 4 || parts[0] != "pbkdf2_sha256") {
-        logger_->error("Invalid password hash format");
-        return false;
-    }
-
-    try {
-        int iterations = std::stoi(parts[1]);
-        std::string salt_b64 = parts[2];
-        std::string expected_hash_b64 = parts[3];
-
-        // Decode salt
-        std::string salt = base64_decode(salt_b64);
-
-        // Derive key with same parameters
-        constexpr int key_length = 32;
-        unsigned char derived_key[key_length];
-
-        #ifdef __APPLE__
-        CCKeyDerivationPBKDF(kCCPBKDF2,
-                            password.c_str(), password.length(),
-                            reinterpret_cast<const uint8_t*>(salt.c_str()), salt.length(),
-                            kCCPRFHmacAlgSHA256,
-                            iterations,
-                            derived_key, key_length);
-        #else
-        PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
-                         reinterpret_cast<const unsigned char*>(salt.c_str()), salt.length(),
-                         iterations,
-                         EVP_sha256(),
-                         key_length, derived_key);
-        #endif
-
-        std::string computed_hash_b64 = base64_encode(std::string(reinterpret_cast<char*>(derived_key), key_length));
-
-        // Constant-time comparison to prevent timing attacks
-        return constant_time_compare(computed_hash_b64, expected_hash_b64);
-
-    } catch (const std::exception& e) {
-        logger_->error("Password verification error: {}", e.what());
-        return false;
-    }
-}
-
-bool RESTAPIServer::constant_time_compare(const std::string& a, const std::string& b) {
-    // Constant-time string comparison to prevent timing attacks
-    if (a.length() != b.length()) {
-        return false;
-    }
-
-    unsigned char result = 0;
-    for (size_t i = 0; i < a.length(); ++i) {
-        result |= a[i] ^ b[i];
-    }
-
-    return result == 0;
 }
 
 } // namespace regulens

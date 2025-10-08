@@ -1,61 +1,79 @@
 #include "metrics_collector.hpp"
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
+#include <cmath>
 
 namespace regulens {
 
 MetricsCollector::MetricsCollector()
-    : running_(false), collection_interval_(std::chrono::seconds(30)),
-      collection_cycles_(0), last_collection_time_(std::chrono::system_clock::now()) {}
+    : running_(false),
+      collection_interval_(std::chrono::milliseconds(1000)),
+      collection_cycles_(0),
+      last_collection_time_(std::chrono::system_clock::now()) {
+}
 
 MetricsCollector::~MetricsCollector() {
     stop_collection();
 }
 
 bool MetricsCollector::start_collection() {
-    if (running_) {
-        return true;
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true)) {
+        // Already running
+        return false;
     }
 
-    running_ = true;
-    collection_thread_ = std::thread(&MetricsCollector::collection_thread, this);
-
-    return true;
+    try {
+        collection_thread_ = std::thread(&MetricsCollector::collection_thread, this);
+        return true;
+    } catch (const std::exception&) {
+        running_ = false;
+        return false;
+    }
 }
 
 void MetricsCollector::stop_collection() {
-    if (!running_) {
-        return;
-    }
-
-    running_ = false;
-    if (collection_thread_.joinable()) {
-        collection_thread_.join();
+    bool expected = true;
+    if (running_.compare_exchange_strong(expected, false)) {
+        if (collection_thread_.joinable()) {
+            collection_thread_.join();
+        }
     }
 }
 
 bool MetricsCollector::register_gauge(const std::string& name, std::function<double()> getter) {
-    std::lock_guard<std::mutex> lock(metrics_mutex_);
-
-    if (gauges_.find(name) != gauges_.end() ||
-        counters_.find(name) != counters_.end() ||
-        histograms_.find(name) != histograms_.end()) {
-        return false; // Metric already exists
+    if (name.empty()) {
+        return false;
     }
 
+    std::lock_guard<std::mutex> lock(metrics_mutex_);
+
+    // Check if metric already exists
+    if (gauge_getters_.find(name) != gauge_getters_.end() ||
+        counters_.find(name) != counters_.end() ||
+        histograms_.find(name) != histograms_.end()) {
+        return false;
+    }
+
+    gauge_getters_[name] = getter;
     gauges_[name] = 0.0;
-    gauge_getters_[name] = std::move(getter);
 
     return true;
 }
 
 bool MetricsCollector::register_counter(const std::string& name) {
+    if (name.empty()) {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
+    // Check if metric already exists
     if (gauges_.find(name) != gauges_.end() ||
         counters_.find(name) != counters_.end() ||
         histograms_.find(name) != histograms_.end()) {
-        return false; // Metric already exists
+        return false;
     }
 
     counters_[name] = 0.0;
@@ -64,12 +82,24 @@ bool MetricsCollector::register_counter(const std::string& name) {
 }
 
 bool MetricsCollector::register_histogram(const std::string& name, const std::vector<double>& bucket_bounds) {
+    if (name.empty() || bucket_bounds.empty()) {
+        return false;
+    }
+
+    // Validate bucket bounds are sorted
+    for (size_t i = 1; i < bucket_bounds.size(); ++i) {
+        if (bucket_bounds[i] <= bucket_bounds[i-1]) {
+            return false;
+        }
+    }
+
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
+    // Check if metric already exists
     if (gauges_.find(name) != gauges_.end() ||
         counters_.find(name) != counters_.end() ||
         histograms_.find(name) != histograms_.end()) {
-        return false; // Metric already exists
+        return false;
     }
 
     histograms_[name] = std::make_unique<HistogramData>(bucket_bounds);
@@ -87,11 +117,17 @@ void MetricsCollector::set_gauge(const std::string& name, double value) {
 }
 
 void MetricsCollector::increment_counter(const std::string& name, double value) {
+    if (value < 0) {
+        return; // Counters can only increase
+    }
+
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
     auto it = counters_.find(name);
     if (it != counters_.end()) {
-        it->second += value;
+        double current = it->second.load();
+        double new_value = current + value;
+        it->second.store(new_value);
     }
 }
 
@@ -125,47 +161,104 @@ double MetricsCollector::get_value(const std::string& name) const {
 nlohmann::json MetricsCollector::get_all_metrics() const {
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
-    nlohmann::json metrics;
+    nlohmann::json result = nlohmann::json::object();
 
     // Add gauges
     for (const auto& [name, value] : gauges_) {
-        metrics[name] = value.load();
+        result[name] = {
+            {"type", "gauge"},
+            {"value", value.load()},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
     }
 
     // Add counters
     for (const auto& [name, value] : counters_) {
-        metrics[name] = value.load();
+        result[name] = {
+            {"type", "counter"},
+            {"value", value.load()},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
     }
 
     // Add histograms
-    for (const auto& [name, hist] : histograms_) {
-        nlohmann::json hist_json;
-        hist_json["sample_count"] = hist->sample_count.load();
-        hist_json["sum"] = hist->sum.load();
-
-        nlohmann::json buckets_json;
-        for (const auto& bucket : hist->buckets) {
-            buckets_json[std::to_string(bucket.upper_bound)] = bucket.count.load();
+    for (const auto& [name, histogram] : histograms_) {
+        nlohmann::json buckets = nlohmann::json::array();
+        for (const auto& bucket : histogram->buckets) {
+            buckets.push_back({
+                {"upper_bound", bucket.upper_bound},
+                {"count", bucket.count.load()}
+            });
         }
-        hist_json["buckets"] = buckets_json;
 
-        metrics[name] = hist_json;
+        result[name] = {
+            {"type", "histogram"},
+            {"sample_count", histogram->sample_count.load()},
+            {"sum", histogram->sum.load()},
+            {"buckets", buckets},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
     }
 
-    return metrics;
+    return result;
 }
 
 nlohmann::json MetricsCollector::get_component_metrics(const std::string& component_name) const {
-    auto all_metrics = get_all_metrics();
-    nlohmann::json component_metrics;
+    std::lock_guard<std::mutex> lock(metrics_mutex_);
 
-    for (const auto& [name, value] : all_metrics.items()) {
-        if (name.find(component_name) == 0) {
-            component_metrics[name] = value;
+    nlohmann::json result = nlohmann::json::object();
+    std::string prefix = component_name + "_";
+
+    // Filter gauges
+    for (const auto& [name, value] : gauges_) {
+        if (name.find(prefix) == 0 || extract_component(name) == component_name) {
+            result[name] = {
+                {"type", "gauge"},
+                {"value", value.load()},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()}
+            };
         }
     }
 
-    return component_metrics;
+    // Filter counters
+    for (const auto& [name, value] : counters_) {
+        if (name.find(prefix) == 0 || extract_component(name) == component_name) {
+            result[name] = {
+                {"type", "counter"},
+                {"value", value.load()},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()}
+            };
+        }
+    }
+
+    // Filter histograms
+    for (const auto& [name, histogram] : histograms_) {
+        if (name.find(prefix) == 0 || extract_component(name) == component_name) {
+            nlohmann::json buckets = nlohmann::json::array();
+            for (const auto& bucket : histogram->buckets) {
+                buckets.push_back({
+                    {"upper_bound", bucket.upper_bound},
+                    {"count", bucket.count.load()}
+                });
+            }
+
+            result[name] = {
+                {"type", "histogram"},
+                {"sample_count", histogram->sample_count.load()},
+                {"sum", histogram->sum.load()},
+                {"buckets", buckets},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()}
+            };
+        }
+    }
+
+    return result;
 }
 
 void MetricsCollector::reset_counter(const std::string& name) {
@@ -180,11 +273,21 @@ void MetricsCollector::reset_counter(const std::string& name) {
 bool MetricsCollector::remove_metric(const std::string& name) {
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
+    // Try to remove from each storage
     bool removed = false;
-    removed |= gauges_.erase(name) > 0;
-    removed |= counters_.erase(name) > 0;
-    removed |= histograms_.erase(name) > 0;
-    gauge_getters_.erase(name);
+
+    if (gauges_.erase(name) > 0) {
+        gauge_getters_.erase(name);
+        removed = true;
+    }
+
+    if (counters_.erase(name) > 0) {
+        removed = true;
+    }
+
+    if (histograms_.erase(name) > 0) {
+        removed = true;
+    }
 
     return removed;
 }
@@ -193,17 +296,22 @@ std::vector<std::string> MetricsCollector::get_metric_names() const {
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
     std::vector<std::string> names;
-    names.reserve(gauges_.size() + counters_.size() + histograms_.size());
 
+    // Collect all metric names
     for (const auto& [name, _] : gauges_) {
         names.push_back(name);
     }
+
     for (const auto& [name, _] : counters_) {
         names.push_back(name);
     }
+
     for (const auto& [name, _] : histograms_) {
         names.push_back(name);
     }
+
+    // Sort for consistent output
+    std::sort(names.begin(), names.end());
 
     return names;
 }

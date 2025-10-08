@@ -20,12 +20,8 @@ target_include_directories(cache
 )
 
 # Link dependencies
-target_link_libraries(cache
-    PUBLIC
-        config
-        logging
-        error_handler
-)
+# Note: config, logging, error_handler are part of regulens_shared
+# No external link dependencies needed for cache
 
 # In production, would also link to hiredis or similar Redis C client:
 # find_package(hiredis REQUIRED)

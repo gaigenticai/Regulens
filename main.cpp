@@ -120,7 +120,7 @@ private:
         web_ui_server_->set_logger(logger_ptr);
 
         // Initialize Metrics Collector and Web UI Handlers
-        metrics_collector_ = std::make_shared<MetricsCollector>(logger_ptr);
+        metrics_collector_ = std::make_shared<MetricsCollector>();
         web_ui_handlers_ = std::make_unique<WebUIHandlers>(config_ptr, logger_ptr, metrics_collector_);
 
         // Register Web UI routes

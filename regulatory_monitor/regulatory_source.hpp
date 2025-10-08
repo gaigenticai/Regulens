@@ -192,6 +192,13 @@ public:
 private:
     std::string rss_url_;
     std::string last_processed_guid_;
+
+    // HTTP helpers
+    struct HttpResponse {
+        int status_code;
+        std::string body;
+    };
+    HttpResponse make_http_request(const std::string& url, const std::string& method);
 };
 
 /**
@@ -216,6 +223,13 @@ private:
     std::string feed_url_;
     std::string feed_type_; // RSS, API, HTML
     std::unordered_map<std::string, std::string> headers_;
+
+    // HTTP helpers
+    struct HttpResponse {
+        int status_code;
+        std::string body;
+    };
+    HttpResponse make_http_request(const std::string& url, const std::string& method);
 };
 
 /**
@@ -240,6 +254,13 @@ private:
     std::string target_url_;
     std::vector<std::string> selectors_; // CSS selectors for content extraction
     std::string last_content_hash_;
+
+    // HTTP helpers
+    struct HttpResponse {
+        int status_code;
+        std::string body;
+    };
+    HttpResponse make_http_request(const std::string& url, const std::string& method);
 };
 
 /**

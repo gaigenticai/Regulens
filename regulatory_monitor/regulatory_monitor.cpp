@@ -138,7 +138,7 @@ bool RegulatoryMonitor::add_standard_source(RegulatorySourceType type) {
         auto source = RegulatorySourceFactory::create_source(type, nlohmann::json{}, config_, logger_);
 
         if (!source) {
-            logger_->error("Failed to create standard regulatory source of type: {}", static_cast<int>(type));
+            logger_->error("Failed to create standard regulatory source of type: " + std::to_string(static_cast<int>(type)));
             return false;
         }
 

@@ -6,6 +6,7 @@
  */
 
 #include "data_ingestion_framework.hpp"
+#include "ingestion_metrics.hpp"
 #include "sources/rest_api_source.hpp"
 #include "sources/web_scraping_source.hpp"
 #include "sources/database_source.hpp"
@@ -40,7 +41,7 @@ bool DataIngestionFramework::initialize() {
 
     try {
         // Initialize metrics
-        metrics_ = std::make_unique<IngestionMetrics>(logger_);
+        metrics_ = std::make_unique<IngestionMetrics>(logger_, db_pool_);
 
         // Start worker threads
         running_ = true;

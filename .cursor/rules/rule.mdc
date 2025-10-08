@@ -11,4 +11,5 @@ alwaysApply: true
 7. UNDER NO CIRCUMSTANCE WILL YOU CREATE A MAKE SHIFT OR WORKAROUND OR SIMPLIED VERSION OF ANY CODE JUST TO PASS TESTS OR MAKE THINGS WORK. THINGS MUST BE PRODUCTION GRADE.
 8. Please do not name anything with phase references like "Phase1_api.py" or UI names which includes the word "Phase". Use proper feature names instead. Do not use "Task1" or "Task2" or task as names in code or UI. It should have the actual feature name.
 9. When you start the build something, you will take into account what is already built and what this new development does to the old development and if they need changes as well to accomodate the new development.
-grep -r "simple" . --exclude-dir=node_modules --exclude-dir=tests --exclude-dir=build --exclude-dir=dist  --exclude="*.md*"
+
+

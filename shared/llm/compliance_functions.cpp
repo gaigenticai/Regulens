@@ -502,16 +502,45 @@ FunctionResult ComplianceFunctionLibrary::get_regulatory_updates(const nlohmann:
                     if (!date_found) {
                         std::regex us_date_pattern(R"(\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\b)", std::regex::icase);
                         if (std::regex_search(result, date_match, us_date_pattern)) {
-                            // Found a date pattern - use it
-                            // For production, implement full date parser here
-                            // For now, document that date was found but needs parsing implementation
-                            logger_->debug("Regulatory update contains date pattern: " + date_match.str(),
-                                         "ComplianceFunctionLibrary", "get_regulatory_updates");
+                            try {
+                                // Parse US date format properly
+                                static const std::unordered_map<std::string, int> month_map = {
+                                    {"january", 0}, {"february", 1}, {"march", 2}, {"april", 3},
+                                    {"may", 4}, {"june", 5}, {"july", 6}, {"august", 7},
+                                    {"september", 8}, {"october", 9}, {"november", 10}, {"december", 11}
+                                };
+                                
+                                std::string month_str = date_match[1].str();
+                                std::transform(month_str.begin(), month_str.end(), month_str.begin(), ::tolower);
+                                int day = std::stoi(date_match[2].str());
+                                int year = std::stoi(date_match[3].str());
+                                
+                                auto month_it = month_map.find(month_str);
+                                if (month_it != month_map.end()) {
+                                    std::tm tm = {};
+                                    tm.tm_year = year - 1900;
+                                    tm.tm_mon = month_it->second;
+                                    tm.tm_mday = day;
+                                    tm.tm_hour = 0;
+                                    tm.tm_min = 0;
+                                    tm.tm_sec = 0;
+                                    
+                                    auto parsed_time = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+                                    effective_date_str = format_timestamp(parsed_time);
+                                    date_found = true;
+                                    
+                                    logger_->debug("Parsed US date format successfully: " + date_match.str(),
+                                                 "ComplianceFunctionLibrary", "get_regulatory_updates");
+                                }
+                            } catch (const std::exception& e) {
+                                logger_->warn("Failed to parse US date format: " + date_match.str() + ", error: " + e.what(),
+                                            "ComplianceFunctionLibrary", "get_regulatory_updates");
+                            }
                         }
                     }
                     
                     // If no explicit date found, use null to indicate missing information
-                    // This is production-grade: we don't guess or use placeholders
+                    // Production-grade approach: we report actual data or explicitly indicate absence
                     if (!date_found) {
                         effective_date_str = "";  // Empty string will be represented as null in JSON
                         logger_->warn("No effective date found in regulatory update content",
@@ -519,7 +548,7 @@ FunctionResult ComplianceFunctionLibrary::get_regulatory_updates(const nlohmann:
                                     {{"update_id", "kb-" + std::to_string(std::hash<std::string>{}(result))}});
                     }
                     
-                    // Construct update with nullable effective_date
+                    // Construct update with all available data
                     nlohmann::json update = {
                         {"id", "kb-" + std::to_string(std::hash<std::string>{}(result))},
                         {"title", result.substr(0, 100) + (result.length() > 100 ? "..." : "")},
@@ -531,7 +560,7 @@ FunctionResult ComplianceFunctionLibrary::get_regulatory_updates(const nlohmann:
                         {"affected_entities", nlohmann::json::array({"financial_institutions"})}
                     };
                     
-                    // Only add effective_date if we actually found one (no placeholders)
+                    // Add effective_date field - use parsed date if available, otherwise null
                     if (!effective_date_str.empty()) {
                         update["effective_date"] = effective_date_str;
                     } else {

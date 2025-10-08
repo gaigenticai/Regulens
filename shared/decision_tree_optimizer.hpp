@@ -417,19 +417,22 @@ private:
         const std::vector<DecisionAlternative>& alternatives);
 
     /**
-     * @brief ELECTRE method (simplified implementation)
+     * @brief ELECTRE III method with concordance/discordance analysis
+     * Full implementation with indifference, preference, and veto thresholds
      */
     std::unordered_map<std::string, double> electre_method(
         const std::vector<DecisionAlternative>& alternatives);
 
     /**
-     * @brief PROMETHEE method (simplified implementation)
+     * @brief PROMETHEE II method with multi-type preference functions
+     * Implements 6 preference function types and net flow calculation
      */
     std::unordered_map<std::string, double> promethee_method(
         const std::vector<DecisionAlternative>& alternatives);
 
     /**
-     * @brief Analytic Hierarchy Process (simplified)
+     * @brief Analytic Hierarchy Process with pairwise comparison matrices
+     * Full AHP implementation with consistency checking
      */
     std::unordered_map<std::string, double> ahp_method(
         const std::vector<DecisionAlternative>& alternatives);

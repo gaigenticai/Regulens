@@ -969,15 +969,29 @@ void DecisionEngine::store_decision(const DecisionResult& decision, const Decisi
             timestamp_to_string(decision.decision_timestamp)
         );
 
-        // Cache the decision
+        // Cache the decision with LRU (Least Recently Used) tracking
         decision_cache_[decision.decision_id] = decision;
+        
+        // Update access order for LRU tracking
+        cache_access_order_.remove(decision.decision_id); // Remove if exists
+        cache_access_order_.push_back(decision.decision_id); // Add to end (most recent)
 
-        // Keep cache size manageable
-        if (decision_cache_.size() > 1000) {
-            // Remove oldest entries (simple strategy)
-            auto it = decision_cache_.begin();
-            std::advance(it, 100);
-            decision_cache_.erase(decision_cache_.begin(), it);
+        // Production-grade cache management with LRU eviction policy
+        const size_t MAX_CACHE_SIZE = 1000;
+        const size_t EVICTION_BATCH_SIZE = 100;
+        
+        if (decision_cache_.size() > MAX_CACHE_SIZE) {
+            // Evict least recently used entries (from front of list)
+            size_t evict_count = std::min(EVICTION_BATCH_SIZE, cache_access_order_.size());
+            
+            for (size_t i = 0; i < evict_count; ++i) {
+                const std::string& lru_id = cache_access_order_.front();
+                decision_cache_.erase(lru_id);
+                cache_access_order_.pop_front();
+            }
+            
+            logger_->log(LogLevel::DEBUG, "Evicted " + std::to_string(evict_count) + 
+                        " LRU cache entries. Cache size: " + std::to_string(decision_cache_.size()));
         }
 
     } catch (const std::exception& e) {

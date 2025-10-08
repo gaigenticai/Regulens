@@ -122,6 +122,9 @@ private:
     std::mutex activities_mutex_;
     std::unordered_map<std::string, std::deque<AgentActivityEvent>> agent_activities_; // agent_id -> events
     std::unordered_map<std::string, AgentActivityStats> agent_stats_;
+    
+    // Per-agent cleanup tracking for time window maintenance
+    std::unordered_map<std::string, std::chrono::system_clock::time_point> last_cleanup_time_;
 
     // Subscription management
     std::mutex subscriptions_mutex_;

@@ -4,10 +4,8 @@
 
 namespace regulens {
 
-// Production-grade custom source implementation
-// Removed MockRegulatorySource as per Rule 1 - no mock/placeholder code
-
-// RegulatorySourceFactory implementation
+// RegulatorySourceFactory implementation for creating production-grade regulatory sources
+// Supports SEC EDGAR, FCA, ECB, and custom regulatory data sources
 std::shared_ptr<RegulatorySource> RegulatorySourceFactory::create_source(
     RegulatorySourceType type,
     const nlohmann::json& config,

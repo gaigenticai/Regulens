@@ -79,6 +79,7 @@ private:
                                                     const nlohmann::json& filters);
     bool is_domain_allowed(const std::string& domain) const;
     double calculate_relevance_score(const SearchResult& result, const std::string& query);
+    double calculate_domain_authority(const std::string& domain) const;
 
     // Utility methods
     std::string url_encode(const std::string& str) const;

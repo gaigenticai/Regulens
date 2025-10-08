@@ -413,10 +413,8 @@ bool ConversationMemory::store_conversation(const std::string& conversation_id,
         entry.outcome = outcome;
     }
 
-    // Determine confidence based on context (simplified)
-    if (context.contains("confidence")) {
-        entry.confidence_score = context["confidence"];
-    }
+    // Production-grade confidence calculation using multi-factor analysis
+    entry.confidence_score = calculate_conversation_confidence(context, decision, outcome);
 
     return store_memory(entry);
 }
@@ -1188,14 +1186,59 @@ std::vector<MemoryEntry> ConversationMemory::load_memories_by_query(const std::s
         auto result = db_connection_->execute_query(query, params);
 
         for (const auto& row : result.rows) {
-            // Similar parsing as in load_memory
+            // Production-grade complete parsing with optimized field extraction
             nlohmann::json context = nlohmann::json::parse(row.at("context"));
+            nlohmann::json metadata = nlohmann::json::parse(row.at("metadata"));
+            
             MemoryEntry entry("", "", "", MemoryType::EPISODIC, context);
-            // Basic fields - similar to load_memory but simplified for performance
+            
+            // Core identification fields
             entry.memory_id = row.at("memory_id");
             entry.conversation_id = row.at("conversation_id");
             entry.agent_id = row.at("agent_id");
             entry.agent_type = row.at("agent_type");
+            
+            // Type and importance
+            entry.memory_type = static_cast<MemoryType>(std::stoi(row.at("memory_type")));
+            entry.importance_level = static_cast<ImportanceLevel>(std::stoi(row.at("importance_level")));
+            
+            // Timestamps
+            entry.timestamp = std::chrono::system_clock::from_time_t(std::stoll(row.at("timestamp")));
+            entry.last_accessed = std::chrono::system_clock::from_time_t(std::stoll(row.at("last_accessed")));
+            entry.access_count = std::stoi(row.at("access_count"));
+            
+            // Content fields
+            entry.summary = row.at("summary");
+            entry.key_topics = nlohmann::json::parse(row.at("key_topics"));
+            entry.compliance_tags = nlohmann::json::parse(row.at("compliance_tags"));
+            
+            // Memory management fields
+            entry.decay_factor = std::stod(row.at("decay_factor"));
+            entry.consolidated = row.at("consolidated") == "t" || row.at("consolidated") == "true";
+            entry.metadata = metadata;
+            
+            // Optional decision fields
+            if (!row.at("decision_made").empty()) {
+                entry.decision_made = row.at("decision_made");
+            }
+            if (!row.at("outcome").empty()) {
+                entry.outcome = row.at("outcome");
+            }
+            if (!row.at("confidence_score").empty()) {
+                entry.confidence_score = std::stod(row.at("confidence_score"));
+            }
+            
+            // Feedback fields
+            if (!row.at("human_feedback").empty() && row.at("human_feedback") != "null") {
+                entry.human_feedback = nlohmann::json::parse(row.at("human_feedback"));
+            }
+            if (!row.at("feedback_type").empty()) {
+                entry.feedback_type = row.at("feedback_type");
+            }
+            if (!row.at("feedback_score").empty()) {
+                entry.feedback_score = std::stod(row.at("feedback_score"));
+            }
+            
             memories.push_back(entry);
         }
 
@@ -1254,6 +1297,104 @@ bool ConversationMemory::validate_memory_entry(const MemoryEntry& entry) const {
     if (entry.context.is_null()) return false;
 
     return true;
+}
+
+double ConversationMemory::calculate_conversation_confidence(const nlohmann::json& context,
+                                                            const std::optional<std::string>& decision,
+                                                            const std::optional<std::string>& outcome) const {
+    // Production-grade multi-factor confidence calculation
+    double confidence = 0.5; // Base confidence
+    
+    // Factor 1: Explicit confidence from context (weight: 40%)
+    if (context.contains("confidence")) {
+        double explicit_confidence = context["confidence"];
+        confidence = explicit_confidence * 0.4 + confidence * 0.6;
+    }
+    
+    // Factor 2: Data completeness analysis (weight: 20%)
+    double completeness_score = 0.0;
+    int available_fields = 0;
+    int total_fields = 7;
+    
+    if (decision.has_value() && !decision->empty()) available_fields++;
+    if (outcome.has_value() && !outcome->empty()) available_fields++;
+    if (context.contains("evidence") && context["evidence"].is_array() && !context["evidence"].empty()) available_fields++;
+    if (context.contains("reasoning") && !context["reasoning"].empty()) available_fields++;
+    if (context.contains("risk_assessment") && context["risk_assessment"].is_object()) available_fields++;
+    if (context.contains("regulatory_context") && context["regulatory_context"].is_object()) available_fields++;
+    if (context.contains("supporting_documents") && context["supporting_documents"].is_array()) available_fields++;
+    
+    completeness_score = static_cast<double>(available_fields) / total_fields;
+    confidence = confidence * 0.8 + completeness_score * 0.2;
+    
+    // Factor 3: Decision-outcome alignment (weight: 20%)
+    double alignment_score = 0.5; // Neutral when no decision/outcome
+    if (decision.has_value() && outcome.has_value()) {
+        // Analyze if the outcome aligns with the decision
+        std::string dec_lower = *decision;
+        std::string out_lower = *outcome;
+        std::transform(dec_lower.begin(), dec_lower.end(), dec_lower.begin(), ::tolower);
+        std::transform(out_lower.begin(), out_lower.end(), out_lower.begin(), ::tolower);
+        
+        // Check for positive alignment indicators
+        if ((dec_lower.find("approve") != std::string::npos && out_lower.find("success") != std::string::npos) ||
+            (dec_lower.find("reject") != std::string::npos && out_lower.find("blocked") != std::string::npos) ||
+            (dec_lower.find("escalate") != std::string::npos && out_lower.find("escalated") != std::string::npos) ||
+            (dec_lower.find("flag") != std::string::npos && out_lower.find("flagged") != std::string::npos)) {
+            alignment_score = 0.9; // High alignment
+        } else if (out_lower.find("error") != std::string::npos || 
+                   out_lower.find("fail") != std::string::npos) {
+            alignment_score = 0.3; // Low confidence if outcome indicates failure
+        } else {
+            alignment_score = 0.6; // Moderate alignment
+        }
+    }
+    confidence = confidence * 0.8 + alignment_score * 0.2;
+    
+    // Factor 4: Regulatory compliance indicators (weight: 20%)
+    double compliance_score = 0.5; // Neutral default
+    if (context.contains("compliance_score")) {
+        compliance_score = context["compliance_score"];
+    } else if (context.contains("regulatory_violations")) {
+        // Lower confidence if violations detected
+        auto violations = context["regulatory_violations"];
+        if (violations.is_array() && violations.size() > 0) {
+            compliance_score = 1.0 - std::min(0.5, violations.size() * 0.1);
+        }
+    } else if (context.contains("compliance_checks_passed")) {
+        int passed = context["compliance_checks_passed"];
+        int total = context.value("compliance_checks_total", passed);
+        if (total > 0) {
+            compliance_score = static_cast<double>(passed) / total;
+        }
+    }
+    confidence = confidence * 0.8 + compliance_score * 0.2;
+    
+    // Factor 5: Agent consensus (if multiple agents involved)
+    if (context.contains("agent_consensus")) {
+        double consensus = context["agent_consensus"];
+        confidence = confidence * 0.9 + consensus * 0.1;
+    }
+    
+    // Factor 6: Human validation indicator
+    if (context.contains("human_validated") && context["human_validated"] == true) {
+        confidence = std::min(1.0, confidence * 1.1); // Boost confidence by 10%
+    }
+    
+    // Factor 7: Risk level adjustment
+    if (context.contains("risk_level")) {
+        std::string risk = context["risk_level"];
+        std::transform(risk.begin(), risk.end(), risk.begin(), ::tolower);
+        if (risk == "critical" || risk == "high") {
+            // Higher scrutiny for high-risk decisions
+            confidence *= 0.9;
+        }
+    }
+    
+    // Ensure confidence is in valid range [0.0, 1.0]
+    confidence = std::max(0.0, std::min(1.0, confidence));
+    
+    return confidence;
 }
 
 // Factory function

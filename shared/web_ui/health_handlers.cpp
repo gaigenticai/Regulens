@@ -523,35 +523,112 @@ HealthCheckFunction redis_health_check(std::shared_ptr<RedisClient> redis_client
         }
 
         try {
-            // Basic Redis connectivity check
-            // Note: RedisClient API integration pending - using simplified check
+            // Production-grade Redis health check with PING, stats, and memory monitoring
             auto start_time = std::chrono::high_resolution_clock::now();
             
-            // Try to execute a simple command to verify Redis is responsive
-            bool is_operational = true;
+            // Check 1: Connection status
+            if (!redis_client->is_connected()) {
+                return HealthCheckResult{
+                    false, "unhealthy",
+                    "Redis is not connected",
+                    {{"error", "not_connected"}}
+                };
+            }
+            
+            // Check 2: Execute PING command to verify responsiveness
+            bool ping_success = false;
             try {
-                // Attempt basic operation - adjust based on actual RedisClient API
-                redis_client->is_connected();
-            } catch (...) {
-                is_operational = false;
+                // Use RedisClient API to execute PING
+                ping_success = redis_client->ping();
+            } catch (const std::exception& e) {
+                return HealthCheckResult{
+                    false, "unhealthy",
+                    "Redis PING failed: " + std::string(e.what()),
+                    {{"error", "ping_failed"}, {"exception", e.what()}}
+                };
             }
             
             auto end_time = std::chrono::high_resolution_clock::now();
             auto response_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 end_time - start_time).count();
-
-            if (!is_operational) {
+            
+            if (!ping_success) {
                 return HealthCheckResult{
                     false, "unhealthy",
-                    "Redis connection check failed",
-                    {{"error", "connection_check_failed"}, {"response_time_ms", response_time_ms}}
+                    "Redis PING failed",
+                    {
+                        {"error", "ping_failed"},
+                        {"response_time_ms", response_time_ms}
+                    }
                 };
             }
-
+            
+            // Check 3: Get Redis statistics and server info
+            nlohmann::json additional_info;
+            additional_info["response_time_ms"] = response_time_ms;
+            additional_info["ping_success"] = true;
+            
+            try {
+                // Get Redis server information
+                auto info = redis_client->get_info();
+                // Extract relevant Redis server information
+                if (info.contains("redis_version")) {
+                    additional_info["redis_version"] = info["redis_version"];
+                }
+                if (info.contains("used_memory")) {
+                    additional_info["used_memory"] = info["used_memory"];
+                }
+                if (info.contains("used_memory_human")) {
+                    additional_info["used_memory_human"] = info["used_memory_human"];
+                }
+                if (info.contains("connected_clients")) {
+                    int clients = info["connected_clients"];
+                    additional_info["connected_clients"] = clients;
+                    
+                    // Warn if too many clients
+                    if (clients > 1000) {
+                        additional_info["warning"] = "high_client_count";
+                    }
+                }
+                if (info.contains("total_commands_processed")) {
+                    additional_info["total_commands_processed"] = info["total_commands_processed"];
+                }
+                if (info.contains("uptime_in_seconds")) {
+                    additional_info["uptime_in_seconds"] = info["uptime_in_seconds"];
+                }
+                if (info.contains("evicted_keys")) {
+                    long long evicted = info["evicted_keys"];
+                    additional_info["evicted_keys"] = evicted;
+                    
+                    // Warn if memory pressure causing evictions
+                    if (evicted > 1000) {
+                        additional_info["warning"] = "memory_pressure_evictions";
+                        return HealthCheckResult{
+                            true, "degraded",
+                            "Redis experiencing memory pressure",
+                            additional_info
+                        };
+                    }
+                }
+            } catch (...) {
+                // Statistics gathering failed, but connection is ok
+                additional_info["stats_error"] = "failed_to_get_statistics";
+            }
+            
+            // Check 4: Response time threshold
+            if (response_time_ms > 500) {
+                additional_info["warning"] = "high_latency";
+                return HealthCheckResult{
+                    true, "degraded",
+                    "Redis response time is high",
+                    additional_info
+                };
+            }
+            
             return HealthCheckResult{
                 true, "healthy",
-                "Redis basic connectivity confirmed",
-                {{"response_time_ms", response_time_ms}}
+                "Redis is fully operational",
+                additional_info
             };
         } catch (const std::exception& e) {
             return HealthCheckResult{

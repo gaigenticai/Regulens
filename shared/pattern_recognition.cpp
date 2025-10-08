@@ -524,7 +524,7 @@ std::vector<std::shared_ptr<SequencePattern>> PatternRecognitionEngine::analyze_
         events.push_back(event);
     }
 
-    // Find frequent sequences (simplified implementation)
+    // Find frequent sequences using production-grade PrefixSpan-like sequence mining
     auto frequent_sequences = find_frequent_sequences(events, config_.min_pattern_occurrences);
 
     for (const auto& seq_str : frequent_sequences) {

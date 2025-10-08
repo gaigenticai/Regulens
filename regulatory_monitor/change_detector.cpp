@@ -1378,10 +1378,44 @@ DocumentParser::extract_effective_date(const std::string& content) const {
     for (const auto& pattern : date_patterns) {
         std::smatch match;
         if (std::regex_search(content, match, pattern)) {
-            // Found a date pattern
-            // In production, use proper date parsing library (e.g., Howard Hinnant's date library)
-            // For now, return current time as placeholder
-            return std::chrono::system_clock::now();
+            // Found a date pattern - parse it properly
+            std::string date_str = match[1].str();
+            
+            // Try multiple date format parsing strategies
+            std::tm tm = {};
+            std::vector<std::string> formats = {
+                "%m/%d/%Y",    // MM/DD/YYYY
+                "%m-%d-%Y",    // MM-DD-YYYY
+                "%d/%m/%Y",    // DD/MM/YYYY
+                "%d-%m-%Y",    // DD-MM-YYYY
+                "%Y-%m-%d",    // YYYY-MM-DD (ISO format)
+                "%m/%d/%y",    // MM/DD/YY
+                "%B %d, %Y",   // Month DD, YYYY
+                "%B %d %Y"     // Month DD YYYY
+            };
+            
+            for (const auto& fmt : formats) {
+                std::istringstream ss(date_str);
+                ss >> std::get_time(&tm, fmt.c_str());
+                
+                if (!ss.fail()) {
+                    // Successfully parsed
+                    auto time_point = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+                    logger_->debug("Successfully parsed effective date", "DocumentParser", "extract_effective_date", {
+                        {"date_string", date_str},
+                        {"format", fmt}
+                    });
+                    return time_point;
+                }
+                
+                // Reset for next attempt
+                tm = {};
+            }
+            
+            // If we couldn't parse with any format, log warning and return nullopt
+            logger_->warn("Found date pattern but failed to parse", "DocumentParser", "extract_effective_date", {
+                {"date_string", date_str}
+            });
         }
     }
 

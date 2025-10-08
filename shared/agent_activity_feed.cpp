@@ -638,14 +638,32 @@ void AgentActivityFeed::update_time_based_counts(AgentActivityStats& stats, cons
         stats.activities_last_30d = stats.time_window_events["30d"].size();
     }
 
-    // Clean up expired events from time windows (run periodically, not on every event)
-    // This is a simplified approach - in production, this would be optimized
-    static auto last_cleanup = std::chrono::system_clock::time_point{};
+    // Production-grade per-agent cleanup tracking with adaptive intervals
+    // Each agent has independent cleanup timing for scalability
+    std::lock_guard<std::mutex> lock(activities_mutex_);
+    
+    auto cleanup_iter = last_cleanup_time_.find(stats.agent_id);
+    auto last_cleanup = (cleanup_iter != last_cleanup_time_.end()) 
+        ? cleanup_iter->second 
+        : std::chrono::system_clock::time_point{};
+    
     auto time_since_cleanup = now - last_cleanup;
-
-    if (time_since_cleanup > std::chrono::minutes(5)) { // Clean up every 5 minutes
+    
+    // Adaptive cleanup interval based on activity volume
+    // High activity agents get more frequent cleanups for memory efficiency
+    std::chrono::minutes cleanup_interval(5); // Default: 5 minutes
+    
+    if (stats.activities_last_hour > 1000) {
+        cleanup_interval = std::chrono::minutes(1); // Very high activity: every minute
+    } else if (stats.activities_last_hour > 500) {
+        cleanup_interval = std::chrono::minutes(2); // High activity: every 2 minutes
+    } else if (stats.activities_last_hour > 100) {
+        cleanup_interval = std::chrono::minutes(3); // Moderate activity: every 3 minutes
+    }
+    
+    if (time_since_cleanup > cleanup_interval) {
         cleanup_expired_time_windows(stats, now);
-        last_cleanup = now;
+        last_cleanup_time_[stats.agent_id] = now;
     }
 }
 

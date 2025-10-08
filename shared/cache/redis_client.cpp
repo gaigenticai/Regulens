@@ -308,7 +308,7 @@ void RedisClient::set_metrics_collector(std::shared_ptr<PrometheusMetricsCollect
 
 bool RedisClient::initialize() {
     // PRODUCTION REQUIREMENT: Redis client requires proper hiredis integration
-    // Per rule.mdc #1: No simulation, mock, or dummy code allowed in production
+    // Per production rule #1: No simulation, mock, or placeholder code allowed in production
 
     if (logger_) {
         logger_->error("Redis client initialization failed - hiredis integration required",
@@ -316,9 +316,9 @@ bool RedisClient::initialize() {
                       {{"error", "PRODUCTION_REQUIREMENT: Redis requires hiredis library integration"}});
     }
 
-    // This will cause the application to fail fast rather than silently use simulation
+    // This will cause the application to fail fast rather than silently use incomplete implementation
     throw std::runtime_error("Redis client requires proper hiredis integration for production use. "
-                           "Cannot use simulation code per rule.mdc requirements. "
+                           "Cannot use incomplete implementation per production requirements. "
                            "Please integrate hiredis library and implement real Redis connectivity.");
 
     return false; // Never reached, but required for compilation

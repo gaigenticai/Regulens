@@ -688,8 +688,99 @@ bool RESTAPISource::validate_response(const HttpResponse& response) {
     return response.success && response.status_code >= 200 && response.status_code < 300;
 }
 
-std::string RESTAPISource::extract_next_page_url(const HttpResponse& /*response*/) {
-    return ""; // Simplified
+std::string RESTAPISource::extract_next_page_url(const HttpResponse& response) {
+    // Production-grade next page URL extraction from various pagination patterns
+    
+    // Method 1: Check Link header (RFC 8288 - common in REST APIs)
+    auto link_header = response.headers.find("Link");
+    if (link_header != response.headers.end()) {
+        const std::string& link_value = link_header->second;
+        
+        // Parse Link header: <https://api.example.com/items?page=3>; rel="next"
+        std::regex next_link_pattern(R"(<([^>]+)>;\s*rel="next")");
+        std::smatch match;
+        if (std::regex_search(link_value, match, next_link_pattern)) {
+            return match[1].str();
+        }
+    }
+    
+    // Method 2: Parse JSON response body for next page URL
+    try {
+        auto json_body = nlohmann::json::parse(response.body);
+        
+        // Common JSON pagination patterns
+        std::vector<std::vector<std::string>> next_url_paths = {
+            {"next"},                       // Stripe, Twitter
+            {"next_url"},
+            {"next_page"},
+            {"_links", "next", "href"},   // HAL format
+            {"pagination", "next"},
+            {"paging", "next"},
+            {"links", "next"},
+            {"meta", "next_page_url"}     // Laravel
+        };
+        
+        for (const auto& path : next_url_paths) {
+            nlohmann::json current = json_body;
+            bool found = true;
+            
+            for (const auto& segment : path) {
+                if (current.contains(segment)) {
+                    current = current[segment];
+                } else {
+                    found = false;
+                    break;
+                }
+            }
+            
+            if (found && current.is_string()) {
+                std::string next_url = current.get<std::string>();
+                if (!next_url.empty() && next_url != "null") {
+                    return next_url;
+                }
+            }
+        }
+        
+        // Method 3: Check for page number indicators
+        if (json_body.contains("page") && json_body.contains("total_pages")) {
+            int current_page = json_body["page"];
+            int total_pages = json_body["total_pages"];
+            
+            if (current_page < total_pages) {
+                // Build next page URL by incrementing page parameter
+                std::string current_url = api_config_.base_url + api_config_.endpoint_path;
+                
+                // Check if URL already has query parameters
+                size_t query_pos = current_url.find('?');
+                if (query_pos != std::string::npos) {
+                    // Extract and modify existing page parameter
+                    std::regex page_param(R"([?&]page=\d+)");
+                    if (std::regex_search(current_url, page_param)) {
+                        return std::regex_replace(current_url, std::regex(R"(page=\d+)"),
+                                                "page=" + std::to_string(current_page + 1));
+                    } else {
+                        return current_url + "&page=" + std::to_string(current_page + 1);
+                    }
+                } else {
+                    return current_url + "?page=" + std::to_string(current_page + 1);
+                }
+            }
+        }
+        
+    } catch (const nlohmann::json::exception&) {
+        // If JSON parsing fails, return empty string
+    }
+    
+    // Method 4: Check for cursor-based pagination in headers
+    auto next_cursor = response.headers.find("X-Next-Cursor");
+    if (next_cursor != response.headers.end() && !next_cursor->second.empty()) {
+        std::string base_url = api_config_.base_url + api_config_.endpoint_path;
+        return base_url + (base_url.find('?') != std::string::npos ? "&" : "?") +
+               "cursor=" + next_cursor->second;
+    }
+    
+    // No next page found
+    return "";
 }
 
 bool RESTAPISource::test_connection() {

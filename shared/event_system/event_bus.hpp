@@ -179,7 +179,7 @@ private:
     // Event queues
     std::queue<std::unique_ptr<Event>> event_queue_;
     std::queue<std::unique_ptr<Event>> dead_letter_queue_;
-    std::mutex queue_mutex_;
+    mutable std::mutex queue_mutex_;  // Mutable to allow locking from const member functions
     std::condition_variable queue_cv_;
 
     // Event routing

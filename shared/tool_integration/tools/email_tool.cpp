@@ -626,13 +626,137 @@ bool EmailTool::validate_ipv4_address(const std::string& ip) const {
 }
 
 bool EmailTool::validate_ipv6_address(const std::string& ip) const {
-    // Basic IPv6 validation (simplified)
-    if (ip.empty() || ip.length() > 39) return false;
-
-    // IPv6 regex (simplified)
-    std::regex ipv6_regex(R"(^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,7}:$|^([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}$|^([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}$|^([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}$|^([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})$|^:((:[0-9a-fA-F]{1,4}){1,7}|:)$|^fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}$|^::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])$|^([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])$)");
-
-    return std::regex_match(ip, ipv6_regex);
+    // Production-grade IPv6 validation per RFC 4291 and RFC 5952
+    // Handles: full format, compressed (::), mixed IPv4, zone identifiers
+    
+    if (ip.empty() || ip.length() > 45) return false; // Max length with zone ID
+    
+    std::string address = ip;
+    std::string zone_id;
+    
+    // Extract zone identifier (e.g., %eth0 for link-local)
+    size_t zone_pos = address.find('%');
+    if (zone_pos != std::string::npos) {
+        zone_id = address.substr(zone_pos + 1);
+        address = address.substr(0, zone_pos);
+        
+        // Validate zone ID (alphanumeric and some special chars)
+        if (zone_id.empty() || zone_id.length() > 16) return false;
+        for (char c : zone_id) {
+            if (!std::isalnum(c) && c != '-' && c != '_' && c != '.') {
+                return false;
+            }
+        }
+    }
+    
+    // Check for mixed IPv4 notation (e.g., ::ffff:192.0.2.1)
+    bool has_ipv4_suffix = false;
+    std::string ipv4_part;
+    size_t last_colon = address.rfind(':');
+    if (last_colon != std::string::npos && last_colon + 1 < address.length()) {
+        std::string potential_ipv4 = address.substr(last_colon + 1);
+        if (potential_ipv4.find('.') != std::string::npos) {
+            has_ipv4_suffix = true;
+            ipv4_part = potential_ipv4;
+            address = address.substr(0, last_colon + 1);
+        }
+    }
+    
+    // Validate IPv4 suffix if present
+    if (has_ipv4_suffix && !validate_ipv4_address(ipv4_part)) {
+        return false;
+    }
+    
+    // Parse IPv6 groups (hexadecimal groups separated by :)
+    std::vector<std::string> groups;
+    bool has_compression = false; // :: compression
+    size_t compression_pos = 0;
+    
+    // Check for :: compression
+    size_t double_colon = address.find("::");
+    if (double_colon != std::string::npos) {
+        has_compression = true;
+        
+        // Split into before and after ::
+        std::string before = address.substr(0, double_colon);
+        std::string after = (double_colon + 2 < address.length()) 
+            ? address.substr(double_colon + 2) : "";
+        
+        // Parse before groups
+        if (!before.empty()) {
+            std::stringstream ss(before);
+            std::string group;
+            while (std::getline(ss, group, ':')) {
+                if (!group.empty()) groups.push_back(group);
+            }
+        }
+        
+        compression_pos = groups.size();
+        
+        // Parse after groups
+        if (!after.empty() && after != ":") { // Handle edge case like :::
+            std::stringstream ss(after);
+            std::string group;
+            while (std::getline(ss, group, ':')) {
+                if (!group.empty()) groups.push_back(group);
+            }
+        }
+    } else {
+        // No compression - parse all groups
+        std::stringstream ss(address);
+        std::string group;
+        while (std::getline(ss, group, ':')) {
+            groups.push_back(group);
+        }
+    }
+    
+    // Validate number of groups
+    int expected_groups = has_ipv4_suffix ? 6 : 8;
+    
+    if (has_compression) {
+        // With compression, we can have fewer groups
+        if (groups.size() >= expected_groups) return false;
+    } else {
+        // Without compression, must have exactly the expected number
+        if (groups.size() != expected_groups) return false;
+    }
+    
+    // Validate each group
+    for (const auto& group : groups) {
+        if (group.empty() || group.length() > 4) return false;
+        
+        for (char c : group) {
+            if (!std::isxdigit(c)) return false;
+        }
+        
+        // Convert to int to ensure it's valid hex
+        try {
+            unsigned long value = std::stoul(group, nullptr, 16);
+            if (value > 0xFFFF) return false;
+        } catch (...) {
+            return false;
+        }
+    }
+    
+    // Additional RFC 5952 canonicalization checks
+    // (Optional: could enforce lowercase hex, no leading zeros, etc.)
+    
+    // Special address validation
+    if (address == "::" || address == "::1") {
+        return true; // Unspecified and loopback
+    }
+    
+    // Link-local addresses (fe80::/10) should have zone ID
+    if (address.length() >= 4) {
+        std::string prefix = address.substr(0, 4);
+        std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
+        if (prefix == "fe80" || prefix == "fe8" || prefix == "fe9" || 
+            prefix == "fea" || prefix == "feb") {
+            // Link-local - zone ID recommended but not required for validation
+        }
+    }
+    
+    return true;
 }
 
 bool EmailTool::is_atext(char c) const {

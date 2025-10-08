@@ -1125,9 +1125,37 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
         auto query_result = connection->execute_query(query, {username});
 
         if (query_result.rows.empty()) {
-            // User not found - use constant time to prevent user enumeration
-            std::string dummy_hash = "$2b$12$dummyhashtopreventtimingattacks";
-            compute_sha256_hash(password); // Dummy operation for constant time
+            // User not found - perform constant-time operation to prevent user enumeration attacks
+            // We execute the full PBKDF2 operation with a generated salt to match timing of real authentication
+            unsigned char constant_salt[16];
+            // Use deterministic salt based on username to ensure consistent timing
+            std::string salt_seed = "regulens_auth_constant_time_" + username;
+            std::string salt_hash = compute_sha256_hash(salt_seed);
+            memcpy(constant_salt, salt_hash.c_str(), std::min(sizeof(constant_salt), salt_hash.length()));
+            
+            constexpr int iterations = 100000;
+            constexpr int key_length = 32;
+            unsigned char derived_key[key_length];
+            
+            #ifdef __APPLE__
+            CCKeyDerivationPBKDF(kCCPBKDF2,
+                                password.c_str(), password.length(),
+                                constant_salt, sizeof(constant_salt),
+                                kCCPRFHmacAlgSHA256,
+                                iterations,
+                                derived_key, key_length);
+            #else
+            PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
+                             constant_salt, sizeof(constant_salt),
+                             iterations,
+                             EVP_sha256(),
+                             key_length, derived_key);
+            #endif
+            
+            // Ensure operation completes before returning
+            volatile unsigned char result = derived_key[0];
+            (void)result; // Prevent compiler optimization
+            
             db_pool_->return_connection(connection);
             return false;
         }

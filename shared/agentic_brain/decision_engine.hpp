@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <string>
 #include <queue>
+#include <list>
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
 #include "llm_interface.hpp"
@@ -190,6 +191,7 @@ private:
 
     std::unordered_map<DecisionType, nlohmann::json> decision_thresholds_;
     std::unordered_map<std::string, DecisionResult> decision_cache_;
+    std::list<std::string> cache_access_order_;  // LRU tracking: front = oldest, back = newest
     std::queue<DecisionContext> pending_decisions_;
 
     // Performance metrics

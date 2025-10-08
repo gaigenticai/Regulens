@@ -380,6 +380,17 @@ private:
      * @return true if valid
      */
     bool validate_memory_entry(const MemoryEntry& entry) const;
+    
+    /**
+     * @brief Calculate confidence score using multi-factor analysis
+     * @param context Conversation context
+     * @param decision Optional decision made
+     * @param outcome Optional outcome
+     * @return Confidence score (0.0-1.0)
+     */
+    double calculate_conversation_confidence(const nlohmann::json& context,
+                                            const std::optional<std::string>& decision,
+                                            const std::optional<std::string>& outcome) const;
 };
 
 /**

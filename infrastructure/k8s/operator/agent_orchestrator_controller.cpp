@@ -504,17 +504,92 @@ nlohmann::json AgentOrchestratorController::monitorAgentHealth(const std::string
 
             total_replicas += replicas;
 
-            // Check deployment status (simplified)
-            auto deployment = api_client_->getCustomResource(
-                "apps", "v1", "deployments", spec.value("namespace", "default"),
-                full_deployment_name);
+            // Production-grade deployment status check with detailed health analysis
+            try {
+                auto deployment = api_client_->getCustomResource(
+                    "apps", "v1", "deployments", spec.value("namespace", "default"),
+                    full_deployment_name);
 
-            if (deployment.contains("status")) {
-                int ready_replicas = deployment["status"].value("readyReplicas", 0);
-                available_replicas += ready_replicas;
-            } else {
-                // Assume not healthy if we can't get status
+                if (deployment.contains("status")) {
+                    const auto& status = deployment["status"];
+                    
+                    // Check ready replicas
+                    int ready_replicas = status.value("readyReplicas", 0);
+                    int available_replicas_agent = status.value("availableReplicas", 0);
+                    int updated_replicas = status.value("updatedReplicas", 0);
+                    int unavailable_replicas = status.value("unavailableReplicas", 0);
+                    
+                    available_replicas += ready_replicas;
+                    
+                    // Check deployment conditions for detailed health status
+                    if (status.contains("conditions") && status["conditions"].is_array()) {
+                        bool is_progressing = false;
+                        bool is_available = false;
+                        std::string failure_reason;
+                        
+                        for (const auto& condition : status["conditions"]) {
+                            std::string type = condition.value("type", "");
+                            std::string status_val = condition.value("status", "False");
+                            
+                            if (type == "Progressing" && status_val == "True") {
+                                is_progressing = true;
+                            }
+                            if (type == "Available" && status_val == "True") {
+                                is_available = true;
+                            }
+                            if (type == "ReplicaFailure" && status_val == "True") {
+                                failure_reason = condition.value("reason", "Unknown failure");
+                                health_status["healthy"] = false;
+                                health_status["failure_reason"] = failure_reason;
+                            }
+                        }
+                        
+                        // Agent is unhealthy if not available or not progressing
+                        if (!is_available || !is_progressing) {
+                            health_status["healthy"] = false;
+                        }
+                    }
+                    
+                    // Check if deployment is stuck or has issues
+                    if (unavailable_replicas > 0) {
+                        health_status["warning"] = "Agent has " + std::to_string(unavailable_replicas) +
+                                                   " unavailable replicas";
+                    }
+                    
+                    // Detailed replica status for this agent
+                    if (!health_status.contains("agents_status")) {
+                        health_status["agents_status"] = nlohmann::json::array();
+                    }
+                    
+                    health_status["agents_status"].push_back({
+                        {"agent_name", agent_name},
+                        {"desired_replicas", replicas},
+                        {"ready_replicas", ready_replicas},
+                        {"available_replicas", available_replicas_agent},
+                        {"updated_replicas", updated_replicas},
+                        {"unavailable_replicas", unavailable_replicas}
+                    });
+                    
+                    logger_->debug("Agent health check for " + agent_name +
+                                 ": ready=" + std::to_string(ready_replicas) +
+                                 "/" + std::to_string(replicas),
+                                 "AgentOrchestratorController", "monitorAgentHealth",
+                                 {{"orchestrator", orchestrator_name}, {"agent", agent_name}});
+                } else {
+                    // Deployment exists but has no status - might be newly created
+                    health_status["healthy"] = false;
+                    health_status["warning"] = "Agent deployment has no status: " + agent_name;
+                    logger_->warn("Deployment status not available for agent: " + agent_name,
+                                "AgentOrchestratorController", "monitorAgentHealth",
+                                {{"orchestrator", orchestrator_name}, {"agent", agent_name}});
+                }
+            } catch (const std::exception& e) {
+                // Failed to get deployment status
                 health_status["healthy"] = false;
+                health_status["error"] = "Failed to check agent status: " + std::string(e.what());
+                logger_->error("Exception checking agent deployment: " + std::string(e.what()),
+                             "AgentOrchestratorController", "monitorAgentHealth",
+                             {{"orchestrator", orchestrator_name}, {"agent", agent_name}});
             }
         }
 

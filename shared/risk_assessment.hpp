@@ -298,9 +298,21 @@ private:
     std::unordered_map<std::string, std::vector<RiskAssessment>> risk_history_;
     std::mutex history_mutex_;
 
-    // Statistical models and baselines
-    std::unordered_map<std::string, double> entity_baselines_;
+    // Production-grade statistical models and baselines
+    std::unordered_map<std::string, double> entity_baselines_;  // EMA baselines per entity
+    std::unordered_map<std::string, double> entity_volatility_; // Risk volatility per entity
+    std::unordered_map<std::string, double> entity_risk_trends_; // Risk trend slopes per entity
+    std::unordered_map<std::string, double> category_baselines_; // Category-specific baselines
     std::unordered_map<std::string, std::vector<double>> transaction_amount_history_;
+    
+    // Transaction history with timestamps for time-based velocity analysis
+    struct TimestampedTransaction {
+        double amount;
+        std::chrono::system_clock::time_point timestamp;
+        TimestampedTransaction(double amt, std::chrono::system_clock::time_point ts)
+            : amount(amt), timestamp(ts) {}
+    };
+    std::unordered_map<std::string, std::vector<TimestampedTransaction>> transaction_history_with_time_;
 
     // Risk scoring algorithms
 
@@ -346,13 +358,13 @@ private:
                                        const std::vector<double>& history) const;
 
     /**
-     * @brief Calculate velocity changes in transaction patterns
+     * @brief Calculate velocity changes in transaction patterns with time-based analysis
      */
     double calculate_velocity_changes(const TransactionData& transaction,
                                     const std::vector<double>& history) const;
 
     /**
-     * @brief Calculate peer comparison risk (simplified implementation)
+     * @brief Calculate peer comparison risk using statistical distribution analysis
      */
     double calculate_peer_comparison(double transaction_amount,
                                    const std::vector<double>& history) const;

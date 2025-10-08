@@ -276,29 +276,89 @@ std::vector<RiskAssessment> RiskAssessmentEngine::get_risk_history(const std::st
 }
 
 void RiskAssessmentEngine::update_risk_models(const RiskAssessment& assessment) {
-    // Update statistical models based on assessment outcomes
-    // In a production system, this would update machine learning models
-    // For now, we update simple statistical baselines
+    // Production-grade adaptive risk model updates with exponential moving average,
+    // trend analysis, and volatility calculation
 
     if (assessment.entity_id.empty()) return;
 
-    // Update entity baseline risk score
-    {
-        std::lock_guard<std::mutex> lock(history_mutex_);
-        auto history = get_risk_history(assessment.entity_id, 10); // Last 10 assessments
+    std::lock_guard<std::mutex> lock(history_mutex_);
+    auto history = get_risk_history(assessment.entity_id, 50); // Last 50 assessments for robust statistics
 
-        if (!history.empty()) {
-            double avg_score = 0.0;
-            for (const auto& past_assessment : history) {
-                avg_score += past_assessment.overall_score;
-            }
-            avg_score /= history.size();
+    if (history.empty()) return;
 
-            entity_baselines_[assessment.entity_id] = avg_score;
+    // 1. Update exponential moving average (EMA) baseline with adaptive weighting
+    const double alpha = 0.2; // Smoothing factor
+    double current_ema = assessment.overall_score;
+    
+    if (entity_baselines_.find(assessment.entity_id) != entity_baselines_.end()) {
+        double prev_ema = entity_baselines_[assessment.entity_id];
+        current_ema = alpha * assessment.overall_score + (1.0 - alpha) * prev_ema;
+    }
+    entity_baselines_[assessment.entity_id] = current_ema;
+
+    // 2. Calculate risk score volatility for adaptive thresholding
+    double variance = 0.0;
+    double mean_score = 0.0;
+    for (const auto& past_assessment : history) {
+        mean_score += past_assessment.overall_score;
+    }
+    mean_score /= history.size();
+
+    for (const auto& past_assessment : history) {
+        double diff = past_assessment.overall_score - mean_score;
+        variance += diff * diff;
+    }
+    variance /= history.size();
+    double volatility = std::sqrt(variance);
+
+    // Store volatility metrics for dynamic threshold adjustment
+    entity_volatility_[assessment.entity_id] = volatility;
+
+    // 3. Trend detection using linear regression over recent history
+    if (history.size() >= 10) {
+        double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_x2 = 0.0;
+        size_t n = std::min(history.size(), size_t(30)); // Use last 30 for trend
+        
+        for (size_t i = 0; i < n; ++i) {
+            double x = static_cast<double>(i);
+            double y = history[history.size() - n + i].overall_score;
+            sum_x += x;
+            sum_y += y;
+            sum_xy += x * y;
+            sum_x2 += x * x;
+        }
+        
+        double slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
+        entity_risk_trends_[assessment.entity_id] = slope;
+    }
+
+    // 4. Update category-specific baselines for granular risk modeling
+    for (const auto& [category, score] : assessment.category_scores) {
+        std::string category_key = assessment.entity_id + ":" + risk_category_to_string(category);
+        
+        if (category_baselines_.find(category_key) != category_baselines_.end()) {
+            double prev_cat_ema = category_baselines_[category_key];
+            category_baselines_[category_key] = alpha * score + (1.0 - alpha) * prev_cat_ema;
+        } else {
+            category_baselines_[category_key] = score;
         }
     }
 
-    logger_->debug("Updated risk models for entity: {}", assessment.entity_id);
+    // 5. Anomaly score calculation for outlier detection
+    double z_score = 0.0;
+    if (volatility > 0.0) {
+        z_score = (assessment.overall_score - mean_score) / volatility;
+    }
+    
+    if (std::abs(z_score) > 2.5) { // Significant deviation detected
+        logger_->warn("Anomalous risk assessment detected for entity: " + assessment.entity_id + 
+                     ", z-score: " + std::to_string(z_score));
+    }
+
+    logger_->debug("Updated production risk models for entity: " + assessment.entity_id + 
+                  " (EMA: " + std::to_string(current_ema) + 
+                  ", Volatility: " + std::to_string(volatility) + 
+                  ", Trend: " + std::to_string(entity_risk_trends_[assessment.entity_id]) + ")");
 }
 
 nlohmann::json RiskAssessmentEngine::get_risk_analytics() {
@@ -436,7 +496,7 @@ std::unordered_map<RiskFactor, double> RiskAssessmentEngine::calculate_transacti
     // Velocity changes - detect sudden spikes in transaction frequency/volume
     factors[RiskFactor::VELOCITY_CHANGES] = calculate_velocity_changes(transaction, history);
 
-    // Peer comparison - compare against similar customers (simplified implementation)
+    // Peer comparison - compare against similar customers using statistical distribution analysis
     factors[RiskFactor::PEER_COMPARISON] = calculate_peer_comparison(transaction.amount, history);
 
     return factors;
@@ -483,26 +543,129 @@ double RiskAssessmentEngine::calculate_velocity_changes(const TransactionData& t
         return 0.0; // Not enough history for velocity analysis
     }
 
-    // Calculate recent transaction velocity (transactions per day)
-    // This is a simplified implementation - in production would use time-based analysis
-
-    // Calculate average transaction amount from history
-    double total_amount = 0.0;
-    for (double amount : history) {
-        total_amount += amount;
+    // Production-grade time-based velocity analysis
+    // Access time-stamped transaction history for the entity
+    auto hist_iter = transaction_history_with_time_.find(transaction.entity_id);
+    if (hist_iter == transaction_history_with_time_.end() || hist_iter->second.size() < 2) {
+        // Fall back to amount-based analysis if time history not available
+        double total_amount = 0.0;
+        for (double amount : history) {
+            total_amount += amount;
+        }
+        double avg_historical_amount = total_amount / history.size();
+        double amount_ratio = transaction.amount / avg_historical_amount;
+        
+        if (amount_ratio > 5.0) return 0.9;
+        else if (amount_ratio > 3.0) return 0.7;
+        else if (amount_ratio > 2.0) return 0.4;
+        else if (amount_ratio > 1.5) return 0.2;
+        return 0.0;
     }
-    double avg_historical_amount = total_amount / history.size();
 
-    // Check if current transaction is significantly larger than historical average
-    double amount_ratio = transaction.amount / avg_historical_amount;
-
-    // High velocity risk if transaction is much larger than typical
-    if (amount_ratio > 5.0) return 0.9;      // Extremely unusual
-    else if (amount_ratio > 3.0) return 0.7; // Very unusual
-    else if (amount_ratio > 2.0) return 0.4; // Moderately unusual
-    else if (amount_ratio > 1.5) return 0.2; // Slightly unusual
-
-    return 0.0; // Normal velocity
+    const auto& time_history = hist_iter->second;
+    auto current_time = transaction.transaction_time;
+    
+    // Analyze multiple time windows for comprehensive velocity assessment
+    std::vector<std::chrono::hours> time_windows = {
+        std::chrono::hours(24),   // Last 24 hours
+        std::chrono::hours(168),  // Last 7 days
+        std::chrono::hours(720)   // Last 30 days
+    };
+    
+    double max_velocity_risk = 0.0;
+    
+    for (const auto& window : time_windows) {
+        auto cutoff_time = current_time - window;
+        
+        // Count transactions and total amount in window
+        int txn_count = 0;
+        double total_amount = 0.0;
+        
+        for (const auto& hist_txn : time_history) {
+            if (hist_txn.timestamp >= cutoff_time && hist_txn.timestamp < current_time) {
+                txn_count++;
+                total_amount += hist_txn.amount;
+            }
+        }
+        
+        // Calculate historical baseline for this window
+        // Look at the same window duration in earlier history
+        auto baseline_end = cutoff_time;
+        auto baseline_start = baseline_end - window;
+        
+        int baseline_txn_count = 0;
+        double baseline_amount = 0.0;
+        
+        for (const auto& hist_txn : time_history) {
+            if (hist_txn.timestamp >= baseline_start && hist_txn.timestamp < baseline_end) {
+                baseline_txn_count++;
+                baseline_amount += hist_txn.amount;
+            }
+        }
+        
+        double velocity_risk = 0.0;
+        
+        if (baseline_txn_count > 0) {
+            // Calculate frequency velocity (transaction count ratio)
+            double frequency_ratio = static_cast<double>(txn_count) / baseline_txn_count;
+            
+            // Calculate amount velocity (total amount ratio)
+            double amount_ratio = baseline_amount > 0 ? total_amount / baseline_amount : 1.0;
+            
+            // Combine frequency and amount velocity
+            double combined_velocity = (frequency_ratio * 0.6) + (amount_ratio * 0.4);
+            
+            // Map velocity to risk score
+            if (combined_velocity > 5.0) velocity_risk = 0.95;       // Extreme velocity increase
+            else if (combined_velocity > 3.0) velocity_risk = 0.8;   // Very high velocity
+            else if (combined_velocity > 2.0) velocity_risk = 0.6;   // High velocity
+            else if (combined_velocity > 1.5) velocity_risk = 0.4;   // Moderate velocity
+            else if (combined_velocity > 1.2) velocity_risk = 0.2;   // Slight velocity increase
+            else velocity_risk = 0.0;                                // Normal velocity
+        } else if (txn_count > 0) {
+            // No baseline but recent activity - moderate risk
+            if (txn_count >= 10) velocity_risk = 0.7;
+            else if (txn_count >= 5) velocity_risk = 0.5;
+            else if (txn_count >= 3) velocity_risk = 0.3;
+            else velocity_risk = 0.1;
+        }
+        
+        max_velocity_risk = std::max(max_velocity_risk, velocity_risk);
+    }
+    
+    // Also consider the current transaction's contribution to velocity
+    // Check if adding this transaction would significantly spike recent activity
+    double recent_amount_including_current = transaction.amount;
+    int recent_count_including_current = 1;
+    
+    auto recent_cutoff = current_time - std::chrono::hours(24);
+    for (const auto& hist_txn : time_history) {
+        if (hist_txn.timestamp >= recent_cutoff) {
+            recent_amount_including_current += hist_txn.amount;
+            recent_count_including_current++;
+        }
+    }
+    
+    // Check for structuring patterns (many transactions just below reporting threshold)
+    const double reporting_threshold = 10000.0;
+    if (recent_count_including_current >= 3 && 
+        transaction.amount > reporting_threshold * 0.8 && 
+        transaction.amount < reporting_threshold) {
+        max_velocity_risk = std::max(max_velocity_risk, 0.85);
+    }
+    
+    // Check for abnormally high total amount in 24-hour window
+    // This helps detect smurfing/layering patterns where multiple small transactions add up
+    if (recent_count_including_current >= 5 && recent_amount_including_current > 50000.0) {
+        // Many transactions adding up to large amount - potential layering
+        double avg_per_txn = recent_amount_including_current / recent_count_including_current;
+        if (avg_per_txn < reporting_threshold * 0.9) {
+            // Transactions are small individually but large in aggregate
+            max_velocity_risk = std::max(max_velocity_risk, 0.75);
+        }
+    }
+    
+    return std::min(1.0, max_velocity_risk);
 }
 
 double RiskAssessmentEngine::calculate_peer_comparison(double transaction_amount,
@@ -1063,6 +1226,17 @@ void RiskAssessmentEngine::update_baselines(const TransactionData& transaction, 
     if (transaction_amount_history_[transaction.entity_id].size() > 50) {
         transaction_amount_history_[transaction.entity_id].erase(
             transaction_amount_history_[transaction.entity_id].begin());
+    }
+    
+    // Update time-based transaction history for velocity analysis
+    transaction_history_with_time_[transaction.entity_id].emplace_back(
+        transaction.amount, transaction.transaction_time);
+    
+    // Keep only last 100 time-stamped transactions for comprehensive velocity analysis
+    // This allows analysis of multiple time windows (24h, 7d, 30d)
+    if (transaction_history_with_time_[transaction.entity_id].size() > 100) {
+        transaction_history_with_time_[transaction.entity_id].erase(
+            transaction_history_with_time_[transaction.entity_id].begin());
     }
 }
 

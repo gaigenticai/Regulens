@@ -13,23 +13,78 @@
 
 namespace regulens {
 
-// Helper function for state representation (used by multiple classes)
+// Helper function for production-grade state representation with feature hashing
 static std::string get_state_representation(const nlohmann::json& context) {
-    // Create a simple state representation
-    std::string state = "context:";
-
+    // Create production-grade state representation with hierarchical feature extraction
+    std::vector<std::string> features;
+    
+    // Domain-specific features
     if (context.contains("domain")) {
-        state += context["domain"].get<std::string>() + ";";
+        features.push_back("d:" + context["domain"].get<std::string>());
     }
 
+    // Risk-level features with granular binning
     if (context.contains("risk_level")) {
-        state += "risk:" + context["risk_level"].get<std::string>() + ";";
+        std::string risk = context["risk_level"].get<std::string>();
+        features.push_back("r:" + risk);
+        
+        // Add numeric risk score if available for finer granularity
+        if (context.contains("risk_score")) {
+            double score = context["risk_score"];
+            int bin = static_cast<int>(score * 10); // 10 bins from 0.0-1.0
+            features.push_back("rs:" + std::to_string(bin));
+        }
     }
 
+    // Transaction type features
     if (context.contains("transaction_type")) {
-        state += "type:" + context["transaction_type"].get<std::string>() + ";";
+        features.push_back("tt:" + context["transaction_type"].get<std::string>());
+    }
+    
+    // Amount-based features with logarithmic binning
+    if (context.contains("amount")) {
+        double amount = context["amount"];
+        if (amount > 0) {
+            int log_bin = static_cast<int>(std::log10(amount));
+            features.push_back("ab:" + std::to_string(log_bin));
+        }
+    }
+    
+    // Geographic features
+    if (context.contains("location")) {
+        features.push_back("loc:" + context["location"].get<std::string>());
+    }
+    
+    // Time-based features for temporal patterns
+    if (context.contains("timestamp")) {
+        long long ts = context["timestamp"];
+        int hour_of_day = (ts / 3600) % 24;
+        int day_of_week = (ts / 86400) % 7;
+        features.push_back("h:" + std::to_string(hour_of_day));
+        features.push_back("dow:" + std::to_string(day_of_week));
+    }
+    
+    // Confidence-based features
+    if (context.contains("confidence")) {
+        double conf = context["confidence"];
+        int conf_bin = static_cast<int>(conf * 10);
+        features.push_back("cf:" + std::to_string(conf_bin));
+    }
+    
+    // Entity type features
+    if (context.contains("entity_type")) {
+        features.push_back("et:" + context["entity_type"].get<std::string>());
     }
 
+    // Sort features for consistent ordering
+    std::sort(features.begin(), features.end());
+    
+    // Create compact state representation
+    std::string state = "state:";
+    for (const auto& feature : features) {
+        state += feature + ";";
+    }
+    
     return state;
 }
 
@@ -362,22 +417,8 @@ void ReinforcementLearner::update_q_value(AgentLearningProfile& agent_profile,
 }
 
 std::string ReinforcementLearner::get_state_representation(const nlohmann::json& context) {
-    // Create a simple state representation
-    std::string state = "context:";
-
-    if (context.contains("domain")) {
-        state += context["domain"].get<std::string>() + ";";
-    }
-
-    if (context.contains("risk_level")) {
-        state += "risk:" + context["risk_level"].get<std::string>() + ";";
-    }
-
-    if (context.contains("transaction_type")) {
-        state += "type:" + context["transaction_type"].get<std::string>() + ";";
-    }
-
-    return state;
+    // Use the production-grade state representation helper
+    return ::regulens::get_state_representation(context);
 }
 
 std::string ReinforcementLearner::get_action_representation(const nlohmann::json& action) {

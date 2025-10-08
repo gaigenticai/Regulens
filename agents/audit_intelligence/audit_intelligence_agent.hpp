@@ -29,7 +29,7 @@ class AuditIntelligenceAgent {
 public:
     AuditIntelligenceAgent(std::shared_ptr<ConfigurationManager> config,
                           std::shared_ptr<StructuredLogger> logger,
-                          std::shared_ptr<PostgreSQLConnectionPool> db_pool,
+                          std::shared_ptr<ConnectionPool> db_pool,
                           std::shared_ptr<AnthropicClient> llm_client,
                           std::shared_ptr<DecisionAuditTrailManager> audit_trail);
 
@@ -206,9 +206,25 @@ private:
      */
     nlohmann::json generate_basic_fraud_recommendations(const nlohmann::json& transaction_data);
 
+    // Helper methods for converting audit trail data
+    std::vector<AgentDecision> convert_audit_trails_to_decisions(const std::vector<nlohmann::json>& audit_trails);
+    DecisionType string_to_decision_type(const std::string& decision_str);
+    ConfidenceLevel int_to_confidence_level(int confidence_int);
+    double parse_structured_risk_response(const std::string& llm_response);
+    std::optional<std::chrono::system_clock::time_point> parse_iso_timestamp(const std::string& timestamp_str);
+    
+    // Pattern analysis helpers
+    nlohmann::json analyze_decision_patterns_from_audit_trails(const std::vector<nlohmann::json>& audit_trails);
+    std::vector<nlohmann::json> perform_advanced_pattern_recognition(const std::vector<nlohmann::json>& audit_data);
+    
+    /**
+     * @brief Analyze time-based risk patterns
+     */
+    double analyze_time_based_risk_patterns(const nlohmann::json& analysis_data);
+
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
-    std::shared_ptr<PostgreSQLConnectionPool> db_pool_;
+    std::shared_ptr<ConnectionPool> db_pool_;
     std::shared_ptr<AnthropicClient> llm_client_;
     std::shared_ptr<DecisionAuditTrailManager> audit_trail_;
 

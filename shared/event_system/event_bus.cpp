@@ -306,6 +306,21 @@ void EventBus::reset_statistics() {
     logger_->log(LogLevel::INFO, "Event Bus statistics reset");
 }
 
+size_t EventBus::get_pending_event_count() const {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    return event_queue_.size();
+}
+
+size_t EventBus::get_processing_event_count() const {
+    // For production: track events currently being processed by workers
+    // For now, return 0 as events are processed synchronously in worker threads
+    return 0;
+}
+
+size_t EventBus::get_failed_event_count() const {
+    return events_failed_.load();
+}
+
 // Private methods
 
 void EventBus::event_processing_loop() {

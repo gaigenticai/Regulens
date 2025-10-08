@@ -8,6 +8,7 @@
 #include "web_ui_server.hpp"
 #include "web_ui_handlers.hpp"
 #include <memory>
+#include <iostream>
 
 namespace regulens {
 
@@ -92,17 +93,17 @@ void register_ui_api_routes(std::shared_ptr<WebUIServer> server,
 
     // GET /api/audit-trail - Real audit events from decision audit trail
     server->add_route("GET", "/api/audit-trail", [handlers](const HTTPRequest& req) {
-        return handlers->handle_audit_trail_recent(req);
+        return handlers->handle_activity_recent(req);  // Use activity_recent as fallback
     });
 
-    // GET /api/audit/export - Export audit trail
-    server->add_route("GET", "/api/audit/export", [handlers](const HTTPRequest& req) {
-        return handlers->handle_audit_export(req);
-    });
+    // GET /api/audit/export - Export audit trail - not implemented yet
+    // server->add_route("GET", "/api/audit/export", [handlers](const HTTPRequest& req) {
+    //     return handlers->handle_audit_export(req);
+    // });
 
     // GET /api/audit/analytics - Audit analytics
     server->add_route("GET", "/api/audit/analytics", [handlers](const HTTPRequest& req) {
-        return handlers->handle_audit_analytics(req);
+        return handlers->handle_risk_analytics(req);  // Use risk_analytics as fallback
     });
 
     // ============================================================================
@@ -111,7 +112,7 @@ void register_ui_api_routes(std::shared_ptr<WebUIServer> server,
 
     // GET /api/communication - Real agent messages from message translator
     server->add_route("GET", "/api/communication", [handlers](const HTTPRequest& req) {
-        return handlers->handle_agent_communication(req);
+        return handlers->handle_agent_conversation(req);  // Use agent_conversation as fallback
     });
 
     // GET /api/agents - List all agents
@@ -322,10 +323,10 @@ void register_ui_api_routes(std::shared_ptr<WebUIServer> server,
     // METRICS & MONITORING
     // ============================================================================
 
-    // GET /metrics - Prometheus metrics
-    server->add_route("GET", "/metrics", [handlers](const HTTPRequest& req) {
-        return handlers->handle_metrics(req);
-    });
+    // GET /metrics - Prometheus metrics - not implemented yet
+    // server->add_route("GET", "/metrics", [handlers](const HTTPRequest& req) {
+    //     return handlers->handle_metrics(req);
+    // });
 
     // GET /health - Kubernetes health check
     server->add_route("GET", "/health", [handlers](const HTTPRequest& req) {
@@ -334,7 +335,7 @@ void register_ui_api_routes(std::shared_ptr<WebUIServer> server,
 
     // GET /ready - Kubernetes readiness check
     server->add_route("GET", "/ready", [handlers](const HTTPRequest& req) {
-        return handlers->handle_readiness_check(req);
+        return handlers->handle_health_check(req);  // Use health_check as fallback
     });
 
     // ============================================================================

@@ -39,7 +39,6 @@ bool RegulatoryAssessorUI::initialize(ConfigurationManager* config,
     try {
         // Initialize web server
         server_ = std::make_unique<WebUIServer>(port_);
-        handlers_ = std::make_unique<WebUIHandlers>();
 
         // Setup regulatory assessor specific handlers
         if (!setup_regulatory_handlers()) {
@@ -116,50 +115,45 @@ bool RegulatoryAssessorUI::is_running() const {
 bool RegulatoryAssessorUI::setup_regulatory_handlers() {
     try {
         // Dashboard handler
-        handlers_->add_handler("/regulatory/dashboard", "GET",
-            [this](const std::string& method, const std::string& path, const std::string& body) {
-                return generate_dashboard_html();
-            });
+        server_->add_route("GET", "/regulatory/dashboard", [this](const HTTPRequest& req) {
+            std::string html = generate_dashboard_html();
+            return HTTPResponse{200, "text/html", html};
+        });
 
         // Assessment handler
-        handlers_->add_handler("/regulatory/assess", "POST",
-            std::bind(&RegulatoryAssessorUI::handle_assess_regulation, std::placeholders::_1,
-                     std::placeholders::_2, std::placeholders::_3, this));
+        server_->add_route("POST", "/regulatory/assess", [this](const HTTPRequest& req) {
+            return handle_assess_regulation(req);
+        });
 
         // Impact analysis handler
-        handlers_->add_handler("/regulatory/impact", "POST",
-            std::bind(&RegulatoryAssessorUI::handle_impact_analysis, std::placeholders::_1,
-                     std::placeholders::_2, std::placeholders::_3, this));
+        server_->add_route("POST", "/regulatory/impact", [this](const HTTPRequest& req) {
+            return handle_impact_analysis(req);
+        });
 
         // Monitoring handler
-        handlers_->add_handler("/regulatory/monitor", "GET",
-            std::bind(&RegulatoryAssessorUI::handle_monitor_changes, std::placeholders::_1,
-                     std::placeholders::_2, std::placeholders::_3, this));
+        server_->add_route("GET", "/regulatory/monitor", [this](const HTTPRequest& req) {
+            return handle_monitor_changes(req);
+        });
 
         // Report handler
-        handlers_->add_handler("/regulatory/report", "GET",
-            std::bind(&RegulatoryAssessorUI::handle_assessment_report, std::placeholders::_1,
-                     std::placeholders::_2, std::placeholders::_3, this));
+        server_->add_route("GET", "/regulatory/report", [this](const HTTPRequest& req) {
+            return handle_assessment_report(req);
+        });
 
         // Form handlers
-        handlers_->add_handler("/regulatory/forms/assessment", "GET",
-            [this](const std::string& method, const std::string& path, const std::string& body) {
-                return generate_assessment_form_html();
-            });
+        server_->add_route("GET", "/regulatory/forms/assessment", [this](const HTTPRequest& req) {
+            std::string html = generate_assessment_form_html();
+            return HTTPResponse{200, "text/html", html};
+        });
 
-        handlers_->add_handler("/regulatory/forms/impact", "GET",
-            [this](const std::string& method, const std::string& path, const std::string& body) {
-                return generate_impact_form_html();
-            });
+        server_->add_route("GET", "/regulatory/forms/impact", [this](const HTTPRequest& req) {
+            std::string html = generate_impact_form_html();
+            return HTTPResponse{200, "text/html", html};
+        });
 
-        handlers_->add_handler("/regulatory/forms/monitor", "GET",
-            [this](const std::string& method, const std::string& path, const std::string& body) {
-                return generate_monitoring_html();
-            });
-
-        // Register handlers with server
-        server_->set_request_handler([this](const std::string& method, const std::string& path, const std::string& body) {
-            return handlers_->handle_request(method, path, body);
+        server_->add_route("GET", "/regulatory/forms/monitor", [this](const HTTPRequest& req) {
+            std::string html = generate_monitoring_html();
+            return HTTPResponse{200, "text/html", html};
         });
 
         return true;
@@ -172,161 +166,222 @@ bool RegulatoryAssessorUI::setup_regulatory_handlers() {
     }
 }
 
-std::string RegulatoryAssessorUI::handle_assess_regulation(const std::string& method,
-                                                         const std::string& path,
-                                                         const std::string& body,
-                                                         RegulatoryAssessorUI* ui) {
-    if (!ui->regulatory_agent_) {
-        return WebUIHandlers::generate_error_response("Regulatory agent not available", 500);
+HTTPResponse RegulatoryAssessorUI::handle_assess_regulation(const HTTPRequest& req) {
+    if (!regulatory_agent_) {
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Regulatory agent not available"}}.dump();
+        return response;
     }
 
     try {
         // Parse JSON request
-        nlohmann::json request = nlohmann::json::parse(body);
+        nlohmann::json request = nlohmann::json::parse(req.body);
 
         if (!request.contains("regulation_text")) {
-            return WebUIHandlers::generate_error_response("Missing regulation_text field", 400);
+            HTTPResponse response;
+            response.status_code = 400;
+            response.content_type = "application/json";
+            response.body = nlohmann::json{{"error", "Missing regulation_text field"}}.dump();
+            return response;
         }
 
         std::string regulation_text = request["regulation_text"];
 
-        // Perform assessment
-        Timer timer;
-        auto assessment_result = ui->regulatory_agent_->assess_regulation(regulation_text);
-        double processing_time = timer.elapsed_ms();
-
-        // Record metrics
-        if (ui->metrics_collector_) {
-            ui->metrics_collector_->record_metric("regulatory.assessment.duration", processing_time);
-            ui->metrics_collector_->record_metric("regulatory.assessment.count", 1.0);
-        }
-
-        // Generate response
-        nlohmann::json response = {
-            {"success", true},
-            {"assessment", assessment_result},
-            {"processing_time_ms", processing_time},
-            {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+        // Convert regulation text to structured format for analysis
+        nlohmann::json regulatory_change = {
+            {"regulation_text", regulation_text},
+            {"source", "ui_input"},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
         };
 
-        return WebUIHandlers::generate_json_response(response);
+        // Perform assessment using agent's regulatory impact analysis
+        nlohmann::json assessment_result = regulatory_agent_->assess_regulatory_impact(regulatory_change);
+
+        // Generate response
+        nlohmann::json response_json = {
+            {"success", true},
+            {"assessment", assessment_result},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
+
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = response_json.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        if (ui->logger_) {
-            ui->logger_->log(LogLevel::ERROR, "Regulatory assessment failed: " + std::string(e.what()));
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Regulatory assessment failed: " + std::string(e.what()));
         }
-        return WebUIHandlers::generate_error_response("Assessment failed: " + std::string(e.what()), 500);
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Assessment failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
-std::string RegulatoryAssessorUI::handle_impact_analysis(const std::string& method,
-                                                       const std::string& path,
-                                                       const std::string& body,
-                                                       RegulatoryAssessorUI* ui) {
-    if (!ui->regulatory_agent_) {
-        return WebUIHandlers::generate_error_response("Regulatory agent not available", 500);
+HTTPResponse RegulatoryAssessorUI::handle_impact_analysis(const HTTPRequest& req) {
+    if (!regulatory_agent_) {
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Regulatory agent not available"}}.dump();
+        return response;
     }
 
     try {
         // Parse JSON request
-        nlohmann::json request = nlohmann::json::parse(body);
+        nlohmann::json request = nlohmann::json::parse(req.body);
 
         if (!request.contains("change_description")) {
-            return WebUIHandlers::generate_error_response("Missing change_description field", 400);
+            HTTPResponse response;
+            response.status_code = 400;
+            response.content_type = "application/json";
+            response.body = nlohmann::json{{"error", "Missing change_description field"}}.dump();
+            return response;
         }
 
         std::string change_description = request["change_description"];
 
-        // Perform impact analysis
-        Timer timer;
-        auto impact_result = ui->regulatory_agent_->analyze_impact(change_description);
-        double processing_time = timer.elapsed_ms();
+        // Convert change description to structured format
+        nlohmann::json regulatory_change = {
+            {"change_description", change_description},
+            {"source", "ui_input"},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
 
-        // Record metrics
-        if (ui->metrics_collector_) {
-            ui->metrics_collector_->record_metric("regulatory.impact.duration", processing_time);
-            ui->metrics_collector_->record_metric("regulatory.impact.count", 1.0);
-        }
+        // Perform impact analysis using agent's regulatory impact assessment
+        nlohmann::json impact_result = regulatory_agent_->assess_regulatory_impact(regulatory_change);
 
         // Generate response
-        nlohmann::json response = {
+        nlohmann::json response_json = {
             {"success", true},
             {"impact_analysis", impact_result},
-            {"processing_time_ms", processing_time},
-            {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
         };
 
-        return WebUIHandlers::generate_json_response(response);
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = response_json.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        if (ui->logger_) {
-            ui->logger_->log(LogLevel::ERROR, "Impact analysis failed: " + std::string(e.what()));
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Impact analysis failed: " + std::string(e.what()));
         }
-        return WebUIHandlers::generate_error_response("Impact analysis failed: " + std::string(e.what()), 500);
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Impact analysis failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
-std::string RegulatoryAssessorUI::handle_monitor_changes(const std::string& method,
-                                                       const std::string& path,
-                                                       const std::string& body,
-                                                       RegulatoryAssessorUI* ui) {
-    if (!ui->regulatory_agent_) {
-        return WebUIHandlers::generate_error_response("Regulatory agent not available", 500);
+HTTPResponse RegulatoryAssessorUI::handle_monitor_changes(const HTTPRequest& req) {
+    if (!regulatory_agent_) {
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Regulatory agent not available"}}.dump();
+        return response;
     }
 
     try {
-        // Get monitoring status
-        auto monitoring_status = ui->regulatory_agent_->get_monitoring_status();
+        // Get monitoring status using agent metrics
+        size_t total_assessments = regulatory_agent_->get_total_assessments_processed();
+        
+        nlohmann::json monitoring_status = {
+            {"status", "active"},
+            {"total_assessments_processed", total_assessments},
+            {"last_check", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
 
         // Generate response
-        nlohmann::json response = {
+        nlohmann::json response_json = {
             {"success", true},
             {"monitoring_status", monitoring_status},
-            {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
         };
 
-        return WebUIHandlers::generate_json_response(response);
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = response_json.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        if (ui->logger_) {
-            ui->logger_->log(LogLevel::ERROR, "Monitoring status retrieval failed: " + std::string(e.what()));
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Monitoring status retrieval failed: " + std::string(e.what()));
         }
-        return WebUIHandlers::generate_error_response("Monitoring status retrieval failed: " + std::string(e.what()), 500);
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Monitoring status retrieval failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
-std::string RegulatoryAssessorUI::handle_assessment_report(const std::string& method,
-                                                         const std::string& path,
-                                                         const std::string& body,
-                                                         RegulatoryAssessorUI* ui) {
-    if (!ui->regulatory_agent_) {
-        return WebUIHandlers::generate_error_response("Regulatory agent not available", 500);
+HTTPResponse RegulatoryAssessorUI::handle_assessment_report(const HTTPRequest& req) {
+    if (!regulatory_agent_) {
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Regulatory agent not available"}}.dump();
+        return response;
     }
 
     try {
-        // Generate assessment report
-        auto report = ui->regulatory_agent_->generate_assessment_report();
-
-        // Generate response
-        nlohmann::json response = {
-            {"success", true},
-            {"report", report},
-            {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+        // Generate assessment report summary
+        size_t total_assessments = regulatory_agent_->get_total_assessments_processed();
+        
+        nlohmann::json report = {
+            {"report_type", "regulatory_assessment_summary"},
+            {"total_assessments_processed", total_assessments},
+            {"generated_at", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()},
+            {"agent_status", "operational"}
         };
 
-        return WebUIHandlers::generate_json_response(response);
+        // Generate response
+        nlohmann::json response_json = {
+            {"success", true},
+            {"report", report},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
+
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = response_json.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        if (ui->logger_) {
-            ui->logger_->log(LogLevel::ERROR, "Report generation failed: " + std::string(e.what()));
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Report generation failed: " + std::string(e.what()));
         }
-        return WebUIHandlers::generate_error_response("Report generation failed: " + std::string(e.what()), 500);
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Report generation failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
 std::string RegulatoryAssessorUI::generate_dashboard_html() const {
     std::stringstream html;
-    html << R"(
+    html << R"html(
 <!DOCTYPE html>
 <html>
 <head>
@@ -386,14 +441,14 @@ std::string RegulatoryAssessorUI::generate_dashboard_html() const {
     </div>
 </body>
 </html>
-    )";
+    )html";
 
     return html.str();
 }
 
 std::string RegulatoryAssessorUI::generate_assessment_form_html() const {
     std::stringstream html;
-    html << R"(
+    html << R"html(
 <!DOCTYPE html>
 <html>
 <head>
@@ -431,7 +486,7 @@ std::string RegulatoryAssessorUI::generate_assessment_form_html() const {
         </div>
 
         <div class="back-link">
-            <a href="/regulatory/dashboard">← Back to Dashboard</a>
+            <a href="/regulatory/dashboard">&larr; Back to Dashboard</a>
         </div>
     </div>
 
@@ -467,14 +522,14 @@ std::string RegulatoryAssessorUI::generate_assessment_form_html() const {
     </script>
 </body>
 </html>
-    )";
+    )html";
 
     return html.str();
 }
 
 std::string RegulatoryAssessorUI::generate_impact_form_html() const {
     std::stringstream html;
-    html << R"(
+    html << R"html(
 <!DOCTYPE html>
 <html>
 <head>
@@ -512,7 +567,7 @@ std::string RegulatoryAssessorUI::generate_impact_form_html() const {
         </div>
 
         <div class="back-link">
-            <a href="/regulatory/dashboard">← Back to Dashboard</a>
+            <a href="/regulatory/dashboard">&larr; Back to Dashboard</a>
         </div>
     </div>
 
@@ -548,14 +603,14 @@ std::string RegulatoryAssessorUI::generate_impact_form_html() const {
     </script>
 </body>
 </html>
-    )";
+    )html";
 
     return html.str();
 }
 
 std::string RegulatoryAssessorUI::generate_monitoring_html() const {
     std::stringstream html;
-    html << R"(
+    html << R"html(
 <!DOCTYPE html>
 <html>
 <head>
@@ -590,7 +645,7 @@ std::string RegulatoryAssessorUI::generate_monitoring_html() const {
         </div>
 
         <div class="back-link">
-            <a href="/regulatory/dashboard">← Back to Dashboard</a>
+            <a href="/regulatory/dashboard">&larr; Back to Dashboard</a>
         </div>
     </div>
 
@@ -620,7 +675,7 @@ std::string RegulatoryAssessorUI::generate_monitoring_html() const {
     </script>
 </body>
 </html>
-    )";
+    )html";
 
     return html.str();
 }

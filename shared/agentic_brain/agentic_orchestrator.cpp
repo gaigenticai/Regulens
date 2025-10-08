@@ -710,7 +710,7 @@ Return the optimized tool sequence with execution metadata.
 
 nlohmann::json AgenticOrchestrator::discover_unknown_tools(const nlohmann::json& requirements) {
     // Check if autonomous tool integration is enabled
-    if (!capability_config_.enable_autonomous_tool_integration) {
+    if (!capability_config_.enable_autonomous_integration) {
         logger_->log(LogLevel::INFO, "Autonomous tool integration disabled via environment configuration");
         return {{"discovered_tools", nlohmann::json::array()}, {"error", "Autonomous tool integration disabled"}};
     }

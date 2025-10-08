@@ -19,6 +19,8 @@
 #include "../shared/models/compliance_event.hpp"
 #include "../shared/models/agent_decision.hpp"
 #include "../shared/models/agent_state.hpp"
+#include "agent_communication.hpp"  // Provides MessageType, AgentMessage, AgentCommCapabilities
+#include "consensus_engine.hpp"      // Provides ConsensusAlgorithm, ConsensusResult
 
 namespace regulens {
 
@@ -28,7 +30,7 @@ class EventProcessor;
 class KnowledgeBase;
 class MetricsCollector;
 class InterAgentCommunicator;
-class AgentRegistry;
+class AgentCommRegistry;
 class IntelligentMessageTranslator;
 class ConsensusEngine;
 class CommunicationMediator;
@@ -72,14 +74,14 @@ struct AgentRegistration {
     std::string agent_type;
     std::string agent_name;
     std::shared_ptr<ComplianceAgent> agent_instance;
-    AgentCapabilities capabilities;
+    AgentCommCapabilities capabilities;
     bool active;
 
     // Default constructor for map operations
     AgentRegistration() = default;
 
     AgentRegistration(std::string type, std::string name, std::shared_ptr<ComplianceAgent> instance,
-                     AgentCapabilities caps, bool act = true)
+                     AgentCommCapabilities caps, bool act = true)
         : agent_type(std::move(type)), agent_name(std::move(name)), agent_instance(std::move(instance)),
           capabilities(std::move(caps)), active(act) {}
 };
@@ -152,6 +154,12 @@ public:
      * @return JSON status information
      */
     nlohmann::json get_status() const;
+    
+    /**
+     * @brief Get thread pool statistics for health monitoring
+     * @return JSON with thread pool metrics
+     */
+    nlohmann::json get_thread_pool_stats() const;
 
     /**
      * @brief Enable/disable an agent type
@@ -288,6 +296,7 @@ public:
     // Helper methods for improved modularity
     bool initialize_components();
     bool initialize_agents();
+    bool initialize_communication_system();
     void register_system_metrics();
     bool validate_agent_registration(const AgentRegistration& registration) const;
     bool prepare_task_execution(const AgentTask& task, std::shared_ptr<ComplianceAgent>& agent);
@@ -317,7 +326,7 @@ public:
     std::shared_ptr<MetricsCollector> metrics_collector_;
 
     // Multi-agent communication system
-    std::shared_ptr<AgentRegistry> agent_registry_;
+    std::shared_ptr<AgentCommRegistry> agent_registry_;
     std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
     std::shared_ptr<IntelligentMessageTranslator> message_translator_;
     std::shared_ptr<ConsensusEngine> consensus_engine_;

@@ -41,7 +41,6 @@ bool AuditIntelligenceUI::initialize(ConfigurationManager* config,
     try {
         // Initialize web server
         server_ = std::make_unique<WebUIServer>(port_);
-        handlers_ = std::make_unique<WebUIHandlers>();
 
         // Setup audit intelligence specific handlers
         if (!setup_audit_handlers()) {
@@ -100,66 +99,84 @@ bool AuditIntelligenceUI::is_running() const {
 }
 
 bool AuditIntelligenceUI::setup_audit_handlers() {
-    if (!server_ || !handlers_) return false;
+    if (!server_) return false;
 
     // Main dashboard
-    server_->add_handler("/audit", [this](const httplib::Request& req, httplib::Response& res) {
-        res.set_content(generate_dashboard_html(), "text/html");
+    server_->add_route("GET", "/audit", [this](const HTTPRequest& req) {
+        std::string html = generate_dashboard_html();
+        return HTTPResponse{200, "text/html", html};
     });
 
     // Analyze audit trails
-    server_->add_handler("/audit/analyze", [this](const httplib::Request& req, httplib::Response& res) {
+    server_->add_route("GET", "/audit/analyze", [this](const HTTPRequest& req) {
         if (!audit_agent_) {
-            res.status = 500;
-            res.set_content("Audit agent not available", "text/plain");
-            return;
+            HTTPResponse response;
+            response.status_code = 500;
+            response.content_type = "application/json";
+            response.body = nlohmann::json{{"error", "Audit agent not available"}}.dump();
+            return response;
         }
 
         int hours = 24; // Default to 24 hours
-        if (req.has_param("hours")) {
+        auto it = req.query_params.find("hours");
+        if (it != req.query_params.end()) {
             try {
-                hours = std::stoi(req.get_param_value("hours"));
+                hours = std::stoi(it->second);
             } catch (...) {
                 hours = 24;
             }
         }
 
         auto anomalies = audit_agent_->analyze_audit_trails(hours);
-        res.set_content(generate_anomaly_report_html(anomalies), "text/html");
+        std::string html = generate_anomaly_report_html(anomalies);
+        return HTTPResponse{200, "text/html", html};
     });
 
     // Test compliance monitoring
-    server_->add_handler("/audit/compliance", [this](const httplib::Request& req, httplib::Response& res) {
+    server_->add_route("GET", "/audit/compliance", [this](const HTTPRequest& req) {
         if (!audit_agent_) {
-            res.status = 500;
-            res.set_content("Audit agent not available", "text/plain");
-            return;
+            HTTPResponse response;
+            response.status_code = 500;
+            response.content_type = "application/json";
+            response.body = nlohmann::json{{"error", "Audit agent not available"}}.dump();
+            return response;
         }
 
-        // Create a test compliance event
-        ComplianceEvent test_event(
-            "TEST_COMPLIANCE_EVENT",
-            "MEDIUM",
-            "Test compliance event for UI demonstration",
+        // Create a production-grade test compliance event with proper structure
+        EventSource source{
             "audit_intelligence_ui",
-            "ui_testing",
-            nlohmann::json{{"test_data", "sample_compliance_check"}},
-            std::chrono::system_clock::now()
+            "ui_testing_instance_001",
+            "local_system"
+        };
+
+        EventMetadata metadata;
+        metadata["test_category"] = std::string("ui_demonstration");
+        metadata["sample_id"] = std::string("compliance_check_001");
+
+        ComplianceEvent test_event(
+            EventType::AUDIT_LOG_ENTRY,
+            EventSeverity::MEDIUM,
+            "Test compliance event for UI demonstration - validates monitoring capabilities",
+            source,
+            metadata
         );
 
         auto decision = audit_agent_->perform_compliance_monitoring(test_event);
-        res.set_content(generate_risk_analysis_html(decision), "text/html");
+        std::string html = generate_risk_analysis_html(decision);
+        return HTTPResponse{200, "text/html", html};
     });
 
     // Test fraud detection
-    server_->add_handler("/audit/fraud", [this](const httplib::Request& req, httplib::Response& res) {
+    server_->add_route("GET", "/audit/fraud", [this](const HTTPRequest& req) {
         if (!audit_agent_) {
-            res.status = 500;
-            res.set_content("Audit agent not available", "text/plain");
-            return;
+            HTTPResponse response;
+            response.status_code = 500;
+            response.content_type = "application/json";
+            response.body = nlohmann::json{{"error", "Audit agent not available"}}.dump();
+            return response;
         }
 
-        // Create test transaction data
+        // Create production-grade test transaction data
         nlohmann::json test_transaction = {
             {"amount", 5000.0},
             {"currency", "USD"},
@@ -167,19 +184,25 @@ bool AuditIntelligenceUI::setup_audit_handlers() {
             {"usual_location", "New York"},
             {"transaction_type", "wire_transfer"},
             {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count()}
+                std::chrono::system_clock::now().time_since_epoch()).count()},
+            {"account_id", "test_account_12345"},
+            {"velocity_score", 0.75},
+            {"risk_factors", nlohmann::json::array({"location_mismatch", "high_amount"})}
         };
 
         auto fraud_analysis = audit_agent_->detect_fraud_patterns(test_transaction);
-        res.set_content(generate_fraud_analysis_html(fraud_analysis), "text/html");
+        std::string html = generate_fraud_analysis_html(fraud_analysis);
+        return HTTPResponse{200, "text/html", html};
     });
 
     // Generate audit report
-    server_->add_handler("/audit/report", [this](const httplib::Request& req, httplib::Response& res) {
+    server_->add_route("GET", "/audit/report", [this](const HTTPRequest& req) {
         if (!audit_agent_) {
-            res.status = 500;
-            res.set_content("Audit agent not available", "text/plain");
-            return;
+            HTTPResponse response;
+            response.status_code = 500;
+            response.content_type = "application/json";
+            response.body = nlohmann::json{{"error", "Audit agent not available"}}.dump();
+            return response;
         }
 
         auto now = std::chrono::system_clock::now();
@@ -189,8 +212,8 @@ bool AuditIntelligenceUI::setup_audit_handlers() {
 
         std::string template_content = load_template("audit_report.html");
         if (template_content.empty()) {
-            res.set_content("<html><body><h1>Error: Template not found</h1></body></html>", "text/html");
-            return;
+            std::string html = "<html><body><h1>Audit Report</h1><pre>" + report.dump(2) + "</pre></body></html>";
+            return HTTPResponse{200, "text/html", html};
         }
 
         std::map<std::string, std::string> replacements;
@@ -198,7 +221,7 @@ bool AuditIntelligenceUI::setup_audit_handlers() {
         replacements["report_content"] = report.dump(2);
 
         std::string html = replace_placeholders(template_content, replacements);
-        res.set_content(html, "text/html");
+        return HTTPResponse{200, "text/html", html};
     });
 
     return true;
@@ -245,16 +268,20 @@ std::string AuditIntelligenceUI::generate_anomaly_report_html(const std::vector<
     } else {
         for (const auto& anomaly : anomalies) {
             std::string severity_class = "low";
-            if (anomaly.severity == "HIGH") severity_class = "high";
-            else if (anomaly.severity == "MEDIUM") severity_class = "medium";
+            EventSeverity sev = anomaly.get_severity();
+            if (sev == EventSeverity::HIGH) severity_class = "high";
+            else if (sev == EventSeverity::MEDIUM) severity_class = "medium";
+            else if (sev == EventSeverity::CRITICAL) severity_class = "critical";
 
             anomalies_stream << R"(
         <div class="anomaly )" << severity_class << R"(">
-            <h3>)" << anomaly.event_type << R"( - )" << anomaly.severity << R"(</h3>
-            <p><strong>Description:</strong> )" << anomaly.description << R"(</p>
-            <p><strong>Source:</strong> )" << anomaly.source_type << R"( - )" << anomaly.source_id << R"(</p>
+            <h3>)" << event_type_to_string(anomaly.get_type()) << R"( - )" 
+                    << event_severity_to_string(anomaly.get_severity()) << R"(</h3>
+            <p><strong>Description:</strong> )" << anomaly.get_description() << R"(</p>
+            <p><strong>Source:</strong> )" << anomaly.get_source().source_type << R"( - )" 
+                    << anomaly.get_source().source_id << R"(</p>
             <p><strong>Time:</strong> )" << std::chrono::duration_cast<std::chrono::seconds>(
-                anomaly.occurred_at.time_since_epoch()).count() << R"(</p>
+                anomaly.get_timestamp().time_since_epoch()).count() << R"(</p>
         </div>)";
         }
     }

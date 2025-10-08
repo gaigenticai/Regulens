@@ -231,31 +231,58 @@ void RegulatoryMonitorUI::setup_routes() {
     server_->add_route("GET", "/api/activities/export", [this](const HTTPRequest& req) {
         // Production-grade CSV export for agent activities
         try {
-            std::string headers = "Event ID,Agent Type,Agent Name,Event Type,Event Category,"
-                                "Description,Severity,Entity ID,Entity Type,Occurred At,Processed At\n";
+            std::string headers = "Event ID,Agent ID,Activity Type,Title,"
+                                "Description,Severity,Timestamp\n";
 
             std::string csv_content = headers;
 
+            // Helper lambda to convert activity type enum to string
+            auto activity_type_to_string = [](AgentActivityType type) -> std::string {
+                switch(type) {
+                    case AgentActivityType::AGENT_STARTED: return "AGENT_STARTED";
+                    case AgentActivityType::AGENT_STOPPED: return "AGENT_STOPPED";
+                    case AgentActivityType::AGENT_ERROR: return "AGENT_ERROR";
+                    case AgentActivityType::AGENT_HEALTH_CHANGE: return "AGENT_HEALTH_CHANGE";
+                    case AgentActivityType::DECISION_MADE: return "DECISION_MADE";
+                    case AgentActivityType::TASK_STARTED: return "TASK_STARTED";
+                    case AgentActivityType::TASK_COMPLETED: return "TASK_COMPLETED";
+                    case AgentActivityType::TASK_FAILED: return "TASK_FAILED";
+                    case AgentActivityType::EVENT_RECEIVED: return "EVENT_RECEIVED";
+                    case AgentActivityType::EVENT_PROCESSED: return "EVENT_PROCESSED";
+                    case AgentActivityType::STATE_CHANGED: return "STATE_CHANGED";
+                    case AgentActivityType::METRICS_UPDATED: return "METRICS_UPDATED";
+                    case AgentActivityType::CONFIGURATION_CHANGED: return "CONFIGURATION_CHANGED";
+                    case AgentActivityType::LEARNING_OCCURRED: return "LEARNING_OCCURRED";
+                    default: return "UNKNOWN";
+                }
+            };
+
+            // Helper lambda to convert severity enum to string
+            auto severity_to_string = [](ActivitySeverity severity) -> std::string {
+                switch(severity) {
+                    case ActivitySeverity::INFO: return "INFO";
+                    case ActivitySeverity::WARNING: return "WARNING";
+                    case ActivitySeverity::ERROR: return "ERROR";
+                    case ActivitySeverity::CRITICAL: return "CRITICAL";
+                    default: return "UNKNOWN";
+                }
+            };
+
             // Get activities from the activity feed system
-            if (activity_feed_) {
-                auto activities = activity_feed_->get_recent_activities(1000); // Export up to 1000 activities
+            auto activity_feed = handlers_->get_activity_feed();
+            if (activity_feed) {
+                auto activities = activity_feed->get_recent_activities("", 1000); // Export up to 1000 activities
 
                 for (const auto& activity : activities) {
                     std::vector<std::string> row = {
                         activity.event_id,
-                        activity.agent_type,
-                        activity.agent_name,
-                        activity.event_type,
-                        activity.event_category,
+                        activity.agent_id,
+                        activity_type_to_string(activity.activity_type),
+                        activity.title,
                         activity.description,
-                        activity.severity,
-                        activity.entity_id.value_or(""),
-                        activity.entity_type.value_or(""),
+                        severity_to_string(activity.severity),
                         std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-                            activity.occurred_at.time_since_epoch()).count()),
-                        activity.processed_at ?
-                            std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                activity.processed_at->time_since_epoch()).count()) : ""
+                            activity.timestamp.time_since_epoch()).count())
                     };
 
                     // Escape CSV fields containing commas, quotes, or newlines
@@ -286,8 +313,9 @@ void RegulatoryMonitorUI::setup_routes() {
             csv_content += "\n\"Export Metadata\",\"Generated At\",\"" +
                           std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
                               std::chrono::system_clock::now().time_since_epoch()).count()) + "\"\n";
+            auto activity_feed_for_count = handlers_->get_activity_feed();
             csv_content += "\"Export Metadata\",\"Total Activities\",\"" +
-                          (activity_feed_ ? std::to_string(activity_feed_->get_recent_activities(1000).size()) : "0") + "\"\n";
+                          (activity_feed_for_count ? std::to_string(activity_feed_for_count->get_recent_activities("", 1000).size()) : "0") + "\"\n";
 
             HTTPResponse response;
             response.status_code = 200;

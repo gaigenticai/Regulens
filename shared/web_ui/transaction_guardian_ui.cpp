@@ -39,7 +39,6 @@ bool TransactionGuardianUI::initialize(ConfigurationManager* config,
     try {
         // Initialize web server
         server_ = std::make_unique<WebUIServer>(port_);
-        handlers_ = std::make_unique<WebUIHandlers>();
 
         // Setup transaction guardian specific handlers
         setup_transaction_handlers();
@@ -96,39 +95,40 @@ void TransactionGuardianUI::setup_transaction_handlers() {
     if (!server_) return;
 
     // Main page
-    server_->Get("/", [this](const httplib::Request& req, httplib::Response& res) {
-        res.set_content(generate_main_page(), "text/html");
+    server_->add_route("GET", "/", [this](const HTTPRequest& req) {
+        std::string html = generate_main_page();
+        return HTTPResponse{200, "text/html", html};
     });
 
     // Transaction submission
-    server_->Post("/submit-transaction", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_transaction_submission(req, res);
+    server_->add_route("POST", "/submit-transaction", [this](const HTTPRequest& req) {
+        return handle_transaction_submission(req);
     });
 
     // Monitoring dashboard
-    server_->Get("/monitoring", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_monitoring_dashboard(req, res);
+    server_->add_route("GET", "/monitoring", [this](const HTTPRequest& req) {
+        return handle_monitoring_dashboard(req);
     });
 
     // Compliance report
-    server_->Get("/compliance-report", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_compliance_report(req, res);
+    server_->add_route("GET", "/compliance-report", [this](const HTTPRequest& req) {
+        return handle_compliance_report(req);
     });
 
     // Velocity check
-    server_->Post("/velocity-check", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_velocity_check(req, res);
+    server_->add_route("POST", "/velocity-check", [this](const HTTPRequest& req) {
+        return handle_velocity_check(req);
     });
 
     // Fraud detection
-    server_->Post("/fraud-detection", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_fraud_detection(req, res);
+    server_->add_route("POST", "/fraud-detection", [this](const HTTPRequest& req) {
+        return handle_fraud_detection(req);
     });
 }
 
 std::string TransactionGuardianUI::generate_main_page() {
     std::stringstream html;
-    html << R"(
+    html << R"html(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -298,41 +298,56 @@ std::string TransactionGuardianUI::generate_main_page() {
     </script>
 </body>
 </html>
-    )";
+    )html";
 
     return html.str();
 }
 
-void TransactionGuardianUI::handle_transaction_submission(const httplib::Request& req, httplib::Response& res) {
+HTTPResponse TransactionGuardianUI::handle_transaction_submission(const HTTPRequest& req) {
     if (!transaction_agent_) {
-        res.status = 500;
-        res.set_content("{\"error\": \"Transaction agent not initialized\"}", "application/json");
-        return;
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Transaction agent not initialized"}}.dump();
+        return response;
     }
 
     try {
         auto transaction_data = nlohmann::json::parse(req.body);
 
-        // Process transaction
-        Timer timer;
+        // Process transaction with production-grade timing
+        auto start_time = std::chrono::high_resolution_clock::now();
         auto decision = transaction_agent_->process_transaction(transaction_data);
-        auto processing_time = timer.elapsed_ms();
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
-        // Add processing time to response
-        decision.decision_timestamp = std::chrono::system_clock::now();
-        decision.reasoning["processing_time_ms"] = processing_time;
+        // Build response with comprehensive data
+        nlohmann::json response_data = decision.to_json();
+        response_data["processing_time_ms"] = processing_time;
+        response_data["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
 
-        res.set_content(decision.reasoning.dump(2), "application/json");
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = response_data.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        res.status = 500;
-        res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}", "application/json");
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Transaction submission failed: " + std::string(e.what()));
+        }
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Transaction processing failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
-void TransactionGuardianUI::handle_monitoring_dashboard(const httplib::Request& req, httplib::Response& res) {
+HTTPResponse TransactionGuardianUI::handle_monitoring_dashboard(const HTTPRequest& req) {
     std::stringstream html;
-    html << R"(
+    html << R"html(
 <!DOCTYPE html>
 <html>
 <head>
@@ -361,16 +376,18 @@ void TransactionGuardianUI::handle_monitoring_dashboard(const httplib::Request& 
     <a href="/">Back to Home</a>
 </body>
 </html>
-    )";
+    )html";
 
-    res.set_content(html.str(), "text/html");
+    return HTTPResponse{200, "text/html", html.str()};
 }
 
-void TransactionGuardianUI::handle_compliance_report(const httplib::Request& req, httplib::Response& res) {
+HTTPResponse TransactionGuardianUI::handle_compliance_report(const HTTPRequest& req) {
     if (!transaction_agent_) {
-        res.status = 500;
-        res.set_content("{\"error\": \"Transaction agent not initialized\"}", "application/json");
-        return;
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Transaction agent not initialized"}}.dump();
+        return response;
     }
 
     try {
@@ -379,19 +396,31 @@ void TransactionGuardianUI::handle_compliance_report(const httplib::Request& req
 
         auto report = transaction_agent_->generate_compliance_report(start_time, end_time);
 
-        res.set_content(report.dump(2), "application/json");
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = report.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        res.status = 500;
-        res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}", "application/json");
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Compliance report generation failed: " + std::string(e.what()));
+        }
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Report generation failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
-void TransactionGuardianUI::handle_velocity_check(const httplib::Request& req, httplib::Response& res) {
+HTTPResponse TransactionGuardianUI::handle_velocity_check(const HTTPRequest& req) {
     if (!transaction_agent_) {
-        res.status = 500;
-        res.set_content("{\"error\": \"Transaction agent not initialized\"}", "application/json");
-        return;
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Transaction agent not initialized"}}.dump();
+        return response;
     }
 
     try {
@@ -401,19 +430,31 @@ void TransactionGuardianUI::handle_velocity_check(const httplib::Request& req, h
 
         auto result = transaction_agent_->monitor_velocity(customer_id, amount);
 
-        res.set_content(result.dump(2), "application/json");
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = result.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        res.status = 500;
-        res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}", "application/json");
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Velocity check failed: " + std::string(e.what()));
+        }
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Velocity check failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 
-void TransactionGuardianUI::handle_fraud_detection(const httplib::Request& req, httplib::Response& res) {
+HTTPResponse TransactionGuardianUI::handle_fraud_detection(const HTTPRequest& req) {
     if (!transaction_agent_) {
-        res.status = 500;
-        res.set_content("{\"error\": \"Transaction agent not initialized\"}", "application/json");
-        return;
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Transaction agent not initialized"}}.dump();
+        return response;
     }
 
     try {
@@ -421,11 +462,21 @@ void TransactionGuardianUI::handle_fraud_detection(const httplib::Request& req, 
 
         auto result = transaction_agent_->detect_fraud(transaction_data);
 
-        res.set_content(result.dump(2), "application/json");
+        HTTPResponse response;
+        response.status_code = 200;
+        response.content_type = "application/json";
+        response.body = result.dump(2);
+        return response;
 
     } catch (const std::exception& e) {
-        res.status = 500;
-        res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}", "application/json");
+        if (logger_) {
+            logger_->log(LogLevel::ERROR, "Fraud detection failed: " + std::string(e.what()));
+        }
+        HTTPResponse response;
+        response.status_code = 500;
+        response.content_type = "application/json";
+        response.body = nlohmann::json{{"error", "Fraud detection failed"}, {"message", e.what()}}.dump();
+        return response;
     }
 }
 

@@ -42,6 +42,7 @@ endif()
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(CURL REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # Find system-installed libraries (now available via homebrew)
 find_package(nlohmann_json REQUIRED)
@@ -214,6 +215,8 @@ target_link_libraries(regulens
         regulens_shared
         regulens_regulatory_monitor
         regulens_web_ui
+        regulens_audit
+        regulens_agents
         Threads::Threads
         CURL::libcurl
         ${Boost_LIBRARIES}

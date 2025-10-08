@@ -319,6 +319,14 @@ private:
                                const std::vector<float>& embedding2) const;
 
     /**
+     * @brief Calculate topic-based similarity between query and memory entry
+     * @param query Memory query with required topics
+     * @param entry Memory entry to compare
+     * @return Similarity score (0.0-1.0)
+     */
+    double calculate_topic_similarity(const MemoryQuery& query, const MemoryEntry& entry) const;
+
+    /**
      * @brief Extract topics and tags from memory content
      * @param entry Memory entry
      * @return Pair of topics and compliance tags

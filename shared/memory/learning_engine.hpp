@@ -347,6 +347,13 @@ private:
      */
     double calculate_pattern_similarity(const LearnedPattern& pattern1,
                                      const LearnedPattern& pattern2);
+
+    /**
+     * @brief Extract context features for pattern matching
+     * @param context Decision context
+     * @return Feature map with weights
+     */
+    std::unordered_map<std::string, double> extract_context_features(const nlohmann::json& context);
 };
 
 /**
@@ -486,6 +493,13 @@ private:
      * @brief Perform periodic learning maintenance
      */
     void perform_learning_maintenance();
+
+    /**
+     * @brief Export agent profile to JSON
+     * @param profile Agent learning profile
+     * @return JSON representation of profile
+     */
+    nlohmann::json export_agent_profile(const AgentLearningProfile& profile);
 };
 
 /**
@@ -505,5 +519,12 @@ std::shared_ptr<LearningEngine> create_learning_engine(
     std::shared_ptr<AnthropicClient> anthropic_client,
     StructuredLogger* logger,
     ErrorHandler* error_handler);
+
+/**
+ * @brief Convert feedback type to string representation
+ * @param type Feedback type
+ * @return String representation
+ */
+std::string feedback_type_to_string(LearningFeedbackType type);
 
 } // namespace regulens

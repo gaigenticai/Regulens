@@ -34,9 +34,10 @@ public:
             try {
                 auto conn = pool_->get_connection();
                 if (!conn) {
-                    logger_->error("Failed to acquire database connection",
-                                 {{"operation", operation_name},
-                                  {"retry", std::to_string(retry_count)}});
+                logger_->error("Failed to acquire database connection",
+                             "DatabaseOperationExecutor", "execute_with_retry",
+                             {{"operation", operation_name},
+                              {"retry", std::to_string(retry_count)}});
                     retry_count++;
                     std::this_thread::sleep_for(backoff);
                     backoff *= 2;
@@ -53,15 +54,17 @@ public:
                 // Operation failed, retry
                 retry_count++;
                 if (retry_count < max_retries_) {
-                    logger_->warning("Database operation failed, retrying",
-                                   {{"operation", operation_name},
-                                    {"retry", std::to_string(retry_count)},
-                                    {"max_retries", std::to_string(max_retries_)}});
+                    logger_->warn("Database operation failed, retrying",
+                                "DatabaseOperationExecutor", "execute_with_retry",
+                                {{"operation", operation_name},
+                                 {"retry", std::to_string(retry_count)},
+                                 {"max_retries", std::to_string(max_retries_)}});
                     std::this_thread::sleep_for(backoff);
                     backoff *= 2;
                 }
             } catch (const std::exception& e) {
                 logger_->error("Database operation exception",
+                             "DatabaseOperationExecutor", "execute_with_retry",
                              {{"operation", operation_name},
                               {"error", e.what()},
                               {"retry", std::to_string(retry_count)}});
@@ -74,12 +77,13 @@ public:
         }
 
         logger_->error("Database operation failed after all retries",
+                     "DatabaseOperationExecutor", "execute_with_retry",
                      {{"operation", operation_name},
                       {"retries", std::to_string(max_retries_)}});
         return false;
     }
 
-    template<typename Func, typename ResultType>
+    template<typename ResultType, typename Func>
     std::optional<ResultType> execute_query_with_retry(
         const std::string& operation_name, Func&& func) {
         int retry_count = 0;
@@ -109,6 +113,7 @@ public:
                 }
             } catch (const std::exception& e) {
                 logger_->error("Query execution exception",
+                             "DatabaseOperationExecutor", "execute_query_with_retry",
                              {{"operation", operation_name},
                               {"error", e.what()}});
                 retry_count++;
@@ -129,7 +134,7 @@ private:
 };
 
 // Private implementation class (PIMPL pattern for better encapsulation)
-class RegulatoryKnowledgeBaseImpl {
+class RegulatoryKnowledgeBase::RegulatoryKnowledgeBaseImpl {
 public:
     std::shared_ptr<ConnectionPool> connection_pool;
     std::unique_ptr<DatabaseOperationExecutor> db_executor;
@@ -140,6 +145,36 @@ public:
     struct CacheEntry {
         RegulatoryChange change;
         std::chrono::system_clock::time_point cached_at;
+        
+        // Explicit constructor
+        CacheEntry(const RegulatoryChange& c, std::chrono::system_clock::time_point t)
+            : change(c), cached_at(t) {}
+        
+        // Copy constructor
+        CacheEntry(const CacheEntry& other)
+            : change(other.change), cached_at(other.cached_at) {}
+        
+        // Move constructor
+        CacheEntry(CacheEntry&& other) noexcept
+            : change(std::move(other.change)), cached_at(other.cached_at) {}
+        
+        // Copy assignment
+        CacheEntry& operator=(const CacheEntry& other) {
+            if (this != &other) {
+                change = other.change;
+                cached_at = other.cached_at;
+            }
+            return *this;
+        }
+        
+        // Move assignment
+        CacheEntry& operator=(CacheEntry&& other) noexcept {
+            if (this != &other) {
+                change = std::move(other.change);
+                cached_at = other.cached_at;
+            }
+            return *this;
+        }
     };
     mutable std::unordered_map<std::string, CacheEntry> change_cache;
     mutable std::mutex cache_mutex;
@@ -157,7 +192,7 @@ public:
 
     void update_cache(const std::string& change_id, const RegulatoryChange& change) {
         std::lock_guard<std::mutex> lock(cache_mutex);
-        change_cache[change_id] = CacheEntry{change, std::chrono::system_clock::now()};
+        change_cache.insert_or_assign(change_id, CacheEntry(change, std::chrono::system_clock::now()));
 
         // Limit cache size to prevent memory bloat
         if (change_cache.size() > 1000) {
@@ -238,11 +273,13 @@ bool RegulatoryKnowledgeBase::initialize() {
         load_statistics();
 
         logger_->info("RegulatoryKnowledgeBase initialized successfully",
+                     "RegulatoryKnowledgeBase", "initialize",
                      {{"total_changes", std::to_string(total_changes_.load())}});
         return true;
 
     } catch (const std::exception& e) {
         logger_->error("Failed to initialize knowledge base",
+                     "RegulatoryKnowledgeBase", "initialize",
                      {{"error", e.what()}});
         return false;
     }
@@ -455,7 +492,7 @@ bool RegulatoryKnowledgeBase::create_database_schema(
 
     for (const auto& index_sql : indexes) {
         if (!conn->execute_command(index_sql)) {
-            logger_->warning("Failed to create index", {{"sql", index_sql}});
+            logger_->warn("Failed to create index", "RegulatoryKnowledgeBase", "create_database_schema", {{"sql", index_sql}});
         }
     }
 
@@ -492,7 +529,7 @@ bool RegulatoryKnowledgeBase::store_regulatory_change(const RegulatoryChange& ch
         return false;
     }
 
-    logger_->debug("Storing regulatory change", {{"change_id", change.get_change_id()}});
+    logger_->debug("Storing regulatory change", "RegulatoryKnowledgeBase", "store_regulatory_change", {{"change_id", change.get_change_id()}});
 
     return pimpl_->db_executor->execute_with_retry(
         "store_regulatory_change",
@@ -682,11 +719,13 @@ bool RegulatoryKnowledgeBase::store_regulatory_change(const RegulatoryChange& ch
                 update_statistics_for_change(change, true);
 
                 logger_->info("Regulatory change stored successfully",
+                            "RegulatoryKnowledgeBase", "store_regulatory_change",
                             {{"change_id", change.get_change_id()}});
                 return true;
 
             } catch (const std::exception& e) {
                 logger_->error("Exception storing regulatory change",
+                             "RegulatoryKnowledgeBase", "store_regulatory_change",
                              {{"change_id", change.get_change_id()},
                               {"error", e.what()}});
                 conn->rollback_transaction();
@@ -712,7 +751,7 @@ std::optional<RegulatoryChange> RegulatoryKnowledgeBase::get_regulatory_change(
         if (cache_it != pimpl_->change_cache.end() &&
             pimpl_->is_cache_valid(cache_it->second)) {
             pimpl_->cache_hits++;
-            logger_->debug("Cache hit for regulatory change", {{"change_id", change_id}});
+            logger_->debug("Cache hit for regulatory change", "RegulatoryKnowledgeBase", "get_regulatory_change", {{"change_id", change_id}});
             return cache_it->second.change;
         }
     }
@@ -864,6 +903,7 @@ std::optional<RegulatoryChange> RegulatoryKnowledgeBase::reconstruct_change_from
 
     } catch (const std::exception& e) {
         logger_->error("Failed to reconstruct change from database",
+                     "RegulatoryKnowledgeBase", "reconstruct_change_from_db",
                      {{"error", e.what()}});
         return std::nullopt;
     }
@@ -879,7 +919,7 @@ std::vector<RegulatoryChange> RegulatoryKnowledgeBase::search_changes(
         return {};
     }
 
-    logger_->debug("Searching regulatory changes", {{"query", query}, {"limit", std::to_string(limit)}});
+    logger_->debug("Searching regulatory changes", "RegulatoryKnowledgeBase", "search_changes", {{"query", query}, {"limit", std::to_string(limit)}});
 
     auto result = pimpl_->db_executor->execute_query_with_retry<std::vector<RegulatoryChange>>(
         "search_changes",
@@ -1176,12 +1216,14 @@ bool RegulatoryKnowledgeBase::update_change_status(
                 pimpl_->invalidate_cache(change_id);
 
                 logger_->info("Updated regulatory change status",
+                            "RegulatoryKnowledgeBase", "update_change_status",
                             {{"change_id", change_id},
                              {"new_status", std::to_string(static_cast<int>(new_status))}});
                 return true;
 
             } catch (const std::exception& e) {
                 logger_->error("Failed to update change status",
+                             "RegulatoryKnowledgeBase", "update_change_status",
                              {{"change_id", change_id}, {"error", e.what()}});
                 conn->rollback_transaction();
                 return false;
@@ -1336,6 +1378,7 @@ bool RegulatoryKnowledgeBase::import_from_json(const nlohmann::json& json) {
     }
 
     logger_->info("Import completed",
+                 "RegulatoryKnowledgeBase", "import_from_json",
                  {{"success", std::to_string(success_count)},
                   {"failures", std::to_string(failure_count)}});
 
@@ -1398,7 +1441,7 @@ void RegulatoryKnowledgeBase::clear() {
                 return true;
 
             } catch (const std::exception& e) {
-                logger_->error("Failed to clear data", {{"error", e.what()}});
+                logger_->error("Failed to clear data", "RegulatoryKnowledgeBase", "clear", {{"error", e.what()}});
                 conn->rollback_transaction();
                 return false;
             }
@@ -1414,7 +1457,7 @@ void RegulatoryKnowledgeBase::index_change(const RegulatoryChange& change) {
     const auto& change_id = change.get_change_id();
 
     // Store in memory for quick access
-    changes_store_[change_id] = change;
+    changes_store_.insert_or_assign(change_id, change);
 
     // Index by title words
     std::istringstream title_stream(change.get_title());

@@ -9,6 +9,7 @@ add_library(regulens_shared STATIC
     event_processor.cpp
     knowledge_base.cpp
     knowledge_base/vector_knowledge_base.cpp
+    regulatory_knowledge_base.cpp
     tool_integration/tool_interface.cpp
     visualization/decision_tree_visualizer.cpp
     agent_activity_feed.cpp
@@ -24,6 +25,11 @@ add_library(regulens_shared STATIC
     llm/streaming_handler.cpp
     risk_assessment.cpp
     decision_tree_optimizer.cpp
+    metrics/metrics_collector.cpp
+    memory/conversation_memory.cpp
+    memory/learning_engine.cpp
+    memory/memory_manager.cpp
+    memory/case_based_reasoning.cpp
     ../core/agent/agent_communication.cpp
     ../core/agent/message_translator.cpp
     ../core/agent/consensus_engine.cpp
@@ -74,6 +80,8 @@ target_link_libraries(regulens_shared
         ${PQXX_LIBRARIES}
         CURL::libcurl
         spdlog::spdlog
+        OpenSSL::SSL
+        OpenSSL::Crypto
         resilience
         metrics
         cache

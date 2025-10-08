@@ -12,7 +12,7 @@ namespace regulens {
 RegulatoryAssessorAgent::RegulatoryAssessorAgent(
     std::shared_ptr<ConfigurationManager> config,
     std::shared_ptr<StructuredLogger> logger,
-    std::shared_ptr<PostgreSQLConnectionPool> db_pool,
+                                              std::shared_ptr<ConnectionPool> db_pool,
     std::shared_ptr<AnthropicClient> llm_client,
     std::shared_ptr<KnowledgeBase> knowledge_base)
     : config_(config), logger_(logger), db_pool_(db_pool), llm_client_(llm_client),
@@ -28,9 +28,19 @@ bool RegulatoryAssessorAgent::initialize() {
         logger_->log(LogLevel::INFO, "Initializing Regulatory Assessor Agent");
 
         // Load configuration parameters - all values are required for production
-        high_impact_threshold_ = std::stod(config_->get_value("REGULATORY_HIGH_IMPACT_THRESHOLD"));
-        assessment_interval_ = std::chrono::hours(
-            std::stoi(config_->get_value("REGULATORY_ASSESSMENT_INTERVAL_HOURS")));
+        auto threshold_opt = config_->get_double("REGULATORY_HIGH_IMPACT_THRESHOLD");
+        if (!threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: REGULATORY_HIGH_IMPACT_THRESHOLD");
+            return false;
+        }
+        high_impact_threshold_ = *threshold_opt;
+
+        auto interval_opt = config_->get_int("REGULATORY_ASSESSMENT_INTERVAL_HOURS");
+        if (!interval_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: REGULATORY_ASSESSMENT_INTERVAL_HOURS");
+            return false;
+        }
+        assessment_interval_ = std::chrono::hours(*interval_opt);
 
         logger_->log(LogLevel::INFO, "Regulatory Assessor Agent initialized successfully");
         return true;
@@ -187,13 +197,9 @@ std::vector<nlohmann::json> RegulatoryAssessorAgent::generate_adaptation_recomme
 }
 
 AgentDecision RegulatoryAssessorAgent::analyze_regulatory_change(const nlohmann::json& regulatory_data) {
-    AgentDecision decision;
-    decision.event_id = regulatory_data.value("id", "regulatory_change_" +
+    std::string event_id = regulatory_data.value("id", "regulatory_change_" +
                      std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
-    decision.agent_type = "regulatory_assessor";
-    decision.agent_name = "RegulatoryAssessorAgent";
-    decision.decision_type = "REGULATORY_IMPACT_ASSESSMENT";
-    decision.decision_timestamp = std::chrono::system_clock::now();
+    std::string agent_id = "regulatory_assessor_agent";
 
     try {
         // Perform comprehensive regulatory impact assessment
@@ -202,57 +208,173 @@ AgentDecision RegulatoryAssessorAgent::analyze_regulatory_change(const nlohmann:
 
         std::string impact_level = impact_assessment.value("impact_level", "LOW");
 
+        // Determine decision type and confidence based on impact level
+        DecisionType decision_type;
+        ConfidenceLevel confidence_level;
+
         if (impact_level == "HIGH") {
-            decision.confidence_level = "HIGH";
-            decision.reasoning = nlohmann::json{
-                {"assessment_type", "critical_regulatory_impact"},
-                {"impact_level", impact_level},
-                {"complexity_score", impact_assessment["implementation_complexity"]},
-                {"timeline_days", impact_assessment["estimated_timeline_days"]},
-                {"immediate_action_required", true}
-            };
+            decision_type = DecisionType::ESCALATE;
+            confidence_level = ConfidenceLevel::HIGH;
         } else if (impact_level == "MEDIUM") {
-            decision.confidence_level = "MEDIUM";
-            decision.reasoning = nlohmann::json{
-                {"assessment_type", "moderate_regulatory_impact"},
-                {"impact_level", impact_level},
-                {"complexity_score", impact_assessment["implementation_complexity"]},
-                {"timeline_days", impact_assessment["estimated_timeline_days"]},
-                {"planned_response_required", true}
-            };
+            decision_type = DecisionType::INVESTIGATE;
+            confidence_level = ConfidenceLevel::MEDIUM;
         } else {
-            decision.confidence_level = "LOW";
-            decision.reasoning = nlohmann::json{
-                {"assessment_type", "minimal_regulatory_impact"},
-                {"impact_level", impact_level},
-                {"complexity_score", impact_assessment["implementation_complexity"]},
-                {"timeline_days", impact_assessment["estimated_timeline_days"]},
-                {"standard_compliance_sufficient", true}
-            };
+            decision_type = DecisionType::MONITOR;
+            confidence_level = ConfidenceLevel::LOW;
         }
 
-        decision.recommended_actions = nlohmann::json::array();
+        // Create AgentDecision with proper constructor
+        AgentDecision decision(decision_type, confidence_level, agent_id, event_id);
+
+        // Add reasoning based on impact level
+        if (impact_level == "HIGH") {
+            decision.add_reasoning({
+                "critical_regulatory_impact",
+                "Impact level: " + impact_level + ", Complexity: " +
+                    std::to_string(impact_assessment.value("implementation_complexity", 0.0)) +
+                    ", Timeline: " + std::to_string(impact_assessment.value("estimated_timeline_days", 0)),
+                0.9,
+                "regulatory_impact_analysis"
+            });
+            decision.add_reasoning({
+                "immediate_action_required",
+                "High impact regulatory change requires immediate response",
+                0.95,
+                "impact_assessment"
+            });
+        } else if (impact_level == "MEDIUM") {
+            decision.add_reasoning({
+                "moderate_regulatory_impact",
+                "Impact level: " + impact_level + ", Complexity: " +
+                    std::to_string(impact_assessment.value("implementation_complexity", 0.0)) +
+                    ", Timeline: " + std::to_string(impact_assessment.value("estimated_timeline_days", 0)),
+                0.7,
+                "regulatory_impact_analysis"
+            });
+            decision.add_reasoning({
+                "planned_response_required",
+                "Moderate impact requires planned response strategy",
+                0.75,
+                "impact_assessment"
+            });
+        } else {
+            decision.add_reasoning({
+                "minimal_regulatory_impact",
+                "Impact level: " + impact_level + ", Complexity: " +
+                    std::to_string(impact_assessment.value("implementation_complexity", 0.0)) +
+                    ", Timeline: " + std::to_string(impact_assessment.value("estimated_timeline_days", 0)),
+                0.5,
+                "regulatory_impact_analysis"
+            });
+            decision.add_reasoning({
+                "standard_compliance_sufficient",
+                "Standard compliance procedures are sufficient",
+                0.6,
+                "impact_assessment"
+            });
+        }
+
+        // Add recommended actions
         for (const auto& rec : recommendations) {
-            decision.recommended_actions.push_back(rec["description"]);
+            Priority priority = Priority::NORMAL;
+            std::string priority_str = rec.value("priority", "NORMAL");
+            if (priority_str == "CRITICAL") priority = Priority::CRITICAL;
+            else if (priority_str == "HIGH") priority = Priority::HIGH;
+            else if (priority_str == "LOW") priority = Priority::LOW;
+
+            // Parse timeline for deadline
+            auto deadline = std::chrono::system_clock::now() + std::chrono::hours(24);
+            std::string timeline = rec.value("timeline", "Within 24 hours");
+            if (timeline.find("3 days") != std::string::npos) {
+                deadline = std::chrono::system_clock::now() + std::chrono::hours(72);
+            } else if (timeline.find("2 weeks") != std::string::npos || timeline.find("week") != std::string::npos) {
+                deadline = std::chrono::system_clock::now() + std::chrono::hours(336);
+            } else if (timeline.find("Immediate") != std::string::npos) {
+                deadline = std::chrono::system_clock::now() + std::chrono::hours(1);
+            } else if (timeline.find("Ongoing") != std::string::npos) {
+                deadline = std::chrono::system_clock::now() + std::chrono::hours(8760); // 1 year
+            }
+
+            RecommendedAction action;
+            action.action_type = rec.value("action_type", "compliance_action");
+            action.description = rec.value("description", "Compliance action required");
+            action.priority = priority;
+            action.deadline = deadline;
+
+            // Add resources as parameters
+            if (rec.contains("resources_required")) {
+                int resource_idx = 0;
+                for (const auto& resource : rec["resources_required"]) {
+                    action.parameters["resource_" + std::to_string(resource_idx++)] = resource.get<std::string>();
+                }
+            }
+
+            decision.add_action(action);
         }
 
-        decision.risk_assessment = nlohmann::json{
-            {"regulatory_risk_level", impact_level},
-            {"compliance_gap", impact_assessment.value("impact_score", 0.0)},
-            {"implementation_risk", impact_assessment.value("implementation_complexity", 0.0)},
-            {"timeline_risk", impact_assessment.value("estimated_timeline_days", 365) < 90 ? "HIGH" : "LOW"}
-        };
+        // Create risk assessment
+        RiskAssessment risk_assessment;
+        risk_assessment.assessment_id = "risk_" + event_id;
+        risk_assessment.entity_id = "regulatory_assessor";
+        risk_assessment.transaction_id = event_id;
+        risk_assessment.assessed_by = agent_id;
+        risk_assessment.assessment_time = std::chrono::system_clock::now();
+        risk_assessment.risk_score = impact_assessment.value("impact_score", 0.0);
+        risk_assessment.risk_level = impact_level;
+
+        if (impact_level == "HIGH") {
+            risk_assessment.overall_severity = RiskSeverity::HIGH;
+        } else if (impact_level == "MEDIUM") {
+            risk_assessment.overall_severity = RiskSeverity::MEDIUM;
+        } else {
+            risk_assessment.overall_severity = RiskSeverity::LOW;
+        }
+
+        risk_assessment.overall_score = impact_assessment.value("implementation_complexity", 0.0);
+
+        // Add risk factors
+        risk_assessment.risk_factors.push_back("Regulatory compliance gap: " +
+            std::to_string(impact_assessment.value("impact_score", 0.0)));
+        risk_assessment.risk_factors.push_back("Implementation complexity: " +
+            std::to_string(impact_assessment.value("implementation_complexity", 0.0)));
+
+        int timeline_days = impact_assessment.value("estimated_timeline_days", 365);
+        if (timeline_days < 90) {
+            risk_assessment.risk_factors.push_back("Timeline risk: HIGH - " +
+                std::to_string(timeline_days) + " days available");
+        } else {
+            risk_assessment.risk_factors.push_back("Timeline risk: LOW - " +
+                std::to_string(timeline_days) + " days available");
+        }
+
+        decision.set_risk_assessment(risk_assessment);
 
         total_assessments_processed_++;
 
+        return decision;
+
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Failed to analyze regulatory change: " + std::string(e.what()));
-        decision.confidence_level = "LOW";
-        decision.reasoning = nlohmann::json{{"error", std::string(e.what())}};
-        decision.recommended_actions = nlohmann::json::array({"Manual regulatory impact assessment required"});
-    }
 
-    return decision;
+        // Create a minimal error decision
+        AgentDecision decision(DecisionType::NO_ACTION, ConfidenceLevel::LOW, agent_id, event_id);
+
+        decision.add_reasoning({
+            "error",
+            "Failed to analyze regulatory change: " + std::string(e.what()),
+            0.1,
+            "error_handler"
+        });
+
+        RecommendedAction action;
+        action.action_type = "manual_review";
+        action.description = "Manual regulatory impact assessment required";
+        action.priority = Priority::HIGH;
+        action.deadline = std::chrono::system_clock::now() + std::chrono::hours(24);
+        decision.add_action(action);
+
+        return decision;
+    }
 }
 
 nlohmann::json RegulatoryAssessorAgent::predict_regulatory_trends(const std::vector<nlohmann::json>& recent_changes) {

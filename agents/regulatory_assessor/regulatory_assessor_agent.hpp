@@ -6,6 +6,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <unordered_map>
 #include <optional>
 #include <nlohmann/json.hpp>
@@ -30,7 +31,7 @@ class RegulatoryAssessorAgent {
 public:
     RegulatoryAssessorAgent(std::shared_ptr<ConfigurationManager> config,
                            std::shared_ptr<StructuredLogger> logger,
-                           std::shared_ptr<PostgreSQLConnectionPool> db_pool,
+                           std::shared_ptr<ConnectionPool> db_pool,
                            std::shared_ptr<AnthropicClient> llm_client,
                            std::shared_ptr<KnowledgeBase> knowledge_base);
 
@@ -149,9 +150,15 @@ private:
      */
     std::optional<std::chrono::system_clock::time_point> parse_iso8601_timestamp(const std::string& timestamp_str);
 
+    /**
+     * @brief Fetch recent regulatory changes from the database
+     * @return Vector of regulatory change records
+     */
+    std::vector<nlohmann::json> fetch_recent_regulatory_changes();
+
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
-    std::shared_ptr<PostgreSQLConnectionPool> db_pool_;
+    std::shared_ptr<ConnectionPool> db_pool_;
     std::shared_ptr<AnthropicClient> llm_client_;
     std::shared_ptr<KnowledgeBase> knowledge_base_;
 

@@ -224,9 +224,11 @@ Icon
 # BACKUPS AND ARCHIVES
 # =============================================================================
 
-# Backup files
+# Backup files (production safety - no backup files in repository)
 *.bak
+*.bak2
 *.backup
+*.backup2
 *.old
 *.orig
 *.rej

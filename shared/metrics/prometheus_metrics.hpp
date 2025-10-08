@@ -233,13 +233,18 @@ private:
         }
 
         void observe(double value) {
-            count++;
-            sum += value;
+            count.fetch_add(1, std::memory_order_relaxed);
+            // Atomic double increment using compare-and-swap
+            double old_sum = sum.load(std::memory_order_relaxed);
+            double new_sum;
+            do {
+                new_sum = old_sum + value;
+            } while (!sum.compare_exchange_weak(old_sum, new_sum, std::memory_order_release, std::memory_order_relaxed));
 
             // Update buckets
             for (auto& bucket : buckets) {
                 if (value <= bucket.upper_bound) {
-                    bucket.count++;
+                    bucket.count.fetch_add(1, std::memory_order_relaxed);
                 }
             }
         }

@@ -64,9 +64,13 @@ public:
     bool execute_prepared(const std::string& name,
                          const std::vector<std::string>& params);
 
-    // Health checks
+    // Health checks and monitoring
     bool ping();
     nlohmann::json get_connection_stats() const;
+    
+    // Pool-style methods for health monitoring (when used with ConnectionPool)
+    int get_pool_size() const;
+    int get_active_connections() const;
 
 private:
     DatabaseConfig config_;

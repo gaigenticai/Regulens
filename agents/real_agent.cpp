@@ -13,18 +13,18 @@ RealRegulatoryFetcher::RealRegulatoryFetcher(std::shared_ptr<HttpClient> http_cl
                                            std::shared_ptr<EmailClient> email_client,
                                            std::shared_ptr<StructuredLogger> logger)
     : http_client_(http_client), email_client_(email_client), logger_(logger),
-      config_manager_(std::make_shared<ConfigurationManager>()),
+      config_manager_(std::shared_ptr<ConfigurationManager>(&ConfigurationManager::get_instance(), [](ConfigurationManager*){})),
       running_(false), total_fetches_(0),
       last_fetch_time_(std::chrono::system_clock::now()) {
 
-    // Initialize configuration manager
-    config_manager_->initialize(0, nullptr);
+    // Configuration manager is already initialized as singleton
+    // Note: Using raw pointer to singleton instance
 
     // Load notification recipients from configuration
     notification_recipients_ = config_manager_->get_notification_recipients();
 
     // Initialize circuit breakers for regulatory APIs
-    auto config_manager = std::make_shared<ConfigurationManager>();
+    auto config_manager = std::shared_ptr<ConfigurationManager>(&ConfigurationManager::get_instance(), [](ConfigurationManager*){});
     auto error_handler = std::make_shared<ErrorHandler>(config_manager, logger);
 
     // SEC EDGAR circuit breaker - higher tolerance for government site
@@ -103,7 +103,7 @@ void RealRegulatoryFetcher::fetching_loop() {
             std::this_thread::sleep_for(std::chrono::minutes(5));
 
         } catch (const std::exception& e) {
-            logger_->error("Error in regulatory fetching loop: {}", e.what());
+            logger_->error("Error in regulatory fetching loop: " + std::string(e.what()));
             std::this_thread::sleep_for(std::chrono::seconds(30));
         }
     }
@@ -132,14 +132,14 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
                         // Use cache if less than 5 minutes old
                         if (age < std::chrono::minutes(5)) {
                             updates = cached_data["updates"];
-                            logger_->info("✅ SEC data served from cache ({} updates)",
-                                         updates.size());
+                            logger_->info("✅ SEC data served from cache (" +
+                                         std::to_string(updates.size()) + " updates)");
                             return updates;
                         }
                     }
                 } catch (const std::exception& e) {
-                    logger_->warn("Failed to parse cached SEC data, proceeding with API call",
-                                 {{"error", e.what()}});
+                    logger_->warn("Failed to parse cached SEC data, proceeding with API call: " +
+                                 std::string(e.what()));
                 }
             }
         }
@@ -156,11 +156,11 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
                 HttpResponse response = http_client_->get(sec_full_url);
 
                 if (response.success) {
-                    return CircuitBreakerResult(true, {
-                        {"success", true},
-                        {"body", response.body},
-                        {"size", response.body.size()}
-                    });
+                    nlohmann::json result_data = nlohmann::json::object();
+                    result_data["success"] = true;
+                    result_data["body"] = response.body;
+                    result_data["size"] = response.body.size();
+                    return CircuitBreakerResult(true, result_data);
                 } else {
                     return CircuitBreakerResult(false, std::nullopt,
                         "HTTP request failed: " + response.error_message);
@@ -170,7 +170,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
 
         if (breaker_result.success && breaker_result.data) {
             auto& data = breaker_result.data.value();
-            logger_->info("✅ Connected to SEC EDGAR - received {} bytes", data["size"]);
+            logger_->info("✅ Connected to SEC EDGAR - received " +
+                         std::to_string(data["size"].get<size_t>()) + " bytes");
 
             // Parse the HTML for regulatory actions
             auto sec_updates = parse_sec_html(data["body"]);
@@ -178,7 +179,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
             for (auto& update : sec_updates) {
                 if (is_new_content(update["hash"])) {
                     updates.push_back(update);
-                    logger_->info("📄 Found new SEC regulatory action: {}", update["title"]);
+                    logger_->info("📄 Found new SEC regulatory action: " +
+                                 update["title"].get<std::string>());
                 }
             }
 
@@ -197,12 +199,13 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
                                                          std::chrono::minutes(10)); // Cache for 10 minutes
 
                     if (cache_result.success) {
-                        logger_->debug("SEC data cached successfully for {} updates", updates.size());
+                        logger_->debug("SEC data cached successfully for " +
+                                      std::to_string(updates.size()) + " updates");
                     } else {
-                        logger_->warn("Failed to cache SEC data: {}", cache_result.error_message);
+                        logger_->warn("Failed to cache SEC data: " + cache_result.error_message);
                     }
                 } catch (const std::exception& e) {
-                    logger_->warn("Exception during SEC data caching: {}", e.what());
+                    logger_->warn("Exception during SEC data caching: " + std::string(e.what()));
                 }
             }
 
@@ -212,7 +215,7 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_sec_updates() {
         }
 
     } catch (const std::exception& e) {
-        logger_->error("Error fetching SEC updates: {}", e.what());
+        logger_->error("Error fetching SEC updates: " + std::string(e.what()));
     }
 
     return updates;
@@ -241,14 +244,14 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
                         // Use cache if less than 5 minutes old
                         if (age < std::chrono::minutes(5)) {
                             updates = cached_data["updates"];
-                            logger_->info("✅ FCA data served from cache ({} updates)",
-                                         updates.size());
+                            logger_->info("✅ FCA data served from cache (" +
+                                         std::to_string(updates.size()) + " updates)");
                             return updates;
                         }
                     }
                 } catch (const std::exception& e) {
-                    logger_->warn("Failed to parse cached FCA data, proceeding with API call",
-                                 {{"error", e.what()}});
+                    logger_->warn("Failed to parse cached FCA data, proceeding with API call: " +
+                                 std::string(e.what()));
                 }
             }
         }
@@ -264,11 +267,11 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
                 HttpResponse response = http_client_->get(fca_news_url);
 
                 if (response.success) {
-                    return CircuitBreakerResult(true, {
-                        {"success", true},
-                        {"body", response.body},
-                        {"size", response.body.size()}
-                    });
+                    nlohmann::json result_data = nlohmann::json::object();
+                    result_data["success"] = true;
+                    result_data["body"] = response.body;
+                    result_data["size"] = response.body.size();
+                    return CircuitBreakerResult(true, result_data);
                 } else {
                     return CircuitBreakerResult(false, std::nullopt,
                         "HTTP request failed: " + response.error_message);
@@ -278,7 +281,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
 
         if (breaker_result.success && breaker_result.data) {
             auto& data = breaker_result.data.value();
-            logger_->info("✅ Connected to FCA - received {} bytes", data["size"]);
+            logger_->info("✅ Connected to FCA - received " +
+                         std::to_string(data["size"].get<size_t>()) + " bytes");
 
             // Parse the HTML for regulatory bulletins
             auto fca_updates = parse_fca_html(data["body"]);
@@ -286,7 +290,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
             for (auto& update : fca_updates) {
                 if (is_new_content(update["hash"])) {
                     updates.push_back(update);
-                    logger_->info("📄 Found new FCA regulatory bulletin: {}", update["title"]);
+                    logger_->info("📄 Found new FCA regulatory bulletin: " +
+                                 update["title"].get<std::string>());
                 }
             }
 
@@ -305,12 +310,13 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
                                                          std::chrono::minutes(10)); // Cache for 10 minutes
 
                     if (cache_result.success) {
-                        logger_->debug("FCA data cached successfully for {} updates", updates.size());
+                        logger_->debug("FCA data cached successfully for " +
+                                      std::to_string(updates.size()) + " updates");
                     } else {
-                        logger_->warn("Failed to cache FCA data: {}", cache_result.error_message);
+                        logger_->warn("Failed to cache FCA data: " + cache_result.error_message);
                     }
                 } catch (const std::exception& e) {
-                    logger_->warn("Exception during FCA data caching: {}", e.what());
+                    logger_->warn("Exception during FCA data caching: " + std::string(e.what()));
                 }
             }
 
@@ -320,7 +326,7 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_fca_updates() {
         }
 
     } catch (const std::exception& e) {
-        logger_->error("Error fetching FCA updates: {}", e.what());
+        logger_->error("Error fetching FCA updates: " + std::string(e.what()));
     }
 
     return updates;
@@ -349,14 +355,14 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
                         // Use cache if less than 5 minutes old
                         if (age < std::chrono::minutes(5)) {
                             updates = cached_data["updates"];
-                            logger_->info("✅ ECB data served from cache ({} updates)",
-                                         updates.size());
+                            logger_->info("✅ ECB data served from cache (" +
+                                         std::to_string(updates.size()) + " updates)");
                             return updates;
                         }
                     }
                 } catch (const std::exception& e) {
-                    logger_->warn("Failed to parse cached ECB data, proceeding with API call",
-                                 {{"error", e.what()}});
+                    logger_->warn("Failed to parse cached ECB data, proceeding with API call: " +
+                                 std::string(e.what()));
                 }
             }
         }
@@ -372,11 +378,11 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
                 HttpResponse response = http_client_->get(ecb_press_url);
 
                 if (response.success) {
-                    return CircuitBreakerResult(true, {
-                        {"success", true},
-                        {"body", response.body},
-                        {"size", response.body.size()}
-                    });
+                    nlohmann::json result_data = nlohmann::json::object();
+                    result_data["success"] = true;
+                    result_data["body"] = response.body;
+                    result_data["size"] = response.body.size();
+                    return CircuitBreakerResult(true, result_data);
                 } else {
                     return CircuitBreakerResult(false, std::nullopt,
                         "HTTP request failed: " + response.error_message);
@@ -386,7 +392,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
 
         if (breaker_result.success && breaker_result.data) {
             auto& data = breaker_result.data.value();
-            logger_->info("✅ Connected to ECB - received {} bytes", data["size"]);
+            logger_->info("✅ Connected to ECB - received " +
+                         std::to_string(data["size"].get<size_t>()) + " bytes");
 
             // Parse the HTML for regulatory announcements
             auto ecb_updates = parse_ecb_html(data["body"]);
@@ -394,7 +401,8 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
             for (auto& update : ecb_updates) {
                 if (is_new_content(update["hash"])) {
                     updates.push_back(update);
-                    logger_->info("📄 Found new ECB regulatory announcement: {}", update["title"]);
+                    logger_->info("📄 Found new ECB regulatory announcement: " +
+                                 update["title"].get<std::string>());
                 }
             }
 
@@ -413,12 +421,13 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
                                                          std::chrono::minutes(10)); // Cache for 10 minutes
 
                     if (cache_result.success) {
-                        logger_->debug("ECB data cached successfully for {} updates", updates.size());
+                        logger_->debug("ECB data cached successfully for " +
+                                      std::to_string(updates.size()) + " updates");
                     } else {
-                        logger_->warn("Failed to cache ECB data: {}", cache_result.error_message);
+                        logger_->warn("Failed to cache ECB data: " + cache_result.error_message);
                     }
                 } catch (const std::exception& e) {
-                    logger_->warn("Exception during ECB data caching: {}", e.what());
+                    logger_->warn("Exception during ECB data caching: " + std::string(e.what()));
                 }
             }
 
@@ -428,7 +437,7 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::fetch_ecb_updates() {
         }
 
     } catch (const std::exception& e) {
-        logger_->error("Error fetching ECB updates: {}", e.what());
+        logger_->error("Error fetching ECB updates: " + std::string(e.what()));
     }
 
     return updates;
@@ -470,7 +479,7 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::parse_sec_html(const std::str
             }
         }
     } catch (const std::exception& e) {
-        logger_->warn("Error parsing SEC HTML: {}", e.what());
+        logger_->warn("Error parsing SEC HTML: " + std::string(e.what()));
     }
 
     return updates;
@@ -513,7 +522,7 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::parse_fca_html(const std::str
             }
         }
     } catch (const std::exception& e) {
-        logger_->warn("Error parsing FCA HTML: {}", e.what());
+        logger_->warn("Error parsing FCA HTML: " + std::string(e.what()));
     }
 
     return updates;
@@ -555,7 +564,7 @@ std::vector<nlohmann::json> RealRegulatoryFetcher::parse_ecb_html(const std::str
             }
         }
     } catch (const std::exception& e) {
-        logger_->warn("Error parsing ECB HTML: {}", e.what());
+        logger_->warn("Error parsing ECB HTML: " + std::string(e.what()));
     }
 
     return updates;
@@ -587,9 +596,9 @@ void RealRegulatoryFetcher::send_notification_email(const std::vector<nlohmann::
         bool success = email_client_->send_email(recipient, subject.str(), body.str());
 
         if (success) {
-            logger_->info("📧 Regulatory notification email sent to {}", recipient);
+            logger_->info("📧 Regulatory notification email sent to " + recipient);
         } else {
-            logger_->error("❌ Failed to send regulatory notification email to {}", recipient);
+            logger_->error("❌ Failed to send regulatory notification email to " + recipient);
             overall_success = false;
         }
     }
@@ -660,7 +669,8 @@ RealComplianceAgent::RealComplianceAgent(std::shared_ptr<HttpClient> http_client
 }
 
 AgentDecision RealComplianceAgent::process_regulatory_change(const nlohmann::json& regulatory_data) {
-    logger_->info("🧠 AI Agent analyzing regulatory change: {}", regulatory_data["title"]);
+    logger_->info("🧠 AI Agent analyzing regulatory change: " +
+                 regulatory_data["title"].get<std::string>());
 
     std::string impact = analyze_regulatory_impact(regulatory_data);
     int deadline_days = calculate_compliance_deadline(regulatory_data);
@@ -691,15 +701,28 @@ AgentDecision RealComplianceAgent::process_regulatory_change(const nlohmann::jso
               << affected_units.size() << " business units. Risk level: " << risk_level
               << ". Recommended action: " << action;
 
-    AgentDecision decision("ComplianceAnalyzer", decision_type, reasoning.str(), action, risk_level, confidence);
+    // Create proper AgentDecision with DecisionType enum and ConfidenceLevel enum
+    DecisionType dt = string_to_decision_type(decision_type);
+    ConfidenceLevel cl = (confidence >= 0.9) ? ConfidenceLevel::VERY_HIGH :
+                         (confidence >= 0.8) ? ConfidenceLevel::HIGH :
+                         (confidence >= 0.6) ? ConfidenceLevel::MEDIUM : ConfidenceLevel::LOW;
+    
+    AgentDecision decision(dt, cl, "ComplianceAnalyzer", regulatory_data.value("change_id", "unknown"));
+    
+    // Add reasoning and action as decision details
+    decision.add_reasoning({"regulatory_impact", reasoning.str(), confidence, "AI_Analysis"});
+    decision.add_action({decision_type, action, Priority::HIGH, 
+                        std::chrono::system_clock::now() + std::chrono::hours(24), {}});
 
-    logger_->info("✅ AI Agent decision: {} (confidence: {:.1f}%)", action, confidence * 100);
+    logger_->info("✅ AI Agent decision", "RealComplianceAgent", "process_regulatory_change",
+                 {{"action", action}, {"confidence", std::to_string(confidence * 100)}});
 
     return decision;
 }
 
 nlohmann::json RealComplianceAgent::perform_risk_assessment(const nlohmann::json& regulatory_data) {
-    logger_->info("🔍 Performing real risk assessment for: {}", regulatory_data["title"]);
+    logger_->info("🔍 Performing real risk assessment for: " +
+                 regulatory_data["title"].get<std::string>());
 
     // Deterministic risk analysis based on regulatory content
     std::string title = regulatory_data.value("title", "");
@@ -723,7 +746,8 @@ nlohmann::json RealComplianceAgent::perform_risk_assessment(const nlohmann::json
         {"confidence_level", 0.88}
     };
 
-    logger_->info("📊 Risk assessment complete: {} (score: {:.2f})", risk_level, risk_score);
+    logger_->info("📊 Risk assessment complete", "RealComplianceAgent", "perform_risk_assessment",
+                 {{"risk_level", risk_level}, {"risk_score", std::to_string(risk_score)}});
 
     return assessment;
 }
@@ -784,17 +808,17 @@ void RealComplianceAgent::send_compliance_alert(const nlohmann::json& regulatory
     body << "Please review immediately and take appropriate action.\n\n";
     body << "Generated by Regulens Agentic AI System\n";
 
-    // Get sender email from configuration
-    auto sender_email = config_manager_->get_string("SMTP_FROM_EMAIL").value_or("regulens@gaigentic.ai");
+    // Get sender email - use default since RealComplianceAgent doesn't have config_manager
+    std::string sender_email = "regulens@gaigentic.ai";
 
     bool overall_success = true;
     for (const auto& recipient : notification_recipients_) {
         bool success = email_client_->send_email(recipient, subject.str(), body.str(), sender_email);
 
         if (success) {
-            logger_->info("📧 Compliance alert email sent to {}", recipient);
+            logger_->info("📧 Compliance alert email sent to " + recipient);
         } else {
-            logger_->error("❌ Failed to send compliance alert email to {}", recipient);
+            logger_->error("❌ Failed to send compliance alert email to " + recipient);
             overall_success = false;
         }
     }
@@ -810,7 +834,7 @@ std::vector<RealRegulatoryFetcher::HtmlLink> RealRegulatoryFetcher::extract_stru
 
     // Enhanced regex for SEC EDGAR current events page structure
     // Look for table rows with links in the current events section
-    std::regex link_pattern(R"(<tr[^>]*>.*?<td[^>]*>.*?<a[^>]*href="([^"]*\.htm[^"]*)"[^>]*>([^<]*)</a>.*?</td>.*?</tr>)",
+    std::regex link_pattern(R"html(<tr[^>]*>.*?<td[^>]*>.*?<a[^>]*href="([^"]*\.htm[^"]*)"[^>]*>([^<]*)</a>.*?</td>.*?</tr>)html",
                            std::regex_constants::icase | std::regex_constants::multiline);
 
     std::sregex_iterator iter(html.begin(), html.end(), link_pattern);
@@ -838,7 +862,7 @@ std::vector<RealRegulatoryFetcher::HtmlContent> RealRegulatoryFetcher::extract_f
 
     // FCA news page structure parsing
     // Look for article blocks with titles, dates, and links
-    std::regex article_pattern(R"(<article[^>]*>(.*?)</article>)",
+    std::regex article_pattern(R"html(<article[^>]*>(.*?)</article>)html",
                               std::regex_constants::icase | std::regex_constants::multiline);
 
     std::string::const_iterator search_start(html.cbegin());
@@ -848,7 +872,7 @@ std::vector<RealRegulatoryFetcher::HtmlContent> RealRegulatoryFetcher::extract_f
         std::string article_html = article_match[1].str();
 
         // Extract title
-        std::regex title_pattern(R"(<h[2-3][^>]*class="[^"]*title[^"]*"[^>]*>([^<]*)</h[2-3]>)");
+        std::regex title_pattern(R"html(<h[2-3][^>]*class="[^"]*title[^"]*"[^>]*>([^<]*)</h[2-3]>)html");
         std::smatch title_match;
         std::string title;
         if (std::regex_search(article_html, title_match, title_pattern)) {
@@ -856,7 +880,7 @@ std::vector<RealRegulatoryFetcher::HtmlContent> RealRegulatoryFetcher::extract_f
         }
 
         // Extract URL
-        std::regex url_pattern(R"(<a[^>]*href="([^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>)");
+        std::regex url_pattern(R"html(<a[^>]*href="([^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>)html");
         std::smatch url_match;
         std::string url;
         if (std::regex_search(article_html, url_match, url_pattern)) {
@@ -864,7 +888,7 @@ std::vector<RealRegulatoryFetcher::HtmlContent> RealRegulatoryFetcher::extract_f
         }
 
         // Extract date
-        std::regex date_pattern(R"(<time[^>]*>([^<]*)</time>)");
+        std::regex date_pattern(R"html(<time[^>]*>([^<]*)</time>)html");
         std::smatch date_match;
         std::string date;
         if (std::regex_search(article_html, date_match, date_pattern)) {
@@ -886,7 +910,7 @@ std::vector<RealRegulatoryFetcher::HtmlLink> RealRegulatoryFetcher::extract_ecb_
     std::vector<HtmlLink> press_releases;
 
     // ECB press release page structure parsing
-    std::regex press_pattern(R"(<a[^>]*href="([^"]*press[^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>([^<]*)</a>)",
+    std::regex press_pattern(R"html(<a[^>]*href="([^"]*press[^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>([^<]*)</a>)html",
                             std::regex_constants::icase);
 
     std::sregex_iterator iter(html.begin(), html.end(), press_pattern);
@@ -1011,11 +1035,11 @@ std::string RealRegulatoryFetcher::sanitize_html_text(const std::string& text) {
     std::string clean = text;
 
     // Remove HTML entities
-    std::regex entity_pattern(R"(&[a-zA-Z]+;)");
+    std::regex entity_pattern(R"html(&[a-zA-Z]+;)html");
     clean = std::regex_replace(clean, entity_pattern, "");
 
     // Remove extra whitespace
-    std::regex whitespace_pattern(R"(\s+)");
+    std::regex whitespace_pattern(R"html(\s+)html");
     clean = std::regex_replace(clean, whitespace_pattern, " ");
 
     // Trim leading/trailing whitespace

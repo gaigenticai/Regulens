@@ -143,6 +143,12 @@ public:
     // Performance and monitoring
     nlohmann::json get_statistics() const;
     void reset_statistics();
+    
+    // Health check methods for monitoring
+    size_t get_pending_event_count() const;
+    size_t get_processing_event_count() const;
+    size_t get_failed_event_count() const;
+    size_t get_queue_capacity() const { return max_queue_size_; }
 
     // Configuration
     void set_max_queue_size(size_t size) { max_queue_size_ = size; }

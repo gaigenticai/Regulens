@@ -47,7 +47,7 @@ bool MemoryManager::initialize() {
 
     try {
         // Load optimization plan from configuration
-        auto plan_config = config_->get_json("MEMORY_OPTIMIZATION_PLAN");
+        auto plan_config = config_->get_string("MEMORY_OPTIMIZATION_PLAN");
         if (plan_config) {
             // In a real implementation, parse the plan from config
             // For now, use defaults
@@ -65,7 +65,7 @@ bool MemoryManager::initialize() {
     } catch (const std::exception& e) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
+                ErrorCategory::CONFIGURATION,
                 ErrorSeverity::HIGH,
                 "MemoryManager",
                 "initialize",
@@ -290,7 +290,7 @@ bool MemoryManager::optimize_memory(const MemoryOptimizationPlan& plan) {
         log_management_operation("optimization", log_details);
 
         if (logger_) {
-            logger_->info("Memory optimization completed: " +
+            logger_->info(std::string("Memory optimization completed: ") +
                          (success ? "successful" : "with issues"),
                          "MemoryManager", "optimize_memory");
         }
@@ -363,10 +363,23 @@ size_t MemoryManager::emergency_cleanup(double target_memory_pressure) {
 bool MemoryManager::backup_critical_memories(const std::string& backup_path) {
     try {
         auto critical_memories = identify_critical_memories();
-        nlohmann::json backup_data = {
-            {"backup_timestamp", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
-            {"critical_memories", nlohmann::json::array()},
-            {"memory_health", get_memory_health()}
+        nlohmann::json backup_data = nlohmann::json::object();
+        backup_data["backup_timestamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        backup_data["critical_memories"] = nlohmann::json::array();
+        
+        // Convert MemoryHealthMetrics to JSON
+        auto health = get_memory_health();
+        backup_data["memory_health"] = {
+            {"total_memories", health.total_memories},
+            {"working_memories", health.working_memories},
+            {"episodic_memories", health.episodic_memories},
+            {"semantic_memories", health.semantic_memories},
+            {"procedural_memories", health.procedural_memories},
+            {"archival_memories", health.archival_memories},
+            {"average_importance", health.average_importance},
+            {"memory_pressure", health.memory_pressure},
+            {"consolidation_ratio", health.consolidation_ratio},
+            {"forgetting_rate", health.forgetting_rate}
         };
 
         // In a real implementation, this would export actual memory data
@@ -808,12 +821,24 @@ MemoryHealthMonitor::MemoryHealthMonitor(std::shared_ptr<ConfigurationManager> c
     : config_(config), logger_(logger) {}
 
 nlohmann::json MemoryHealthMonitor::monitor_memory_health(const MemoryHealthMetrics& health_metrics) {
-    nlohmann::json monitoring_result = {
-        {"timestamp", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
-        {"health_score", calculate_memory_health_score(health_metrics)},
-        {"alerts", nlohmann::json::array()},
-        {"recommendations", nlohmann::json::array()},
-        {"metrics", health_metrics}
+    nlohmann::json monitoring_result = nlohmann::json::object();
+    monitoring_result["timestamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    monitoring_result["health_score"] = calculate_memory_health_score(health_metrics);
+    monitoring_result["alerts"] = nlohmann::json::array();
+    monitoring_result["recommendations"] = nlohmann::json::array();
+    
+    // Convert MemoryHealthMetrics to JSON
+    monitoring_result["metrics"] = {
+        {"total_memories", health_metrics.total_memories},
+        {"working_memories", health_metrics.working_memories},
+        {"episodic_memories", health_metrics.episodic_memories},
+        {"semantic_memories", health_metrics.semantic_memories},
+        {"procedural_memories", health_metrics.procedural_memories},
+        {"archival_memories", health_metrics.archival_memories},
+        {"average_importance", health_metrics.average_importance},
+        {"memory_pressure", health_metrics.memory_pressure},
+        {"consolidation_ratio", health_metrics.consolidation_ratio},
+        {"forgetting_rate", health_metrics.forgetting_rate}
     };
 
     // Check for issues

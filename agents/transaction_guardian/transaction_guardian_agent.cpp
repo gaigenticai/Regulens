@@ -12,7 +12,7 @@ namespace regulens {
 TransactionGuardianAgent::TransactionGuardianAgent(
     std::shared_ptr<ConfigurationManager> config,
     std::shared_ptr<StructuredLogger> logger,
-    std::shared_ptr<PostgreSQLConnectionPool> db_pool,
+                                               std::shared_ptr<ConnectionPool> db_pool,
     std::shared_ptr<AnthropicClient> llm_client,
     std::shared_ptr<RiskAssessmentEngine> risk_engine)
     : config_(config), logger_(logger), db_pool_(db_pool), llm_client_(llm_client),
@@ -29,36 +29,178 @@ bool TransactionGuardianAgent::initialize() {
         logger_->log(LogLevel::INFO, "Initializing Transaction Guardian Agent");
 
         // Load configuration parameters - all values are required for production
-        fraud_threshold_ = std::stod(config_->get_value("TRANSACTION_FRAUD_THRESHOLD"));
-        velocity_threshold_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_THRESHOLD"));
-        high_risk_threshold_ = std::stod(config_->get_value("TRANSACTION_HIGH_RISK_THRESHOLD"));
-        analysis_window_ = std::chrono::minutes(
-            std::stoi(config_->get_value("TRANSACTION_ANALYSIS_WINDOW_MINUTES")));
+        auto fraud_threshold_opt = config_->get_double("TRANSACTION_FRAUD_THRESHOLD");
+        if (!fraud_threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_FRAUD_THRESHOLD");
+            return false;
+        }
+        fraud_threshold_ = *fraud_threshold_opt;
+
+        auto velocity_threshold_opt = config_->get_double("TRANSACTION_VELOCITY_THRESHOLD");
+        if (!velocity_threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_THRESHOLD");
+            return false;
+        }
+        velocity_threshold_ = *velocity_threshold_opt;
+
+        auto high_risk_threshold_opt = config_->get_double("TRANSACTION_HIGH_RISK_THRESHOLD");
+        if (!high_risk_threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_HIGH_RISK_THRESHOLD");
+            return false;
+        }
+        high_risk_threshold_ = *high_risk_threshold_opt;
+
+        auto analysis_window_opt = config_->get_int("TRANSACTION_ANALYSIS_WINDOW_MINUTES");
+        if (!analysis_window_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_ANALYSIS_WINDOW_MINUTES");
+            return false;
+        }
+        analysis_window_ = std::chrono::minutes(*analysis_window_opt);
 
         // Load risk calculation parameters - all values are required for production
-        risk_amount_100k_ = std::stod(config_->get_value("TRANSACTION_RISK_AMOUNT_100K"));
-        risk_amount_50k_ = std::stod(config_->get_value("TRANSACTION_RISK_AMOUNT_50K"));
-        risk_amount_10k_ = std::stod(config_->get_value("TRANSACTION_RISK_AMOUNT_10K"));
-        risk_international_ = std::stod(config_->get_value("TRANSACTION_RISK_INTERNATIONAL"));
-        risk_crypto_ = std::stod(config_->get_value("TRANSACTION_RISK_CRYPTO"));
-        velocity_critical_threshold_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_CRITICAL_THRESHOLD"));
-        velocity_high_threshold_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_HIGH_THRESHOLD"));
-        velocity_moderate_threshold_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_MODERATE_THRESHOLD"));
-        velocity_ratio_5x_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_RATIO_5X"));
-        velocity_ratio_3x_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_RATIO_3X"));
-        velocity_ratio_2x_ = std::stod(config_->get_value("TRANSACTION_VELOCITY_RATIO_2X"));
-        ai_confidence_weight_ = std::stod(config_->get_value("TRANSACTION_AI_CONFIDENCE_WEIGHT"));
-        customer_risk_update_weight_ = std::stod(config_->get_value("TRANSACTION_CUSTOMER_RISK_UPDATE_WEIGHT"));
-        unusual_amount_multiplier_ = std::stod(config_->get_value("TRANSACTION_UNUSUAL_AMOUNT_MULTIPLIER"));
-        unusual_amount_risk_weight_ = std::stod(config_->get_value("TRANSACTION_UNUSUAL_AMOUNT_RISK_WEIGHT"));
-        off_hours_risk_weight_ = std::stod(config_->get_value("TRANSACTION_OFF_HOURS_RISK_WEIGHT"));
-        weekend_risk_weight_ = std::stod(config_->get_value("TRANSACTION_WEEKEND_RISK_WEIGHT"));
-        risk_update_current_weight_ = std::stod(config_->get_value("TRANSACTION_RISK_UPDATE_CURRENT_WEIGHT"));
-        risk_update_transaction_weight_ = std::stod(config_->get_value("TRANSACTION_RISK_UPDATE_TRANSACTION_WEIGHT"));
-        base_time_risk_weight_ = std::stod(config_->get_value("TRANSACTION_BASE_TIME_RISK_WEIGHT"));
+        auto risk_amount_100k_opt = config_->get_double("TRANSACTION_RISK_AMOUNT_100K");
+        if (!risk_amount_100k_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_AMOUNT_100K");
+            return false;
+        }
+        risk_amount_100k_ = *risk_amount_100k_opt;
+
+        auto risk_amount_50k_opt = config_->get_double("TRANSACTION_RISK_AMOUNT_50K");
+        if (!risk_amount_50k_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_AMOUNT_50K");
+            return false;
+        }
+        risk_amount_50k_ = *risk_amount_50k_opt;
+
+        auto risk_amount_10k_opt = config_->get_double("TRANSACTION_RISK_AMOUNT_10K");
+        if (!risk_amount_10k_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_AMOUNT_10K");
+            return false;
+        }
+        risk_amount_10k_ = *risk_amount_10k_opt;
+
+        auto risk_international_opt = config_->get_double("TRANSACTION_RISK_INTERNATIONAL");
+        if (!risk_international_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_INTERNATIONAL");
+            return false;
+        }
+        risk_international_ = *risk_international_opt;
+
+        auto risk_crypto_opt = config_->get_double("TRANSACTION_RISK_CRYPTO");
+        if (!risk_crypto_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_CRYPTO");
+            return false;
+        }
+        risk_crypto_ = *risk_crypto_opt;
+
+        auto velocity_critical_threshold_opt = config_->get_double("TRANSACTION_VELOCITY_CRITICAL_THRESHOLD");
+        if (!velocity_critical_threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_CRITICAL_THRESHOLD");
+            return false;
+        }
+        velocity_critical_threshold_ = *velocity_critical_threshold_opt;
+
+        auto velocity_high_threshold_opt = config_->get_double("TRANSACTION_VELOCITY_HIGH_THRESHOLD");
+        if (!velocity_high_threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_HIGH_THRESHOLD");
+            return false;
+        }
+        velocity_high_threshold_ = *velocity_high_threshold_opt;
+
+        auto velocity_moderate_threshold_opt = config_->get_double("TRANSACTION_VELOCITY_MODERATE_THRESHOLD");
+        if (!velocity_moderate_threshold_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_MODERATE_THRESHOLD");
+            return false;
+        }
+        velocity_moderate_threshold_ = *velocity_moderate_threshold_opt;
+
+        auto velocity_ratio_5x_opt = config_->get_double("TRANSACTION_VELOCITY_RATIO_5X");
+        if (!velocity_ratio_5x_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_RATIO_5X");
+            return false;
+        }
+        velocity_ratio_5x_ = *velocity_ratio_5x_opt;
+
+        auto velocity_ratio_3x_opt = config_->get_double("TRANSACTION_VELOCITY_RATIO_3X");
+        if (!velocity_ratio_3x_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_RATIO_3X");
+            return false;
+        }
+        velocity_ratio_3x_ = *velocity_ratio_3x_opt;
+
+        auto velocity_ratio_2x_opt = config_->get_double("TRANSACTION_VELOCITY_RATIO_2X");
+        if (!velocity_ratio_2x_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_VELOCITY_RATIO_2X");
+            return false;
+        }
+        velocity_ratio_2x_ = *velocity_ratio_2x_opt;
+
+        auto ai_confidence_weight_opt = config_->get_double("TRANSACTION_AI_CONFIDENCE_WEIGHT");
+        if (!ai_confidence_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_AI_CONFIDENCE_WEIGHT");
+            return false;
+        }
+        ai_confidence_weight_ = *ai_confidence_weight_opt;
+
+        auto customer_risk_update_weight_opt = config_->get_double("TRANSACTION_CUSTOMER_RISK_UPDATE_WEIGHT");
+        if (!customer_risk_update_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_CUSTOMER_RISK_UPDATE_WEIGHT");
+            return false;
+        }
+        customer_risk_update_weight_ = *customer_risk_update_weight_opt;
+
+        auto unusual_amount_multiplier_opt = config_->get_double("TRANSACTION_UNUSUAL_AMOUNT_MULTIPLIER");
+        if (!unusual_amount_multiplier_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_UNUSUAL_AMOUNT_MULTIPLIER");
+            return false;
+        }
+        unusual_amount_multiplier_ = *unusual_amount_multiplier_opt;
+
+        auto unusual_amount_risk_weight_opt = config_->get_double("TRANSACTION_UNUSUAL_AMOUNT_RISK_WEIGHT");
+        if (!unusual_amount_risk_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_UNUSUAL_AMOUNT_RISK_WEIGHT");
+            return false;
+        }
+        unusual_amount_risk_weight_ = *unusual_amount_risk_weight_opt;
+
+        auto off_hours_risk_weight_opt = config_->get_double("TRANSACTION_OFF_HOURS_RISK_WEIGHT");
+        if (!off_hours_risk_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_OFF_HOURS_RISK_WEIGHT");
+            return false;
+        }
+        off_hours_risk_weight_ = *off_hours_risk_weight_opt;
+
+        auto weekend_risk_weight_opt = config_->get_double("TRANSACTION_WEEKEND_RISK_WEIGHT");
+        if (!weekend_risk_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_WEEKEND_RISK_WEIGHT");
+            return false;
+        }
+        weekend_risk_weight_ = *weekend_risk_weight_opt;
+
+        auto risk_update_current_weight_opt = config_->get_double("TRANSACTION_RISK_UPDATE_CURRENT_WEIGHT");
+        if (!risk_update_current_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_UPDATE_CURRENT_WEIGHT");
+            return false;
+        }
+        risk_update_current_weight_ = *risk_update_current_weight_opt;
+
+        auto risk_update_transaction_weight_opt = config_->get_double("TRANSACTION_RISK_UPDATE_TRANSACTION_WEIGHT");
+        if (!risk_update_transaction_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_RISK_UPDATE_TRANSACTION_WEIGHT");
+            return false;
+        }
+        risk_update_transaction_weight_ = *risk_update_transaction_weight_opt;
+
+        auto base_time_risk_weight_opt = config_->get_double("TRANSACTION_BASE_TIME_RISK_WEIGHT");
+        if (!base_time_risk_weight_opt) {
+            logger_->log(LogLevel::ERROR, "Missing required configuration: TRANSACTION_BASE_TIME_RISK_WEIGHT");
+            return false;
+        }
+        base_time_risk_weight_ = *base_time_risk_weight_opt;
 
         // Load sanctioned countries from configuration
-        std::string sanctioned_countries_str = config_->get_value("SANCTIONED_COUNTRIES", "IR,KP,SY,CU");
+        auto sanctioned_countries_opt = config_->get_string("SANCTIONED_COUNTRIES");
+        std::string sanctioned_countries_str = sanctioned_countries_opt.value_or("IR,KP,SY,CU");
         std::stringstream ss(sanctioned_countries_str);
         std::string country;
         while (std::getline(ss, country, ',')) {
@@ -111,12 +253,8 @@ void TransactionGuardianAgent::stop() {
 }
 
 AgentDecision TransactionGuardianAgent::process_transaction(const nlohmann::json& transaction_data) {
-    AgentDecision decision;
-    decision.event_id = "transaction_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
-    decision.agent_type = "transaction_guardian";
-    decision.agent_name = "TransactionGuardianAgent";
-    decision.decision_type = "TRANSACTION_COMPLIANCE_CHECK";
-    decision.decision_timestamp = std::chrono::system_clock::now();
+    std::string event_id = "transaction_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    std::string agent_id = "transaction_guardian_agent";
 
     try {
         // Queue transaction for processing
@@ -148,56 +286,183 @@ AgentDecision TransactionGuardianAgent::process_transaction(const nlohmann::json
             risk_level = "MEDIUM";
         }
 
+        // Determine decision type and confidence
+        DecisionType decision_type;
+        ConfidenceLevel confidence_level;
+
         if (transaction_approved) {
-            decision.confidence_level = risk_score > high_risk_threshold_ ? "MEDIUM" : "HIGH";
-            decision.reasoning = nlohmann::json{
-                {"transaction_approved", true},
-                {"risk_level", risk_level},
-                {"risk_score", risk_score},
-                {"compliance_check_passed", !compliance_check.value("blocked", false)},
-                {"fraud_detection_passed", !fraud_detection.value("suspicious", false)}
-            };
-            decision.recommended_actions = nlohmann::json::array({
-                "Process transaction normally",
-                risk_level != "LOW" ? "Flag for additional monitoring" : "No additional action required"
-            });
+            decision_type = risk_score > high_risk_threshold_ ? DecisionType::MONITOR : DecisionType::APPROVE;
+            confidence_level = risk_score > high_risk_threshold_ ? ConfidenceLevel::MEDIUM : ConfidenceLevel::HIGH;
         } else {
-            decision.confidence_level = "HIGH";
-            decision.reasoning = nlohmann::json{
-                {"transaction_blocked", true},
-                {"risk_level", risk_level},
-                {"risk_score", risk_score},
-                {"block_reason", compliance_check.value("block_reason", "High risk transaction")},
-                {"requires_investigation", true}
-            };
-            decision.recommended_actions = nlohmann::json::array({
-                "Block transaction immediately",
-                "Initiate fraud investigation",
-                "Notify compliance team",
-                "Customer verification required"
+            decision_type = DecisionType::DENY;
+            confidence_level = ConfidenceLevel::HIGH;
+        }
+
+        // Create AgentDecision with proper constructor
+        AgentDecision decision(decision_type, confidence_level, agent_id, event_id);
+
+        // Add reasoning
+        if (transaction_approved) {
+            decision.add_reasoning({
+                "transaction_approved",
+                "Transaction approved with risk level: " + risk_level + ", risk score: " + std::to_string(risk_score),
+                risk_score > high_risk_threshold_ ? 0.7 : 0.9,
+                "transaction_risk_assessment"
+            });
+
+            decision.add_reasoning({
+                "compliance_check_passed",
+                "Compliance checks passed successfully",
+                0.95,
+                "compliance_engine"
+            });
+
+            if (!fraud_detection.value("suspicious", false)) {
+                decision.add_reasoning({
+                    "fraud_detection_passed",
+                    "No fraud indicators detected",
+                    0.85,
+                    "fraud_detection_engine"
+                });
+            }
+        } else {
+            decision.add_reasoning({
+                "transaction_blocked",
+                "Transaction blocked due to: " + compliance_check.value("block_reason", "High risk transaction"),
+                0.95,
+                "compliance_engine"
+            });
+
+            decision.add_reasoning({
+                "high_risk_detected",
+                "Risk score (" + std::to_string(risk_score) + ") exceeds threshold",
+                0.9,
+                "transaction_risk_assessment"
+            });
+
+            decision.add_reasoning({
+                "requires_investigation",
+                "Transaction flagged for fraud investigation",
+                0.85,
+                "fraud_detection_engine"
             });
         }
 
-        decision.risk_assessment = nlohmann::json{
-            {"overall_risk_score", risk_score},
-            {"risk_level", risk_level},
-            {"fraud_probability", fraud_detection.value("fraud_probability", 0.0)},
-            {"compliance_violations", compliance_check.value("violations", nlohmann::json::array())},
-            {"velocity_risk", monitor_velocity(transaction_data.value("customer_id", ""), transaction_data.value("amount", 0.0))}
-        };
+        // Add recommended actions
+        if (transaction_approved) {
+            RecommendedAction action;
+            action.action_type = "approve_transaction";
+            action.description = "Process transaction normally";
+            action.priority = Priority::NORMAL;
+            action.deadline = std::chrono::system_clock::now() + std::chrono::minutes(5);
+            decision.add_action(action);
+
+            if (risk_level != "LOW") {
+                RecommendedAction monitoring_action;
+                monitoring_action.action_type = "flag_for_monitoring";
+                monitoring_action.description = "Flag for additional monitoring";
+                monitoring_action.priority = Priority::HIGH;
+                monitoring_action.deadline = std::chrono::system_clock::now() + std::chrono::hours(1);
+                decision.add_action(monitoring_action);
+            }
+        } else {
+            RecommendedAction block_action;
+            block_action.action_type = "block_transaction";
+            block_action.description = "Block transaction immediately";
+            block_action.priority = Priority::CRITICAL;
+            block_action.deadline = std::chrono::system_clock::now() + std::chrono::seconds(30);
+            decision.add_action(block_action);
+
+            RecommendedAction investigation_action;
+            investigation_action.action_type = "initiate_investigation";
+            investigation_action.description = "Initiate fraud investigation";
+            investigation_action.priority = Priority::HIGH;
+            investigation_action.deadline = std::chrono::system_clock::now() + std::chrono::hours(2);
+            decision.add_action(investigation_action);
+
+            RecommendedAction notify_action;
+            notify_action.action_type = "notify_compliance";
+            notify_action.description = "Notify compliance team";
+            notify_action.priority = Priority::HIGH;
+            notify_action.deadline = std::chrono::system_clock::now() + std::chrono::minutes(30);
+            decision.add_action(notify_action);
+
+            RecommendedAction verification_action;
+            verification_action.action_type = "customer_verification";
+            verification_action.description = "Customer verification required";
+            verification_action.priority = Priority::CRITICAL;
+            verification_action.deadline = std::chrono::system_clock::now() + std::chrono::hours(1);
+            decision.add_action(verification_action);
+        }
+
+        // Create risk assessment
+        RiskAssessment risk_assessment;
+        risk_assessment.assessment_id = "risk_" + event_id;
+        risk_assessment.entity_id = transaction_data.value("customer_id", "unknown");
+        risk_assessment.transaction_id = transaction_data.value("transaction_id", event_id);
+        risk_assessment.assessed_by = agent_id;
+        risk_assessment.assessment_time = std::chrono::system_clock::now();
+        risk_assessment.risk_score = risk_score;
+        risk_assessment.risk_level = risk_level;
+
+        if (risk_level == "CRITICAL") {
+            risk_assessment.overall_severity = RiskSeverity::CRITICAL;
+        } else if (risk_level == "HIGH") {
+            risk_assessment.overall_severity = RiskSeverity::HIGH;
+        } else if (risk_level == "MEDIUM") {
+            risk_assessment.overall_severity = RiskSeverity::MEDIUM;
+        } else {
+            risk_assessment.overall_severity = RiskSeverity::LOW;
+        }
+
+        risk_assessment.overall_score = risk_score;
+
+        // Add risk factors
+        risk_assessment.risk_factors.push_back("Overall risk score: " + std::to_string(risk_score));
+        risk_assessment.risk_factors.push_back("Fraud probability: " +
+            std::to_string(fraud_detection.value("fraud_probability", 0.0)));
+
+        double velocity_risk = monitor_velocity(transaction_data.value("customer_id", ""),
+                                               transaction_data.value("amount", 0.0));
+        risk_assessment.risk_factors.push_back("Velocity risk: " + std::to_string(velocity_risk));
+
+        // Add compliance violations if any
+        if (compliance_check.contains("violations")) {
+            for (const auto& violation : compliance_check["violations"]) {
+                risk_assessment.risk_indicators.push_back(violation.get<std::string>());
+            }
+        }
+
+        decision.set_risk_assessment(risk_assessment);
 
         transactions_processed_++;
 
         logger_->log(LogLevel::INFO, "Processed transaction with risk score: " + std::to_string(risk_score));
 
+        return decision;
+
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Failed to process transaction: " + std::string(e.what()));
-        decision.confidence_level = "LOW";
-        decision.reasoning = nlohmann::json{{"error", std::string(e.what())}};
-        decision.recommended_actions = nlohmann::json::array({"Manual transaction review required"});
-    }
 
-    return decision;
+        // Create a minimal error decision
+        AgentDecision decision(DecisionType::NO_ACTION, ConfidenceLevel::LOW, agent_id, event_id);
+
+        decision.add_reasoning({
+            "error",
+            "Failed to process transaction: " + std::string(e.what()),
+            0.1,
+            "error_handler"
+        });
+
+        RecommendedAction action;
+        action.action_type = "manual_review";
+        action.description = "Manual transaction review required";
+        action.priority = Priority::HIGH;
+        action.deadline = std::chrono::system_clock::now() + std::chrono::hours(1);
+        decision.add_action(action);
+
+        return decision;
+    }
 }
 
 nlohmann::json TransactionGuardianAgent::detect_fraud(const nlohmann::json& transaction_data) {
@@ -217,27 +482,27 @@ nlohmann::json TransactionGuardianAgent::detect_fraud(const nlohmann::json& tran
         double fraud_probability = 0.0;
 
         // High amount transactions
-        if (amount > high_amount_threshold_) {
-            fraud_probability += high_amount_risk_weight_;
+        if (amount > 50000.0) {
+            fraud_probability += 0.3;
             suspicious = true;
         }
 
         // Unusual transaction types
-        if (transaction_type == "international" && amount > international_high_amount_threshold_) {
-            fraud_probability += international_risk_weight_;
+        if (transaction_type == "international" && amount > 100000.0) {
+            fraud_probability += 0.2;
         }
 
         // Check velocity patterns
         if (!customer_id.empty()) {
             auto velocity_check = monitor_velocity(customer_id, amount);
             double velocity_risk = velocity_check.value("risk_score", 0.0);
-            fraud_probability += velocity_risk * velocity_risk_weight_;
+            fraud_probability += velocity_risk * 0.25;
         }
 
         // Use AI for advanced fraud detection (with circuit breaker)
         if (is_circuit_breaker_open(last_llm_failure_, consecutive_llm_failures_)) {
             logger_->log(LogLevel::WARN, "LLM circuit breaker is open. Skipping AI fraud analysis.");
-            fraud_probability += circuit_breaker_fallback_increase_; // Configurable fallback increase
+            fraud_probability += 0.1; // Conservative fallback increase
         } else {
             std::string analysis_prompt = R"(
             Analyze this transaction for potential fraud indicators. Consider:
@@ -261,10 +526,10 @@ nlohmann::json TransactionGuardianAgent::detect_fraud(const nlohmann::json& tran
                 3
             );
 
-            if (ai_analysis && ai_analysis->contains("response")) {
+            if (ai_analysis) {
                 try {
                     // Parse AI response for fraud indicators
-                    auto ai_response = nlohmann::json::parse(ai_analysis->at("response").get<std::string>());
+                    auto ai_response = nlohmann::json::parse(*ai_analysis);
 
                     double ai_fraud_prob = ai_response.value("fraud_probability", 0.0);
                     double ai_confidence = ai_response.value("confidence", 0.5);
@@ -286,14 +551,14 @@ nlohmann::json TransactionGuardianAgent::detect_fraud(const nlohmann::json& tran
                 } catch (const std::exception& e) {
                     record_operation_failure(consecutive_llm_failures_, last_llm_failure_);
                     logger_->log(LogLevel::WARN, "Failed to parse AI fraud analysis response: " + std::string(e.what()));
-                    // Fallback: configurable increase in fraud probability
-                    fraud_probability += fallback_risk_increase_;
+                    // Fallback: conservative increase in fraud probability
+                    fraud_probability += 0.05;
                 }
             } else {
                 record_operation_failure(consecutive_llm_failures_, last_llm_failure_);
                 logger_->log(LogLevel::WARN, "AI fraud analysis failed or returned no response");
-                // Fallback: configurable small increase in fraud probability
-                fraud_probability += ai_failure_fallback_increase_;
+                // Fallback: conservative small increase in fraud probability
+                fraud_probability += 0.02;
             }
         }
 
@@ -318,7 +583,6 @@ nlohmann::json TransactionGuardianAgent::check_compliance(const nlohmann::json& 
 
     try {
         std::string customer_id = transaction_data.value("customer_id", "");
-        double amount = transaction_data.value("amount", 0.0);
         std::string destination_country = transaction_data.value("destination_country", "");
 
         // Check business rules
@@ -450,13 +714,23 @@ void TransactionGuardianAgent::escalate_suspicious_transaction(const nlohmann::j
         logger_->log(LogLevel::WARN, "Escalating suspicious transaction - Risk Score: " + std::to_string(risk_score));
 
         // Create compliance event for escalation
-        ComplianceEvent event(
-            "SUSPICIOUS_TRANSACTION",
-            risk_score > fraud_threshold_ ? "CRITICAL" : "HIGH",
-            "Suspicious transaction detected with risk score: " + std::to_string(risk_score),
+        EventSource source{
             "transaction_guardian_agent",
             "fraud_detection",
-            transaction_data.dump()
+            "system"
+        };
+
+        EventMetadata metadata;
+        metadata["transaction_id"] = transaction_data.value("transaction_id", "unknown");
+        metadata["risk_score"] = risk_score;
+        metadata["customer_id"] = transaction_data.value("customer_id", "unknown");
+
+        ComplianceEvent event(
+            EventType::SUSPICIOUS_ACTIVITY_DETECTED,
+            risk_score > fraud_threshold_ ? EventSeverity::CRITICAL : EventSeverity::HIGH,
+            "Suspicious transaction detected with risk score: " + std::to_string(risk_score),
+            source,
+            metadata
         );
 
         // In production, would queue this event for human review
@@ -505,9 +779,12 @@ void TransactionGuardianAgent::process_transaction_queue() {
             auto decision = process_transaction(transaction);
 
             // Handle high-risk transactions
-            double risk_score = decision.risk_assessment.value("overall_risk_score", 0.0);
-            if (risk_score > high_risk_threshold_) {
-                escalate_suspicious_transaction(transaction, risk_score);
+            auto risk_assessment_opt = decision.get_risk_assessment();
+            if (risk_assessment_opt) {
+                double risk_score = risk_assessment_opt->risk_score;
+                if (risk_score > high_risk_threshold_) {
+                    escalate_suspicious_transaction(transaction, risk_score);
+                }
             }
 
         } catch (const std::exception& e) {
@@ -941,10 +1218,15 @@ double TransactionGuardianAgent::calculate_daily_limit_from_json(const nlohmann:
     std::string risk_rating = customer_row.value("risk_rating", "");
     std::string customer_type = customer_row.value("customer_type", "");
 
-    // Load configurable base limits from configuration
-    double base_limit_individual = std::stod(config_->get_value("TRANSACTION_MAX_AMOUNT_INDIVIDUAL", "10000.0"));
-    double base_limit_business = std::stod(config_->get_value("TRANSACTION_MAX_AMOUNT_BUSINESS", "50000.0"));
-    double base_limit_institution = std::stod(config_->get_value("TRANSACTION_MAX_AMOUNT_INSTITUTION", "100000.0"));
+    // Load configurable base limits from configuration with fallback values
+    auto individual_limit_opt = config_->get_double("TRANSACTION_MAX_AMOUNT_INDIVIDUAL");
+    double base_limit_individual = individual_limit_opt.value_or(10000.0);
+
+    auto business_limit_opt = config_->get_double("TRANSACTION_MAX_AMOUNT_BUSINESS");
+    double base_limit_business = business_limit_opt.value_or(50000.0);
+
+    auto institution_limit_opt = config_->get_double("TRANSACTION_MAX_AMOUNT_INSTITUTION");
+    double base_limit_institution = institution_limit_opt.value_or(100000.0);
 
     // Base limits by customer type
     double base_limit = (customer_type == "INDIVIDUAL") ? base_limit_individual :

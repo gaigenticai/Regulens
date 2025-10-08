@@ -346,6 +346,88 @@ bool RedisClient::is_healthy() const {
     return health_check["healthy"];
 }
 
+bool RedisClient::ping() {
+    // Production-grade PING implementation using connection pool
+    if (!initialized_ || !connection_pool_) {
+        return false;
+    }
+    
+    try {
+        auto result = execute_with_connection([](std::shared_ptr<RedisConnectionWrapper> conn) {
+            return conn->execute_command("PING");
+        });
+        
+        return result.success && result.value && (*result.value == "PONG");
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->error("Redis PING failed", "RedisClient", "ping",
+                         {{"error", e.what()}});
+        }
+        return false;
+    }
+}
+
+nlohmann::json RedisClient::get_info() {
+    // Production-grade INFO command implementation
+    nlohmann::json info;
+    
+    if (!initialized_ || !connection_pool_) {
+        info["error"] = "Redis client not initialized";
+        return info;
+    }
+    
+    try {
+        auto result = execute_with_connection([](std::shared_ptr<RedisConnectionWrapper> conn) {
+            return conn->execute_command("INFO");
+        });
+        
+        if (result.success && result.value) {
+            // Parse INFO command output (key:value pairs separated by newlines)
+            std::string info_str = *result.value;
+            std::istringstream stream(info_str);
+            std::string line;
+            
+            while (std::getline(stream, line)) {
+                // Skip comments and section headers
+                if (line.empty() || line[0] == '#') continue;
+                
+                // Parse key:value pairs
+                auto colon_pos = line.find(':');
+                if (colon_pos != std::string::npos) {
+                    std::string key = line.substr(0, colon_pos);
+                    std::string value = line.substr(colon_pos + 1);
+                    
+                    // Try to parse as number
+                    try {
+                        if (value.find('.') != std::string::npos) {
+                            info[key] = std::stod(value);
+                        } else {
+                            info[key] = std::stoll(value);
+                        }
+                    } catch (...) {
+                        // Not a number, store as string
+                        info[key] = value;
+                    }
+                }
+            }
+        } else {
+            info["error"] = result.error_message;
+        }
+    } catch (const std::exception& e) {
+        info["error"] = e.what();
+        if (logger_) {
+            logger_->error("Redis INFO failed", "RedisClient", "get_info",
+                         {{"error", e.what()}});
+        }
+    }
+    
+    return info;
+}
+
+bool RedisClient::is_connected() const {
+    return initialized_ && connection_pool_ != nullptr;
+}
+
 void RedisClient::load_config() {
     if (!config_) return;
 

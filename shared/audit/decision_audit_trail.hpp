@@ -226,6 +226,12 @@ private:
     std::string generate_unique_id();
     DecisionConfidence calculate_overall_confidence(const std::vector<DecisionStep>& steps);
     std::chrono::milliseconds calculate_total_processing_time(const std::vector<DecisionStep>& steps);
+    double calculate_confidence_impact(
+        AuditEventType event_type,
+        const nlohmann::json& input_data,
+        const nlohmann::json& output_data,
+        const nlohmann::json& metadata
+    );
 
     // Member variables
     std::shared_ptr<ConnectionPool> db_pool_;

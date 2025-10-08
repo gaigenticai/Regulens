@@ -12,7 +12,6 @@
 #include <string>
 #include <map>
 #include "web_ui_server.hpp"
-#include "web_ui_handlers.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../logging/structured_logger.hpp"
 #include "../metrics/metrics_collector.hpp"
@@ -46,7 +45,6 @@ public:
 private:
     int port_;
     std::unique_ptr<WebUIServer> server_;
-    std::unique_ptr<WebUIHandlers> handlers_;
     ConfigurationManager* config_manager_;
     StructuredLogger* logger_;
     MetricsCollector* metrics_collector_;

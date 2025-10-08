@@ -341,9 +341,10 @@ SMTPConfig ConfigurationManager::get_smtp_config() const {
 
 std::vector<std::string> ConfigurationManager::get_notification_recipients() const {
     auto recipients_str = get_string(config_keys::SMTP_NOTIFICATION_RECIPIENTS);
-    if (!recipients_str) {
-        // Default fallback recipients for development/demo
-        return {"compliance@company.com", "legal@company.com", "risk@company.com"};
+    if (!recipients_str || recipients_str->empty()) {
+        // No defaults for production - recipients must be explicitly configured
+        // Return empty vector to indicate configuration error
+        return {};
     }
 
     std::vector<std::string> recipients;

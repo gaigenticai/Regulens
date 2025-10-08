@@ -318,6 +318,13 @@ private:
      * @return true if valid
      */
     bool validate_case(const ComplianceCase& case_data) const;
+
+    /**
+     * @brief Create text representation of query for embedding
+     * @param query Query to convert
+     * @return Text representation
+     */
+    std::string create_query_text_for_embedding(const CaseQuery& query);
 };
 
 /**
@@ -459,6 +466,7 @@ public:
 private:
     std::shared_ptr<ConfigurationManager> config_;
     StructuredLogger* logger_;
+    std::shared_ptr<CaseBasedReasoner> case_reasoner_;
 
     /**
      * @brief Check if two decisions are contradictory

@@ -164,11 +164,11 @@ ChangeDetectionResult ChangeDetector::detect_changes(
 
         structural_detections_++;
 
-        // Phase 3: Semantic change analysis
+        // Step 3: Semantic change analysis
         double semantic_score = detect_semantic_changes(normalized_baseline, normalized_new, metadata);
         semantic_detections_++;
 
-        // Phase 4: Convert diff chunks to regulatory changes
+        // Step 4: Convert diff chunks to regulatory changes
         std::vector<RegulatoryChange> detected_changes;
         auto change_summaries = analyze_diff_chunks(diff_chunks, metadata);
 

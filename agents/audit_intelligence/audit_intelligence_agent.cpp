@@ -5,13 +5,15 @@
 #include <iomanip>
 #include <random>
 #include <cmath>
+#include <variant>
+#include <regex>
 
 namespace regulens {
 
 AuditIntelligenceAgent::AuditIntelligenceAgent(
     std::shared_ptr<ConfigurationManager> config,
     std::shared_ptr<StructuredLogger> logger,
-    std::shared_ptr<PostgreSQLConnectionPool> db_pool,
+                                             std::shared_ptr<ConnectionPool> db_pool,
     std::shared_ptr<AnthropicClient> llm_client,
     std::shared_ptr<DecisionAuditTrailManager> audit_trail)
     : config_(config), logger_(logger), db_pool_(db_pool), llm_client_(llm_client),
@@ -29,13 +31,13 @@ bool AuditIntelligenceAgent::initialize() {
         logger_->log(LogLevel::INFO, "Initializing Audit Intelligence Agent");
 
         // Load configuration parameters
-        anomaly_threshold_ = std::stod(config_->get_value("AUDIT_ANOMALY_THRESHOLD", "0.85"));
-        critical_severity_risk_ = std::stod(config_->get_value("AUDIT_CRITICAL_SEVERITY_RISK", "0.8"));
-        high_severity_risk_ = std::stod(config_->get_value("AUDIT_HIGH_SEVERITY_RISK", "0.6"));
-        medium_severity_risk_ = std::stod(config_->get_value("AUDIT_MEDIUM_SEVERITY_RISK", "0.4"));
-        low_severity_risk_ = std::stod(config_->get_value("AUDIT_LOW_SEVERITY_RISK", "0.2"));
+        anomaly_threshold_ = config_->get_double("AUDIT_ANOMALY_THRESHOLD").value_or(0.85);
+        critical_severity_risk_ = config_->get_double("AUDIT_CRITICAL_SEVERITY_RISK").value_or(0.8);
+        high_severity_risk_ = config_->get_double("AUDIT_HIGH_SEVERITY_RISK").value_or(0.6);
+        medium_severity_risk_ = config_->get_double("AUDIT_MEDIUM_SEVERITY_RISK").value_or(0.4);
+        low_severity_risk_ = config_->get_double("AUDIT_LOW_SEVERITY_RISK").value_or(0.2);
         analysis_interval_ = std::chrono::minutes(
-            std::stoi(config_->get_value("AUDIT_ANALYSIS_INTERVAL_MINUTES", "15")));
+            config_->get_int("AUDIT_ANALYSIS_INTERVAL_MINUTES").value_or(15));
 
         logger_->log(LogLevel::INFO, "Audit Intelligence Agent initialized successfully");
         return true;
@@ -98,16 +100,30 @@ std::vector<ComplianceEvent> AuditIntelligenceAgent::analyze_audit_trails(int ti
         }
 
         // Detect anomalies using advanced pattern recognition
-        auto detected_anomalies = perform_advanced_pattern_recognition(audit_data);
+        // Combine multiple anomaly detection methods
+        std::vector<nlohmann::json> detected_anomalies;
+        auto temporal = detect_temporal_anomalies(audit_data);
+        auto behavioral = detect_behavioral_anomalies(audit_data);
+        auto correlation = detect_risk_correlation_anomalies(audit_data);
+        detected_anomalies.insert(detected_anomalies.end(), temporal.begin(), temporal.end());
+        detected_anomalies.insert(detected_anomalies.end(), behavioral.begin(), behavioral.end());
+        detected_anomalies.insert(detected_anomalies.end(), correlation.begin(), correlation.end());
         for (const auto& anomaly : detected_anomalies) {
-            ComplianceEvent event(
-                "AUDIT_ANOMALY",
-                "HIGH",
-                "Audit Intelligence detected anomalous pattern: " + anomaly["description"].get<std::string>(),
+            EventSource source{
                 "audit_intelligence_agent",
                 "audit_trail_analysis",
-                anomaly.dump(),
-                now
+                "internal"
+            };
+            
+            EventMetadata metadata;
+            metadata["anomaly_data"] = anomaly.dump();
+            
+            ComplianceEvent event(
+                EventType::AUDIT_LOG_ENTRY,
+                EventSeverity::HIGH,
+                "Audit Intelligence detected anomalous pattern: " + anomaly["description"].get<std::string>(),
+                source,
+                metadata
             );
             anomalies.push_back(event);
         }
@@ -130,11 +146,18 @@ AgentDecision AuditIntelligenceAgent::perform_compliance_monitoring(const Compli
 
     // Analyze the event using AI-powered compliance monitoring
     nlohmann::json analysis_data = {
-        {"event_type", event.event_type},
-        {"severity", event.severity},
-        {"description", event.description},
-        {"source_metadata", event.event_metadata}
+        {"event_type", static_cast<int>(event.get_type())},
+        {"severity", static_cast<int>(event.get_severity())},
+        {"description", event.get_description()},
+        {"source", event.get_source().to_json()},
+        {"metadata", nlohmann::json::object()}
     };
+    // Add metadata to analysis
+    for (const auto& [key, value] : event.get_metadata()) {
+        std::visit([&](const auto& v) {
+            analysis_data["metadata"][key] = v;
+        }, value);
+    }
 
     // Calculate risk score using advanced ML analysis
     double risk_score = calculate_advanced_risk_score(analysis_data);
@@ -148,13 +171,14 @@ AgentDecision AuditIntelligenceAgent::perform_compliance_monitoring(const Compli
         confidence = ConfidenceLevel::MEDIUM;
     }
 
-    AgentDecision decision(decision_type, confidence, "AuditIntelligenceAgent", event.event_id);
+    AgentDecision decision(decision_type, confidence, "AuditIntelligenceAgent", event.get_event_id());
 
     try {
         // Add reasoning based on the analysis
         DecisionReasoning reasoning;
         reasoning.factor = "Risk-based compliance monitoring";
-        reasoning.evidence = "Event severity: " + event.severity + ", Type: " + event.event_type;
+        reasoning.evidence = "Event severity: " + std::to_string(static_cast<int>(event.get_severity())) + 
+                           ", Type: " + std::to_string(static_cast<int>(event.get_type()));
         reasoning.weight = risk_score;
         reasoning.source = "AuditIntelligenceAgent_ML_Analysis";
         decision.add_reasoning(reasoning);
@@ -162,7 +186,7 @@ AgentDecision AuditIntelligenceAgent::perform_compliance_monitoring(const Compli
         // Add recommended actions based on decision type
         RecommendedAction action;
         action.deadline = std::chrono::system_clock::now() + std::chrono::hours(24);
-        action.parameters = {{"event_id", event.event_id}};
+        action.parameters = {{"event_id", event.get_event_id()}};
 
         if (decision_type == DecisionType::ALERT) {
             action.action_type = "escalate";
@@ -188,7 +212,7 @@ AgentDecision AuditIntelligenceAgent::perform_compliance_monitoring(const Compli
         risk_assessment.assessment_time = std::chrono::system_clock::now();
         decision.set_risk_assessment(risk_assessment);
 
-        logger_->log(LogLevel::INFO, "Completed compliance monitoring for event " + event.event_id +
+        logger_->log(LogLevel::INFO, "Completed compliance monitoring for event " + event.get_event_id() +
                    " with risk score: " + std::to_string(risk_score));
 
     } catch (const std::exception& e) {
@@ -207,7 +231,7 @@ AgentDecision AuditIntelligenceAgent::perform_compliance_monitoring(const Compli
         error_action.description = "Manual compliance review required due to analysis error";
         error_action.priority = Priority::HIGH;
         error_action.deadline = std::chrono::system_clock::now() + std::chrono::hours(4);
-        error_action.parameters = {{"event_id", event.event_id}, {"error", std::string(e.what())}};
+        error_action.parameters = {{"event_id", event.get_event_id()}, {"error", std::string(e.what())}};
         decision.add_action(error_action);
     }
 

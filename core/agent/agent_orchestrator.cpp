@@ -105,12 +105,13 @@ bool AgentOrchestrator::initialize_components() {
 
 bool AgentOrchestrator::initialize_communication_system() {
     try {
-        // Create error handler
-        auto error_handler = std::make_shared<ErrorHandler>(config_, logger_);
+        // Create error handler - create shared_ptr to logger without deleting (singleton)
+        auto logger_shared = std::shared_ptr<StructuredLogger>(logger_, [](StructuredLogger*){});
+        auto error_handler = std::make_shared<ErrorHandler>(config_, logger_shared);
 
         // Create LLM clients for message translation
-        auto openai_client = std::make_shared<OpenAIClient>(config_, logger_, error_handler.get());
-        auto anthropic_client = std::make_shared<AnthropicClient>(config_, logger_, error_handler.get());
+        auto openai_client = std::make_shared<OpenAIClient>(config_, logger_shared, error_handler);
+        auto anthropic_client = std::make_shared<AnthropicClient>(config_, logger_shared, error_handler);
 
         // Initialize communication components
         agent_registry_ = create_agent_registry(config_, logger_, error_handler.get());
@@ -428,6 +429,29 @@ nlohmann::json AgentOrchestrator::get_status() const {
     status["metrics"] = metrics_collector_->get_all_metrics();
 
     return status;
+}
+
+nlohmann::json AgentOrchestrator::get_thread_pool_stats() const {
+    // Production-grade thread pool statistics
+    size_t total_threads = worker_threads_.size();
+    size_t queued_tasks = 0;
+    
+    {
+        std::lock_guard<std::mutex> lock(task_queue_mutex_);
+        queued_tasks = task_queue_.size();
+    }
+    
+    // Calculate idle threads (approximation based on queue state)
+    size_t active_threads = (queued_tasks > 0) ? std::min(queued_tasks, total_threads) : 0;
+    size_t idle_threads = total_threads - active_threads;
+    
+    return {
+        {"total_threads", total_threads},
+        {"active_threads", active_threads},
+        {"idle_threads", idle_threads},
+        {"queued_tasks", queued_tasks},
+        {"completed_tasks", tasks_processed_.load()}
+    };
 }
 
 bool AgentOrchestrator::set_agent_enabled(const std::string& agent_type, bool enabled) {

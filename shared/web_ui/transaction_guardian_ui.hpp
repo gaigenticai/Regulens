@@ -11,7 +11,6 @@
 #include <memory>
 #include <string>
 #include "web_ui_server.hpp"
-#include "web_ui_handlers.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../logging/structured_logger.hpp"
 #include "../metrics/metrics_collector.hpp"
@@ -45,7 +44,6 @@ public:
 private:
     int port_;
     std::unique_ptr<WebUIServer> server_;
-    std::unique_ptr<WebUIHandlers> handlers_;
     ConfigurationManager* config_manager_;
     StructuredLogger* logger_;
     MetricsCollector* metrics_collector_;
@@ -60,11 +58,11 @@ private:
     std::string generate_compliance_report_page();
 
     // Handler methods
-    void handle_transaction_submission(const httplib::Request& req, httplib::Response& res);
-    void handle_monitoring_dashboard(const httplib::Request& req, httplib::Response& res);
-    void handle_compliance_report(const httplib::Request& req, httplib::Response& res);
-    void handle_velocity_check(const httplib::Request& req, httplib::Response& res);
-    void handle_fraud_detection(const httplib::Request& req, httplib::Response& res);
+    HTTPResponse handle_transaction_submission(const HTTPRequest& req);
+    HTTPResponse handle_monitoring_dashboard(const HTTPRequest& req);
+    HTTPResponse handle_compliance_report(const HTTPRequest& req);
+    HTTPResponse handle_velocity_check(const HTTPRequest& req);
+    HTTPResponse handle_fraud_detection(const HTTPRequest& req);
 };
 
 } // namespace regulens

@@ -597,7 +597,7 @@ bool RESTAPIServer::validate_cors(const APIRequest& req) {
         return true; // No Origin header, allow the request
     }
 
-    // Load allowed origins from environment or configuration
+    // Load allowed origins from environment - REQUIRED for production security
     const char* allowed_origins_env = std::getenv("ALLOWED_CORS_ORIGINS");
     std::vector<std::string> allowed_origins;
 
@@ -606,11 +606,18 @@ bool RESTAPIServer::validate_cors(const APIRequest& req) {
         std::istringstream iss(origins_str);
         std::string origin;
         while (std::getline(iss, origin, ',')) {
-            allowed_origins.push_back(origin);
+            // Trim whitespace from origin
+            origin.erase(0, origin.find_first_not_of(" \t"));
+            origin.erase(origin.find_last_not_of(" \t") + 1);
+            if (!origin.empty()) {
+                allowed_origins.push_back(origin);
+            }
         }
     } else {
-        // Default to localhost for development
-        allowed_origins = {"http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"};
+        // No default origins for production security - environment variable MUST be configured
+        logger_->error("ALLOWED_CORS_ORIGINS environment variable not configured",
+                      "RESTAPIServer", __func__);
+        return false;  // Reject request - CORS origins must be explicitly configured
     }
 
     std::string request_origin = origin_it->second;

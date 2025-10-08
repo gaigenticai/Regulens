@@ -16,7 +16,6 @@
 #include "../logging/structured_logger.hpp"
 #include "../metrics/metrics_collector.hpp"
 #include "web_ui_server.hpp"
-#include "web_ui_handlers.hpp"
 #include "../../agents/regulatory_assessor/regulatory_assessor_agent.hpp"
 
 namespace regulens {
@@ -61,34 +60,22 @@ private:
     /**
      * @brief Handler for regulatory assessment requests
      */
-    static std::string handle_assess_regulation(const std::string& method,
-                                               const std::string& path,
-                                               const std::string& body,
-                                               RegulatoryAssessorUI* ui);
+    HTTPResponse handle_assess_regulation(const HTTPRequest& req);
 
     /**
      * @brief Handler for regulatory impact analysis
      */
-    static std::string handle_impact_analysis(const std::string& method,
-                                             const std::string& path,
-                                             const std::string& body,
-                                             RegulatoryAssessorUI* ui);
+    HTTPResponse handle_impact_analysis(const HTTPRequest& req);
 
     /**
      * @brief Handler for regulatory change monitoring
      */
-    static std::string handle_monitor_changes(const std::string& method,
-                                             const std::string& path,
-                                             const std::string& body,
-                                             RegulatoryAssessorUI* ui);
+    HTTPResponse handle_monitor_changes(const HTTPRequest& req);
 
     /**
      * @brief Handler for regulatory assessment reports
      */
-    static std::string handle_assessment_report(const std::string& method,
-                                               const std::string& path,
-                                               const std::string& body,
-                                               RegulatoryAssessorUI* ui);
+    HTTPResponse handle_assessment_report(const HTTPRequest& req);
 
     /**
      * @brief Generate HTML dashboard for regulatory assessor
@@ -116,7 +103,6 @@ private:
     MetricsCollector* metrics_collector_;
     std::shared_ptr<RegulatoryAssessorAgent> regulatory_agent_;
     std::unique_ptr<WebUIServer> server_;
-    std::unique_ptr<WebUIHandlers> handlers_;
     std::atomic<bool> running_;
 };
 

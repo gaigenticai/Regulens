@@ -221,6 +221,31 @@ public:
     // Main dashboard
     HTTPResponse handle_dashboard(const HTTPRequest& request);
     HTTPResponse handle_api_docs(const HTTPRequest& request);
+    
+    // Public HTML generators for external use
+    std::string generate_decision_trees_html() const;
+    
+    // Activity feed accessor for external components
+    std::shared_ptr<AgentActivityFeed> get_activity_feed() const { return activity_feed_; }
+
+    // Memory System UI handlers
+    HTTPResponse handle_memory_dashboard(const HTTPRequest& request);
+    HTTPResponse handle_memory_conversation_store(const HTTPRequest& request);
+    HTTPResponse handle_memory_conversation_retrieve(const HTTPRequest& request);
+    HTTPResponse handle_memory_conversation_search(const HTTPRequest& request);
+    HTTPResponse handle_memory_conversation_delete(const HTTPRequest& request);
+    HTTPResponse handle_memory_case_store(const HTTPRequest& request);
+    HTTPResponse handle_memory_case_retrieve(const HTTPRequest& request);
+    HTTPResponse handle_memory_case_search(const HTTPRequest& request);
+    HTTPResponse handle_memory_case_delete(const HTTPRequest& request);
+    HTTPResponse handle_memory_feedback_store(const HTTPRequest& request);
+    HTTPResponse handle_memory_feedback_retrieve(const HTTPRequest& request);
+    HTTPResponse handle_memory_feedback_search(const HTTPRequest& request);
+    HTTPResponse handle_memory_learning_models(const HTTPRequest& request);
+    HTTPResponse handle_memory_consolidation_status(const HTTPRequest& request);
+    HTTPResponse handle_memory_consolidation_run(const HTTPRequest& request);
+    HTTPResponse handle_memory_access_patterns(const HTTPRequest& request);
+    HTTPResponse handle_memory_statistics(const HTTPRequest& request);
 
 private:
     std::shared_ptr<ConfigurationManager> config_manager_;
@@ -284,7 +309,7 @@ private:
     std::shared_ptr<DecisionTreeOptimizer> decision_optimizer_;
 
     // Multi-Agent Communication System
-    std::shared_ptr<AgentRegistry> agent_registry_;
+    std::shared_ptr<AgentCommRegistry> agent_registry_;
     std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
     std::shared_ptr<IntelligentMessageTranslator> message_translator_;
     std::shared_ptr<ConsensusEngine> consensus_engine_;
@@ -321,7 +346,6 @@ private:
     std::string generate_database_html() const;
     std::string generate_agents_html() const;
     std::string generate_monitoring_html() const;
-    std::string generate_decision_trees_html() const;
     std::string generate_activity_feed_html() const;
     std::string generate_collaboration_html() const;
     std::string generate_pattern_analysis_html() const;
@@ -333,28 +357,8 @@ private:
     std::string generate_embeddings_html() const;
     std::string generate_decision_dashboard_html() const;
     std::string generate_risk_dashboard_html() const;
-       std::string generate_multi_agent_html() const;
-
-       // Memory System UI handlers
-       HTTPResponse handle_memory_dashboard(const HTTPRequest& request);
-       HTTPResponse handle_memory_conversation_store(const HTTPRequest& request);
-       HTTPResponse handle_memory_conversation_retrieve(const HTTPRequest& request);
-       HTTPResponse handle_memory_conversation_search(const HTTPRequest& request);
-       HTTPResponse handle_memory_conversation_delete(const HTTPRequest& request);
-       HTTPResponse handle_memory_case_store(const HTTPRequest& request);
-       HTTPResponse handle_memory_case_retrieve(const HTTPRequest& request);
-       HTTPResponse handle_memory_case_search(const HTTPRequest& request);
-       HTTPResponse handle_memory_case_delete(const HTTPRequest& request);
-       HTTPResponse handle_memory_feedback_store(const HTTPRequest& request);
-       HTTPResponse handle_memory_feedback_retrieve(const HTTPRequest& request);
-       HTTPResponse handle_memory_feedback_search(const HTTPRequest& request);
-       HTTPResponse handle_memory_learning_models(const HTTPRequest& request);
-       HTTPResponse handle_memory_consolidation_status(const HTTPRequest& request);
-       HTTPResponse handle_memory_consolidation_run(const HTTPRequest& request);
-       HTTPResponse handle_memory_access_patterns(const HTTPRequest& request);
-       HTTPResponse handle_memory_statistics(const HTTPRequest& request);
-
-       std::string generate_memory_html() const;
+    std::string generate_multi_agent_html() const;
+    std::string generate_memory_html() const;
     std::string generate_ingestion_html() const;
     std::string generate_api_docs_html() const;
 

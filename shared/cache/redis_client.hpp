@@ -270,6 +270,24 @@ public:
      * @return true if operational
      */
     bool is_healthy() const;
+    
+    /**
+     * @brief Check Redis connectivity with PING command
+     * @return true if Redis responds to PING
+     */
+    bool ping();
+    
+    /**
+     * @brief Get Redis server information
+     * @return JSON with server info (version, memory, clients, etc.)
+     */
+    nlohmann::json get_info();
+    
+    /**
+     * @brief Check connection status
+     * @return true if connected to Redis
+     */
+    bool is_connected() const;
 
     // ===== BASIC REDIS OPERATIONS =====
 

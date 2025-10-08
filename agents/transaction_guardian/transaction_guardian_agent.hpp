@@ -31,7 +31,7 @@ class TransactionGuardianAgent {
 public:
     TransactionGuardianAgent(std::shared_ptr<ConfigurationManager> config,
                             std::shared_ptr<StructuredLogger> logger,
-                            std::shared_ptr<PostgreSQLConnectionPool> db_pool,
+                            std::shared_ptr<ConnectionPool> db_pool,
                             std::shared_ptr<AnthropicClient> llm_client,
                             std::shared_ptr<RiskAssessmentEngine> risk_engine);
 
@@ -184,7 +184,7 @@ private:
 
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
-    std::shared_ptr<PostgreSQLConnectionPool> db_pool_;
+    std::shared_ptr<ConnectionPool> db_pool_;
     std::shared_ptr<AnthropicClient> llm_client_;
     std::shared_ptr<RiskAssessmentEngine> risk_engine_;
 
@@ -220,6 +220,13 @@ private:
     double ai_confidence_weight_;
     double customer_risk_update_weight_;
     double ai_failure_fallback_increase_;
+    double high_amount_threshold_;
+    double international_high_amount_threshold_;
+    double international_risk_weight_;
+    double high_amount_risk_weight_;
+    double velocity_risk_weight_;
+    double circuit_breaker_fallback_increase_;
+    double fallback_risk_increase_;
 
     // Transaction risk calculation parameters
     double unusual_amount_multiplier_;
@@ -251,6 +258,10 @@ private:
     void record_operation_failure(std::atomic<size_t>& failure_counter,
                                  std::chrono::steady_clock::time_point& last_failure);
     void record_operation_success(std::atomic<size_t>& failure_counter);
+
+    // Helper methods for customer profile parsing
+    std::string determine_aml_status_from_json(const nlohmann::json& customer_row);
+    double calculate_daily_limit_from_json(const nlohmann::json& customer_row);
 };
 
 } // namespace regulens

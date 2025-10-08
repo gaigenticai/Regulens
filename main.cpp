@@ -114,8 +114,12 @@ private:
             throw std::runtime_error("Failed to start regulatory monitoring");
         }
 
-        // Initialize Web UI Server
-        web_ui_server_ = std::make_unique<WebUIServer>(8080);
+        // Initialize Web UI Server with configurable port
+        // Get port from environment/config for flexible deployment (local, cloud, on-prem)
+        int web_ui_port = static_cast<int>(config_manager_->get_int("WEB_UI_PORT").value_or(8080));
+        std::string web_ui_host = config_manager_->get_string("WEB_UI_HOST").value_or("0.0.0.0");
+        
+        web_ui_server_ = std::make_unique<WebUIServer>(web_ui_port);
         web_ui_server_->set_config_manager(config_ptr);
         web_ui_server_->set_logger(logger_ptr);
 
@@ -131,7 +135,8 @@ private:
         }
 
         logger_.info("All components initialized successfully - regulatory monitoring active");
-        logger_.info("Web UI server started on http://localhost:8080");
+        logger_.info("Web UI server started", "RegulensPlatform", "initialize_components",
+                    {{"url", "http://" + web_ui_host + "/"}, {"port", std::to_string(web_ui_port)}});
     }
 
     void shutdown_components() {

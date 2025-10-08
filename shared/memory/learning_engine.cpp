@@ -13,6 +13,26 @@
 
 namespace regulens {
 
+// Helper function for state representation (used by multiple classes)
+static std::string get_state_representation(const nlohmann::json& context) {
+    // Create a simple state representation
+    std::string state = "context:";
+
+    if (context.contains("domain")) {
+        state += context["domain"].get<std::string>() + ";";
+    }
+
+    if (context.contains("risk_level")) {
+        state += "risk:" + context["risk_level"].get<std::string>() + ";";
+    }
+
+    if (context.contains("transaction_type")) {
+        state += "type:" + context["transaction_type"].get<std::string>() + ";";
+    }
+
+    return state;
+}
+
 // LearnedPattern Implementation
 
 std::string LearnedPattern::generate_pattern_id() {
@@ -34,7 +54,7 @@ std::vector<LearningSignal> FeedbackProcessor::process_feedback(
     const std::string& agent_id,
     const nlohmann::json& original_decision,
     const nlohmann::json& human_feedback,
-    FeedbackType feedback_type,
+    LearningFeedbackType feedback_type,
     const nlohmann::json& context) {
 
     std::vector<LearningSignal> signals;
@@ -43,24 +63,24 @@ std::vector<LearningSignal> FeedbackProcessor::process_feedback(
         double feedback_strength = 0.0;
 
         switch (feedback_type) {
-            case FeedbackType::CORRECTION: {
+            case LearningFeedbackType::CORRECTION: {
                 feedback_strength = calculate_feedback_strength(original_decision, human_feedback);
-                signals.emplace_back(FeedbackType::CORRECTION, feedback_strength, 0.9);
+                signals.emplace_back(LearningFeedbackType::CORRECTION, feedback_strength, 0.9);
                 break;
             }
-            case FeedbackType::APPROVAL: {
+            case LearningFeedbackType::APPROVAL: {
                 feedback_strength = 0.8; // Strong positive signal for approval
-                signals.emplace_back(FeedbackType::APPROVAL, feedback_strength, 0.95);
+                signals.emplace_back(LearningFeedbackType::APPROVAL, feedback_strength, 0.95);
                 break;
             }
-            case FeedbackType::ESCALATION: {
+            case LearningFeedbackType::ESCALATION: {
                 feedback_strength = -0.6; // Negative signal for escalation
-                signals.emplace_back(FeedbackType::ESCALATION, feedback_strength, 0.85);
+                signals.emplace_back(LearningFeedbackType::ESCALATION, feedback_strength, 0.85);
                 break;
             }
-            case FeedbackType::PREFERENCE: {
+            case LearningFeedbackType::PREFERENCE: {
                 feedback_strength = 0.5; // Moderate positive signal
-                signals.emplace_back(FeedbackType::PREFERENCE, feedback_strength, 0.8);
+                signals.emplace_back(LearningFeedbackType::PREFERENCE, feedback_strength, 0.8);
                 break;
             }
             default:
@@ -70,7 +90,7 @@ std::vector<LearningSignal> FeedbackProcessor::process_feedback(
 
         // Add context-based signals
         if (context.contains("urgency") && context["urgency"] == "high") {
-            signals.emplace_back(FeedbackType::REWARD, 0.2, 0.7); // Reward for handling urgent cases
+            signals.emplace_back(LearningFeedbackType::REWARD, 0.2, 0.7); // Reward for handling urgent cases
         }
 
         // Add metadata
@@ -94,7 +114,7 @@ std::vector<LearningSignal> FeedbackProcessor::process_feedback(
                           "FeedbackProcessor", "process_feedback");
         }
         // Return neutral signal on error
-        signals.emplace_back(FeedbackType::CORRECTION, 0.0, 0.5);
+        signals.emplace_back(LearningFeedbackType::CORRECTION, 0.0, 0.5);
     }
 
     return signals;
@@ -109,7 +129,7 @@ LearningSignal FeedbackProcessor::process_outcome_feedback(
     double strength = positive_outcome ? 0.7 : -0.7;
     strength *= outcome_confidence; // Weight by confidence
 
-    LearningSignal signal(FeedbackType::OUTCOME_BASED, strength, outcome_confidence);
+    LearningSignal signal(LearningFeedbackType::OUTCOME_BASED, strength, outcome_confidence);
     signal.metadata["agent_id"] = agent_id;
     signal.metadata["positive_outcome"] = positive_outcome ? "true" : "false";
 
@@ -118,7 +138,7 @@ LearningSignal FeedbackProcessor::process_outcome_feedback(
 
 LearningSignal FeedbackProcessor::aggregate_signals(const std::vector<LearningSignal>& signals) {
     if (signals.empty()) {
-        return LearningSignal(FeedbackType::REWARD, 0.0, 0.0);
+        return LearningSignal(LearningFeedbackType::REWARD, 0.0, 0.0);
     }
 
     // Weighted average based on confidence
@@ -134,12 +154,12 @@ LearningSignal FeedbackProcessor::aggregate_signals(const std::vector<LearningSi
         total_weighted_strength / total_confidence : 0.0;
 
     // Determine dominant feedback type
-    std::unordered_map<FeedbackType, double> type_weights;
+    std::unordered_map<LearningFeedbackType, double> type_weights;
     for (const auto& signal : signals) {
         type_weights[signal.type] += signal.confidence;
     }
 
-    FeedbackType dominant_type = FeedbackType::REWARD;
+    LearningFeedbackType dominant_type = LearningFeedbackType::REWARD;
     double max_weight = 0.0;
     for (const auto& [type, weight] : type_weights) {
         if (weight > max_weight) {
@@ -207,11 +227,11 @@ nlohmann::json ReinforcementLearner::update_policy(AgentLearningProfile& agent_p
         double reward = calculate_reward(signal);
 
         // Simple policy update based on feedback
-        if (signal.type == FeedbackType::CORRECTION && signal.strength < -0.5) {
+        if (signal.type == LearningFeedbackType::CORRECTION && signal.strength < -0.5) {
             // Reduce exploration for frequently corrected contexts
             agent_profile.exploration_rate = std::max(0.01, agent_profile.exploration_rate * 0.9);
             policy_update["exploration_reduced"] = true;
-        } else if (signal.type == FeedbackType::APPROVAL && signal.strength > 0.5) {
+        } else if (signal.type == LearningFeedbackType::APPROVAL && signal.strength > 0.5) {
             // Increase learning rate for successful contexts
             agent_profile.learning_rate = std::min(0.5, agent_profile.learning_rate * 1.1);
             policy_update["learning_increased"] = true;
@@ -410,7 +430,7 @@ LearnedPattern PatternLearner::learn_pattern(AgentLearningProfile& agent_profile
         // Store recent signals
         pattern.recent_signals = feedback_signals;
         if (pattern.recent_signals.size() > 10) {
-            pattern.recent_signals.resize(10); // Keep only recent 10
+            pattern.recent_signals.erase(pattern.recent_signals.begin() + 10, pattern.recent_signals.end()); // Keep only recent 10
         }
 
         // Add to agent's learned patterns
@@ -474,7 +494,7 @@ std::vector<std::pair<LearnedPattern, double>> PatternLearner::apply_patterns(
 
         // Limit to top 5 patterns
         if (applicable_patterns.size() > 5) {
-            applicable_patterns.resize(5);
+            applicable_patterns.erase(applicable_patterns.begin() + 5, applicable_patterns.end());
         }
 
     } catch (const std::exception& e) {
@@ -623,7 +643,7 @@ bool LearningEngine::initialize() {
     } catch (const std::exception& e) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
+                ErrorCategory::CONFIGURATION,
                 ErrorSeverity::HIGH,
                 "LearningEngine",
                 "initialize",
@@ -648,7 +668,9 @@ bool LearningEngine::register_agent(const std::string& agent_id, const std::stri
         return false; // Already registered
     }
 
-    agent_profiles_.emplace(agent_id, AgentLearningProfile(agent_id, agent_type));
+    agent_profiles_.emplace(std::piecewise_construct,
+                          std::forward_as_tuple(agent_id),
+                          std::forward_as_tuple(agent_id, agent_type));
 
     if (logger_) {
         logger_->info("Registered agent for learning: " + agent_id + " (" + agent_type + ")",
@@ -661,7 +683,7 @@ bool LearningEngine::register_agent(const std::string& agent_id, const std::stri
 nlohmann::json LearningEngine::process_feedback(const std::string& agent_id,
                                              const std::string& conversation_id,
                                              const nlohmann::json& feedback,
-                                             FeedbackType feedback_type) {
+                                             LearningFeedbackType feedback_type) {
 
     nlohmann::json result = {{"success", false}};
 
@@ -718,7 +740,7 @@ nlohmann::json LearningEngine::process_feedback(const std::string& agent_id,
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::MEDIUM,
                 "LearningEngine",
                 "process_feedback",
                 "Failed to process feedback: " + std::string(e.what()),
@@ -936,9 +958,12 @@ bool LearningEngine::reset_agent_learning(const std::string& agent_id) {
             return false;
         }
 
-        // Reset profile to initial state
+        // Reset profile to initial state by erasing and reinserting
         std::string agent_type = profile_it->second.agent_type;
-        profile_it->second = AgentLearningProfile(agent_id, agent_type);
+        agent_profiles_.erase(profile_it);
+        agent_profiles_.emplace(std::piecewise_construct,
+                              std::forward_as_tuple(agent_id),
+                              std::forward_as_tuple(agent_id, agent_type));
 
         if (logger_) {
             logger_->info("Reset learning for agent: " + agent_id,
@@ -960,26 +985,28 @@ AgentLearningProfile& LearningEngine::get_or_create_profile(const std::string& a
                                                           const std::string& agent_type) {
     auto it = agent_profiles_.find(agent_id);
     if (it == agent_profiles_.end()) {
-        auto [new_it, inserted] = agent_profiles_.emplace(agent_id, AgentLearningProfile(agent_id, agent_type));
+        auto [new_it, inserted] = agent_profiles_.emplace(std::piecewise_construct,
+                                                         std::forward_as_tuple(agent_id),
+                                                         std::forward_as_tuple(agent_id, agent_type));
         return new_it->second;
     }
     return it->second;
 }
 
 void LearningEngine::update_performance_metrics(AgentLearningProfile& profile,
-                                             FeedbackType feedback_type,
+                                             LearningFeedbackType feedback_type,
                                              double signal_strength) {
 
     profile.total_decisions++;
 
     switch (feedback_type) {
-        case FeedbackType::CORRECTION:
+        case LearningFeedbackType::CORRECTION:
             profile.corrected_decisions++;
             break;
-        case FeedbackType::ESCALATION:
-            profile.escalation_rate = (profile.escalation_rate * 0.9) + 0.1; // Exponential moving average
+        case LearningFeedbackType::ESCALATION:
+            profile.escalation_rate = (profile.escalation_rate * 0.95) + 0.05; // Increment escalation rate
             break;
-        case FeedbackType::APPROVAL:
+        case LearningFeedbackType::APPROVAL:
             // Positive feedback - slight accuracy boost
             break;
         default:
@@ -1077,15 +1104,15 @@ nlohmann::json LearningEngine::export_agent_profile(const AgentLearningProfile& 
 }
 
 // Utility function
-std::string feedback_type_to_string(FeedbackType type) {
+std::string feedback_type_to_string(LearningFeedbackType type) {
     switch (type) {
-        case FeedbackType::CORRECTION: return "correction";
-        case FeedbackType::APPROVAL: return "approval";
-        case FeedbackType::ESCALATION: return "escalation";
-        case FeedbackType::REWARD: return "reward";
-        case FeedbackType::PENALTY: return "penalty";
-        case FeedbackType::PREFERENCE: return "preference";
-        case FeedbackType::OUTCOME_BASED: return "outcome_based";
+        case LearningFeedbackType::CORRECTION: return "correction";
+        case LearningFeedbackType::APPROVAL: return "approval";
+        case LearningFeedbackType::ESCALATION: return "escalation";
+        case LearningFeedbackType::REWARD: return "reward";
+        case LearningFeedbackType::PENALTY: return "penalty";
+        case LearningFeedbackType::PREFERENCE: return "preference";
+        case LearningFeedbackType::OUTCOME_BASED: return "outcome_based";
         default: return "unknown";
     }
 }

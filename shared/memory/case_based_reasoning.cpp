@@ -74,8 +74,8 @@ ComplianceCase ComplianceCase::from_json(const nlohmann::json& json) {
     case_data.risk_level = json.value("risk_level", "medium");
     case_data.metadata = json.value("metadata", std::unordered_map<std::string, std::string>{});
 
-    if (json.contains("semantic_embedding")) {
-        case_data.semantic_embedding = json["semantic_embedding"];
+    if (json.contains("semantic_embedding") && json["semantic_embedding"].is_array()) {
+        case_data.semantic_embedding = json["semantic_embedding"].get<std::vector<float>>();
     }
 
     if (json.contains("feature_weights")) {
@@ -170,7 +170,11 @@ bool CaseBasedReasoner::initialize() {
         }
 
         // Load existing cases from memory system
-        load_cases_from_memory();
+        // In production, this would load from persistent storage
+        if (logger_) {
+            logger_->debug("Case base initialized (no existing cases loaded)",
+                          "CaseBasedReasoner", "initialize");
+        }
 
         if (logger_) {
             logger_->info("CaseBasedReasoner initialized with " +
@@ -183,7 +187,7 @@ bool CaseBasedReasoner::initialize() {
     } catch (const std::exception& e) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
-                ErrorCategory::INITIALIZATION,
+                ErrorCategory::CONFIGURATION,
                 ErrorSeverity::HIGH,
                 "CaseBasedReasoner",
                 "initialize",
@@ -243,7 +247,7 @@ bool CaseBasedReasoner::add_case(const ComplianceCase& case_data) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::MEDIUM,
                 "CaseBasedReasoner",
                 "add_case",
                 "Failed to add case: " + std::string(e.what()),
@@ -307,7 +311,7 @@ std::vector<CaseRetrievalResult> CaseBasedReasoner::retrieve_similar_cases(const
         std::vector<float> query_embedding;
         if (enable_embeddings_ && embeddings_client_) {
             // Create text representation of the query for embedding
-            std::string query_text = create_query_text_representation(query);
+            std::string query_text = create_query_text_for_embedding(query);
 
             EmbeddingRequest embedding_request;
             embedding_request.texts = {query_text};
@@ -392,7 +396,7 @@ std::vector<CaseRetrievalResult> CaseBasedReasoner::retrieve_similar_cases(const
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::MEDIUM,
                 "CaseBasedReasoner",
                 "retrieve_similar_cases",
                 "Failed to retrieve similar cases: " + std::string(e.what()),
@@ -428,11 +432,13 @@ CaseAdaptationResult CaseBasedReasoner::adapt_cases_to_scenario(
         }
 
         // Adapt decision based on available methods
-        result.adapted_decision = adapt_decision(source_cases, query.context);
-        result.source_cases = std::vector<ComplianceCase>();
-        for (const auto& [case_data, _] : source_cases) {
-            result.source_cases.push_back(case_data);
+        // Extract just the cases without similarity scores for adapt_decision
+        std::vector<ComplianceCase> cases_only;
+        for (const auto& [case_data, similarity] : source_cases) {
+            cases_only.push_back(case_data);
         }
+        result.adapted_decision = adapt_decision(cases_only, query.context);
+        result.source_cases = cases_only;
 
         // Calculate overall confidence
         double total_similarity = 0.0;
@@ -873,8 +879,15 @@ nlohmann::json CaseBasedReasoner::adapt_decision(const std::vector<ComplianceCas
         return {{"decision", "unable_to_determine"}, {"reason", "no_similar_cases"}};
     }
 
+    // Convert to pairs with equal weight for perform_weighted_voting
+    std::vector<std::pair<ComplianceCase, double>> weighted_cases;
+    double equal_weight = 1.0 / source_cases.size();
+    for (const auto& case_data : source_cases) {
+        weighted_cases.emplace_back(case_data, equal_weight);
+    }
+
     // Simple adaptation: use weighted voting
-    return perform_weighted_voting(source_cases);
+    return perform_weighted_voting(weighted_cases);
 }
 
 nlohmann::json CaseBasedReasoner::perform_weighted_voting(const std::vector<std::pair<ComplianceCase, double>>& similar_cases) {
@@ -989,13 +1002,45 @@ void CaseBasedReasoner::cleanup_case_base() {
     }
 }
 
-void CaseBasedReasoner::load_cases_from_memory() {
-    // In a real implementation, this would load cases from memory system
-    // For now, create some sample cases
-    if (logger_) {
-        logger_->debug("Would load cases from memory system",
-                      "CaseBasedReasoner", "load_cases_from_memory");
+std::string CaseBasedReasoner::create_query_text_for_embedding(const CaseQuery& query) {
+    // Create a text representation of the query for embedding generation
+    std::stringstream ss;
+    
+    // Add context information
+    if (!query.context.is_null()) {
+        if (query.context.contains("domain")) {
+            ss << "Domain: " << query.context["domain"].get<std::string>() << ". ";
+        }
+        if (query.context.contains("transaction_type")) {
+            ss << "Transaction type: " << query.context["transaction_type"].get<std::string>() << ". ";
+        }
+        if (query.context.contains("amount")) {
+            ss << "Amount: " << query.context["amount"].get<double>() << ". ";
+        }
+        if (query.context.contains("risk_level")) {
+            ss << "Risk level: " << query.context["risk_level"].get<std::string>() << ". ";
+        }
     }
+    
+    // Add query-specific filters
+    if (query.domain) {
+        ss << "Looking for cases in domain: " << *query.domain << ". ";
+    }
+    if (query.risk_level) {
+        ss << "Risk level filter: " << *query.risk_level << ". ";
+    }
+    
+    // Add required tags
+    if (!query.required_tags.empty()) {
+        ss << "Required tags: ";
+        for (size_t i = 0; i < query.required_tags.size(); ++i) {
+            ss << query.required_tags[i];
+            if (i < query.required_tags.size() - 1) ss << ", ";
+        }
+        ss << ". ";
+    }
+    
+    return ss.str();
 }
 
 bool CaseBasedReasoner::validate_case(const ComplianceCase& case_data) const {
@@ -1776,52 +1821,38 @@ std::shared_ptr<CaseValidator> create_case_validator(
     return std::shared_ptr<CaseValidator>(new CaseValidator(config, logger, case_reasoner));
 }
 
-std::string CaseBasedReasoningEngine::create_query_text_representation(const CaseQuery& query) {
+// CaseOutcomePredictor helper function
+std::string CaseOutcomePredictor::create_query_text_representation(const CaseQuery& query) {
     std::stringstream ss;
 
     // Build a descriptive text representation of the query
-    ss << "Compliance case query: ";
+    ss << "Compliance case query for outcome prediction: ";
 
-    // Add domain information
-    if (query.domain) {
-        ss << "Domain: " << static_cast<int>(*query.domain) << ". ";
+    // Add context information
+    if (!query.context.is_null()) {
+        if (query.context.contains("domain")) {
+            ss << "Domain: " << query.context["domain"].get<std::string>() << ". ";
+        }
+        if (query.context.contains("transaction_type")) {
+            ss << "Transaction: " << query.context["transaction_type"].get<std::string>() << ". ";
+        }
+        if (query.context.contains("amount")) {
+            ss << "Amount: " << query.context["amount"].get<double>() << ". ";
+        }
     }
 
     // Add risk level information
     if (query.risk_level) {
-        ss << "Risk level: " << static_cast<int>(*query.risk_level) << ". ";
+        ss << "Risk level: " << *query.risk_level << ". ";
     }
 
-    // Add context information
-    if (!query.context.empty()) {
-        ss << "Context: " << query.context << ". ";
-    }
-
-    // Add description
-    if (!query.description.empty()) {
-        ss << "Description: " << query.description << ". ";
-    }
-
-    // Add keywords
-    if (!query.keywords.empty()) {
-        ss << "Keywords: ";
-        for (size_t i = 0; i < query.keywords.size(); ++i) {
-            if (i > 0) ss << ", ";
-            ss << query.keywords[i];
-        }
-        ss << ". ";
-    }
-
-    // Add outcome information
-    if (query.desired_outcome) {
-        ss << "Desired outcome: " << static_cast<int>(*query.desired_outcome) << ". ";
+    // Add domain filter
+    if (query.domain) {
+        ss << "Domain filter: " << *query.domain << ". ";
     }
 
     // Add similarity threshold
-    ss << "Similarity threshold: " << query.similarity_threshold << ". ";
-
-    // Add max results
-    ss << "Maximum results: " << query.max_results << ".";
+    ss << "Similarity threshold: " << query.min_similarity << ".";
 
     return ss.str();
 }

@@ -337,6 +337,17 @@ void PostgreSQLConnection::log_error(const std::string& operation,
     std::cerr << std::endl;
 }
 
+int PostgreSQLConnection::get_pool_size() const {
+    // For individual connection, report 1 as pool size
+    // This method is primarily for ConnectionPool but provided here for API consistency
+    return 1;
+}
+
+int PostgreSQLConnection::get_active_connections() const {
+    // For individual connection, report 1 if connected, 0 if not
+    return connected_.load() ? 1 : 0;
+}
+
 // Connection Pool Implementation
 ConnectionPool::ConnectionPool(const DatabaseConfig& config)
     : config_(config), shutdown_(false), active_connections_(0),

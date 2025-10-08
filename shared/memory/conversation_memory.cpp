@@ -130,7 +130,7 @@ MemoryEntry MemoryEntry::from_json(const nlohmann::json& json) {
     }
 
     if (json.contains("semantic_embedding")) {
-        entry.semantic_embedding = json["semantic_embedding"];
+        entry.semantic_embedding = json["semantic_embedding"].get<std::vector<float>>();
     }
 
     if (json.contains("consolidation_date")) {
@@ -241,10 +241,12 @@ bool ConversationMemory::initialize() {
     try {
         // Create memory tables if they don't exist
         if (enable_persistence_ && db_connection_) {
-            pqxx::work txn(db_connection_->get_connection());
+            if (!db_connection_->begin_transaction()) {
+                throw std::runtime_error("Failed to begin transaction");
+            }
 
             // Create conversation_memories table
-            txn.exec(R"(
+            std::string create_table_sql = R"(
                 CREATE TABLE IF NOT EXISTS conversation_memories (
                     memory_id VARCHAR(255) PRIMARY KEY,
                     conversation_id VARCHAR(255) NOT NULL,
@@ -274,22 +276,32 @@ bool ConversationMemory::initialize() {
                     parent_memory_id VARCHAR(255),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            )");
+                )
+            )";
+
+            if (!db_connection_->execute_command(create_table_sql)) {
+                db_connection_->rollback_transaction();
+                throw std::runtime_error("Failed to create conversation_memories table");
+            }
 
             // Create indexes for efficient querying
-            txn.exec(R"(
-                CREATE INDEX IF NOT EXISTS idx_memory_conversation ON conversation_memories(conversation_id);
-                CREATE INDEX IF NOT EXISTS idx_memory_agent ON conversation_memories(agent_id, agent_type);
-                CREATE INDEX IF NOT EXISTS idx_memory_timestamp ON conversation_memories(timestamp);
-                CREATE INDEX IF NOT EXISTS idx_memory_importance ON conversation_memories(importance_level);
-                CREATE INDEX IF NOT EXISTS idx_memory_type ON conversation_memories(memory_type);
-                CREATE INDEX IF NOT EXISTS idx_memory_tags ON conversation_memories USING GIN(compliance_tags);
-                CREATE INDEX IF NOT EXISTS idx_memory_topics ON conversation_memories USING GIN(key_topics);
-                CREATE INDEX IF NOT EXISTS idx_memory_embedding ON conversation_memories USING ivfflat (semantic_embedding vector_cosine_ops) WITH (lists = 100);
-            )");
+            std::vector<std::string> index_sqls = {
+                "CREATE INDEX IF NOT EXISTS idx_memory_conversation ON conversation_memories(conversation_id)",
+                "CREATE INDEX IF NOT EXISTS idx_memory_agent ON conversation_memories(agent_id, agent_type)",
+                "CREATE INDEX IF NOT EXISTS idx_memory_timestamp ON conversation_memories(timestamp)",
+                "CREATE INDEX IF NOT EXISTS idx_memory_importance ON conversation_memories(importance_level)",
+                "CREATE INDEX IF NOT EXISTS idx_memory_type ON conversation_memories(memory_type)"
+                // Note: GIN indexes and vector indexes require extensions - add them separately if available
+            };
 
-            txn.commit();
+            for (const auto& index_sql : index_sqls) {
+                db_connection_->execute_command(index_sql); // Soft fail on index creation
+            }
+
+            if (!db_connection_->commit_transaction()) {
+                db_connection_->rollback_transaction();
+                throw std::runtime_error("Failed to commit transaction");
+            }
 
             if (logger_) {
                 logger_->info("Created conversation memory database schema", "ConversationMemory", "initialize");
@@ -367,7 +379,7 @@ bool ConversationMemory::store_memory(const MemoryEntry& entry) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "store_memory",
                 "Failed to store memory: " + std::string(e.what()),
@@ -500,7 +512,7 @@ std::vector<SimilarityResult> ConversationMemory::retrieve_similar_memories(cons
 
         // Limit results
         if (results.size() > static_cast<size_t>(query.max_results)) {
-            results.resize(query.max_results);
+            results.erase(results.begin() + query.max_results, results.end());
         }
 
         if (logger_) {
@@ -512,7 +524,7 @@ std::vector<SimilarityResult> ConversationMemory::retrieve_similar_memories(cons
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "retrieve_similar_memories",
                 "Failed to retrieve similar memories: " + std::string(e.what()),
@@ -591,7 +603,7 @@ bool ConversationMemory::update_with_feedback(const std::string& memory_id,
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "update_with_feedback",
                 "Failed to update memory with feedback: " + std::string(e.what()),
@@ -678,7 +690,7 @@ std::vector<MemoryEntry> ConversationMemory::get_memories_by_agent(
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::DATABASE,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "get_memories_by_agent",
                 "Failed to get memories by agent: " + std::string(e.what()),
@@ -737,7 +749,7 @@ void ConversationMemory::consolidate_memories(std::chrono::hours max_age) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "consolidate_memories",
                 "Failed to consolidate memories: " + std::string(e.what()),
@@ -776,13 +788,12 @@ void ConversationMemory::forget_memories(std::chrono::hours max_age, double min_
 
         // Remove from database if persistence is enabled
         if (enable_persistence_ && db_connection_ && !to_forget.empty()) {
-            pqxx::work txn(db_connection_->get_connection());
-
-            for (const auto& id : to_forget) {
-                txn.exec_params("DELETE FROM conversation_memories WHERE memory_id = $1", id);
+            if (db_connection_->begin_transaction()) {
+                for (const auto& id : to_forget) {
+                    db_connection_->execute_command("DELETE FROM conversation_memories WHERE memory_id = $1", {id});
+                }
+                db_connection_->commit_transaction();
             }
-
-            txn.commit();
         }
 
         if (logger_) {
@@ -794,7 +805,7 @@ void ConversationMemory::forget_memories(std::chrono::hours max_age, double min_
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::DATABASE,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "forget_memories",
                 "Failed to forget memories: " + std::string(e.what()),
@@ -883,7 +894,7 @@ nlohmann::json ConversationMemory::export_memories(const std::optional<std::stri
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
                 ErrorCategory::PROCESSING,
-                ErrorSeverity::ERROR,
+                ErrorSeverity::HIGH,
                 "ConversationMemory",
                 "export_memories",
                 "Failed to export memories: " + std::string(e.what()),
@@ -910,32 +921,32 @@ std::vector<float> ConversationMemory::generate_embedding(const MemoryEntry& ent
 
     try {
         // Create comprehensive text representation of the memory entry for embedding
-        std::string memory_text = entry.content;
+        std::string memory_text = entry.summary;
+        
+        // Add context as string
+        if (!entry.context.empty()) {
+            memory_text += " Context: " + entry.context.dump();
+        }
 
-        // Add metadata for better semantic understanding
-        if (!entry.tags.empty()) {
+        // Add compliance tags for better semantic understanding
+        if (!entry.compliance_tags.empty()) {
             memory_text += " Tags: ";
-            for (const auto& tag : entry.tags) {
+            for (const auto& tag : entry.compliance_tags) {
                 memory_text += tag + " ";
             }
         }
 
-        if (entry.metadata.contains("agent_type")) {
-            memory_text += " Agent type: " + entry.metadata["agent_type"].get<std::string>();
-        }
+        // Add agent_type (direct field)
+        memory_text += " Agent type: " + entry.agent_type;
 
-        if (entry.metadata.contains("importance")) {
-            memory_text += " Importance: " + std::to_string(entry.metadata["importance"].get<int>());
-        }
+        // Add importance level
+        memory_text += " Importance: " + std::to_string(static_cast<int>(entry.importance_level));
 
-        if (entry.metadata.contains("memory_type")) {
-            memory_text += " Memory type: " + entry.metadata["memory_type"].get<std::string>();
-        }
+        // Add memory type
+        memory_text += " Memory type: " + std::to_string(static_cast<int>(entry.memory_type));
 
-        // Add conversation context if available
-        if (entry.metadata.contains("conversation_id")) {
-            memory_text += " Conversation: " + entry.metadata["conversation_id"].get<std::string>();
-        }
+        // Add conversation_id (direct field)
+        memory_text += " Conversation: " + entry.conversation_id;
 
         // Generate embedding using the embeddings client
         auto embedding_result = embeddings_client_->generate_single_embedding(memory_text);
@@ -944,7 +955,7 @@ std::vector<float> ConversationMemory::generate_embedding(const MemoryEntry& ent
         } else {
             // Fallback to zero vector if embedding generation fails
             if (logger_) {
-                logger_->warn("Failed to generate embedding for memory entry: " + entry.id,
+                logger_->warn("Failed to generate embedding for memory entry: " + entry.memory_id,
                              "ConversationMemory", "generate_embedding");
             }
             return std::vector<float>(384, 0.0f);
@@ -1043,17 +1054,32 @@ bool ConversationMemory::persist_memory(const MemoryEntry& entry) {
     if (!db_connection_) return false;
 
     try {
-        pqxx::work txn(db_connection_->get_connection());
-
         // Convert JSON fields
         std::string context_json = entry.context.dump();
         std::string metadata_json = nlohmann::json(entry.metadata).dump();
         std::string topics_json = nlohmann::json(entry.key_topics).dump();
         std::string tags_json = nlohmann::json(entry.compliance_tags).dump();
-
         std::string human_feedback_json = entry.human_feedback ? entry.human_feedback->dump() : "null";
 
-        txn.exec_params(R"(
+        std::vector<std::string> params = {
+            entry.memory_id, entry.conversation_id, entry.agent_id, entry.agent_type,
+            std::to_string(static_cast<int>(entry.memory_type)),
+            std::to_string(static_cast<int>(entry.importance_level)),
+            std::to_string(std::chrono::system_clock::to_time_t(entry.timestamp)),
+            std::to_string(std::chrono::system_clock::to_time_t(entry.last_accessed)),
+            std::to_string(entry.access_count), context_json, entry.summary,
+            topics_json, tags_json,
+            entry.decision_made.value_or(""), entry.outcome.value_or(""),
+            std::to_string(entry.confidence_score.value_or(0.0)),
+            human_feedback_json,
+            entry.feedback_type.value_or(""),
+            std::to_string(entry.feedback_score.value_or(0.0)),
+            std::to_string(entry.decay_factor),
+            entry.consolidated ? "true" : "false",
+            metadata_json
+        };
+
+        std::string insert_sql = R"(
             INSERT INTO conversation_memories (
                 memory_id, conversation_id, agent_id, agent_type, memory_type,
                 importance_level, timestamp, last_accessed, access_count,
@@ -1072,18 +1098,9 @@ bool ConversationMemory::persist_memory(const MemoryEntry& entry) {
                 consolidated = EXCLUDED.consolidated,
                 metadata = EXCLUDED.metadata,
                 updated_at = CURRENT_TIMESTAMP
-        )", entry.memory_id, entry.conversation_id, entry.agent_id, entry.agent_type,
-             static_cast<int>(entry.memory_type), static_cast<int>(entry.importance_level),
-             std::to_string(std::chrono::system_clock::to_time_t(entry.timestamp)),
-             std::to_string(std::chrono::system_clock::to_time_t(entry.last_accessed)),
-             entry.access_count, context_json, entry.summary, topics_json, tags_json,
-             entry.decision_made.value_or(""), entry.outcome.value_or(""),
-             entry.confidence_score.value_or(0.0), human_feedback_json,
-             entry.feedback_type.value_or(""), entry.feedback_score.value_or(0.0),
-             entry.decay_factor, entry.consolidated, metadata_json);
+        )";
 
-        txn.commit();
-        return true;
+        return db_connection_->execute_command(insert_sql, params);
 
     } catch (const std::exception& e) {
         if (logger_) {
@@ -1098,57 +1115,56 @@ std::optional<MemoryEntry> ConversationMemory::load_memory(const std::string& me
     if (!db_connection_) return std::nullopt;
 
     try {
-        pqxx::work txn(db_connection_->get_connection());
+        std::string query = "SELECT * FROM conversation_memories WHERE memory_id = $1";
+        auto result = db_connection_->execute_query(query, {memory_id});
 
-        auto result = txn.exec_params("SELECT * FROM conversation_memories WHERE memory_id = $1", memory_id);
-
-        if (result.empty()) {
+        if (result.rows.empty()) {
             return std::nullopt;
         }
 
-        const auto& row = result[0];
-        nlohmann::json context = nlohmann::json::parse(row["context"].as<std::string>());
-        nlohmann::json metadata = nlohmann::json::parse(row["metadata"].as<std::string>());
+        const auto& row = result.rows[0];
+        nlohmann::json context = nlohmann::json::parse(row.at("context"));
+        nlohmann::json metadata = nlohmann::json::parse(row.at("metadata"));
 
         MemoryEntry entry("", "", "", MemoryType::EPISODIC, context);
-        entry.memory_id = row["memory_id"].as<std::string>();
-        entry.conversation_id = row["conversation_id"].as<std::string>();
-        entry.agent_id = row["agent_id"].as<std::string>();
-        entry.agent_type = row["agent_type"].as<std::string>();
-        entry.memory_type = static_cast<MemoryType>(row["memory_type"].as<int>());
-        entry.importance_level = static_cast<ImportanceLevel>(row["importance_level"].as<int>());
-        entry.timestamp = std::chrono::system_clock::from_time_t(row["timestamp"].as<time_t>());
-        entry.last_accessed = std::chrono::system_clock::from_time_t(row["last_accessed"].as<time_t>());
-        entry.access_count = row["access_count"].as<int>();
-        entry.summary = row["summary"].as<std::string>();
-        entry.key_topics = nlohmann::json::parse(row["key_topics"].as<std::string>());
-        entry.compliance_tags = nlohmann::json::parse(row["compliance_tags"].as<std::string>());
-        entry.decay_factor = row["decay_factor"].as<double>();
-        entry.consolidated = row["consolidated"].as<bool>();
+        entry.memory_id = row.at("memory_id");
+        entry.conversation_id = row.at("conversation_id");
+        entry.agent_id = row.at("agent_id");
+        entry.agent_type = row.at("agent_type");
+        entry.memory_type = static_cast<MemoryType>(std::stoi(row.at("memory_type")));
+        entry.importance_level = static_cast<ImportanceLevel>(std::stoi(row.at("importance_level")));
+        entry.timestamp = std::chrono::system_clock::from_time_t(std::stoll(row.at("timestamp")));
+        entry.last_accessed = std::chrono::system_clock::from_time_t(std::stoll(row.at("last_accessed")));
+        entry.access_count = std::stoi(row.at("access_count"));
+        entry.summary = row.at("summary");
+        entry.key_topics = nlohmann::json::parse(row.at("key_topics"));
+        entry.compliance_tags = nlohmann::json::parse(row.at("compliance_tags"));
+        entry.decay_factor = std::stod(row.at("decay_factor"));
+        entry.consolidated = row.at("consolidated") == "t" || row.at("consolidated") == "true";
         entry.metadata = metadata;
 
-        if (!row["decision_made"].is_null()) {
-            entry.decision_made = row["decision_made"].as<std::string>();
+        if (!row.at("decision_made").empty()) {
+            entry.decision_made = row.at("decision_made");
         }
 
-        if (!row["outcome"].is_null()) {
-            entry.outcome = row["outcome"].as<std::string>();
+        if (!row.at("outcome").empty()) {
+            entry.outcome = row.at("outcome");
         }
 
-        if (!row["confidence_score"].is_null()) {
-            entry.confidence_score = row["confidence_score"].as<double>();
+        if (!row.at("confidence_score").empty()) {
+            entry.confidence_score = std::stod(row.at("confidence_score"));
         }
 
-        if (!row["human_feedback"].is_null()) {
-            entry.human_feedback = nlohmann::json::parse(row["human_feedback"].as<std::string>());
+        if (!row.at("human_feedback").empty() && row.at("human_feedback") != "null") {
+            entry.human_feedback = nlohmann::json::parse(row.at("human_feedback"));
         }
 
-        if (!row["feedback_type"].is_null()) {
-            entry.feedback_type = row["feedback_type"].as<std::string>();
+        if (!row.at("feedback_type").empty()) {
+            entry.feedback_type = row.at("feedback_type");
         }
 
-        if (!row["feedback_score"].is_null()) {
-            entry.feedback_score = row["feedback_score"].as<double>();
+        if (!row.at("feedback_score").empty()) {
+            entry.feedback_score = std::stod(row.at("feedback_score"));
         }
 
         return entry;
@@ -1169,14 +1185,17 @@ std::vector<MemoryEntry> ConversationMemory::load_memories_by_query(const std::s
     if (!db_connection_) return memories;
 
     try {
-        pqxx::work txn(db_connection_->get_connection());
-        pqxx::result result = txn.exec_params(query, params.begin(), params.end());
+        auto result = db_connection_->execute_query(query, params);
 
-        for (const auto& row : result) {
+        for (const auto& row : result.rows) {
             // Similar parsing as in load_memory
-            nlohmann::json context = nlohmann::json::parse(row["context"].as<std::string>());
+            nlohmann::json context = nlohmann::json::parse(row.at("context"));
             MemoryEntry entry("", "", "", MemoryType::EPISODIC, context);
-            // ... populate other fields similar to load_memory
+            // Basic fields - similar to load_memory but simplified for performance
+            entry.memory_id = row.at("memory_id");
+            entry.conversation_id = row.at("conversation_id");
+            entry.agent_id = row.at("agent_id");
+            entry.agent_type = row.at("agent_type");
             memories.push_back(entry);
         }
 

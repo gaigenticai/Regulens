@@ -64,6 +64,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (credentials: LoginRequest) => {
     setIsLoading(true);
     try {
+      // Development bypass for testing
+      if (import.meta.env.DEV) {
+        const validUsers = [
+          { username: 'admin', password: 'admin123' },
+          { username: 'demo', password: 'demo123' },
+          { username: 'test', password: 'test123' },
+        ];
+
+        const isValid = validUsers.some(
+          (u) => u.username === credentials.username && u.password === credentials.password
+        );
+
+        if (isValid) {
+          const mockUser = {
+            id: '1',
+            username: credentials.username,
+            email: credentials.username + '@regulens.com',
+            role: credentials.username === 'admin' ? 'admin' as const : 'user' as const,
+            permissions: ['view', 'edit'],
+          };
+          setUser(mockUser);
+          return;
+        } else {
+          throw new Error('Invalid credentials. Use admin/admin123, demo/demo123, or test/test123');
+        }
+      }
+      
+      // Production path
       const response = await apiClient.login(credentials);
       setUser(response.user);
     } catch (error) {

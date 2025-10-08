@@ -109,24 +109,25 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # Nginx Reverse Proxy (Optional)
-  nginx:
-    image: nginx:alpine
-    container_name: regulens-nginx
+  # Frontend Application (Development)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: regulens-frontend
     ports:
-      - "80:80"
-      - "443:443"
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8080
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - nginx_logs:/var/log/nginx
+      - ./frontend:/app
+      - /app/node_modules
     networks:
       - regulens-network
     depends_on:
       - regulens
     restart: unless-stopped
-    profiles:
-      - with-proxy
 
   # Monitoring with Prometheus (Optional)
   prometheus:

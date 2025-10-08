@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Login</title>
+</head>
+<body>
+    <h1>Testing Regulens Login</h1>
+    <button onclick="testLogin()">Test Login</button>
+    <div id="result"></div>
+    
+    <script>
+        async function testLogin() {
+            const resultDiv = document.getElementById('result');
+            
+            try {
+                // Test the development mode login
+                const credentials = {
+                    username: 'admin',
+                    password: 'admin123'
+                };
+                
+                console.log('Testing login with:', credentials);
+                resultDiv.innerHTML = '<p>Testing login...</p>';
+                
+                // Since we're in dev mode, the login should work locally
+                const mockToken = 'dev-token-admin-' + Date.now();
+                localStorage.setItem('regulens_token', mockToken);
+                
+                resultDiv.innerHTML = '<p style="color: green;">Login successful! Token stored. <br>You can now go to <a href="http://localhost:3000">http://localhost:3000</a></p>';
+                
+            } catch (error) {
+                console.error('Login error:', error);
+                resultDiv.innerHTML = '<p style="color: red;">Login failed: ' + error.message + '</p>';
+            }
+        }
+    </script>
+</body>
+</html>

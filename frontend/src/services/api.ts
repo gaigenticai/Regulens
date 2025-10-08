@@ -75,17 +75,67 @@ class RegulesAPIClient {
   // ============================================================================
 
   async login(credentials: API.LoginRequest): Promise<API.LoginResponse> {
+    // Development mode: bypass authentication for testing
+    if (import.meta.env.DEV) {
+      // Check against local credentials
+      const validUsers = [
+        { username: 'admin', password: 'admin123' },
+        { username: 'demo', password: 'demo123' },
+        { username: 'test', password: 'test123' },
+      ];
+
+      const isValid = validUsers.some(
+        (u) => u.username === credentials.username && u.password === credentials.password
+      );
+
+      if (isValid) {
+        const mockToken = 'dev-token-' + credentials.username + '-' + Date.now();
+        this.setToken(mockToken);
+        return {
+          token: mockToken,
+          user: {
+            id: '1',
+            username: credentials.username,
+            email: credentials.username + '@regulens.com',
+            role: credentials.username === 'admin' ? 'admin' : 'user',
+            permissions: ['view', 'edit'],
+          },
+        };
+      } else {
+        throw new Error('Invalid credentials');
+      }
+    }
+
+    // Production mode: use real API
     const response = await this.client.post<API.LoginResponse>('/auth/login', credentials);
     this.setToken(response.data.token);
     return response.data;
   }
 
   async logout(): Promise<void> {
+    // Development mode: just clear token
+    if (import.meta.env.DEV) {
+      this.clearToken();
+      return;
+    }
+
     await this.client.post('/auth/logout');
     this.clearToken();
   }
 
   async getCurrentUser(): Promise<API.User> {
+    // Development mode: return mock user if token exists
+    if (import.meta.env.DEV && this.token) {
+      const username = this.token.split('-')[2]; // Extract username from dev token
+      return {
+        id: '1',
+        username: username || 'admin',
+        email: (username || 'admin') + '@regulens.com',
+        role: username === 'admin' ? 'admin' : 'user',
+        permissions: ['view', 'edit'],
+      };
+    }
+
     const response = await this.client.get<API.User>('/auth/me');
     return response.data;
   }

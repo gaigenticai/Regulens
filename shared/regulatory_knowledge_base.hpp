@@ -175,9 +175,42 @@ private:
      */
     bool load_from_storage();
 
+    /**
+     * @brief Create database schema for PostgreSQL backend
+     * @param conn Database connection
+     * @return true if schema created successfully
+     */
+    bool create_database_schema(std::shared_ptr<class PostgreSQLConnection> conn);
+
+    /**
+     * @brief Reconstruct RegulatoryChange object from database records
+     * @param conn Database connection
+     * @param main_row Main table row data
+     * @return Reconstructed RegulatoryChange or nullopt
+     */
+    std::optional<RegulatoryChange> reconstruct_change_from_db(
+        std::shared_ptr<class PostgreSQLConnection> conn,
+        const std::unordered_map<std::string, std::string>& main_row) const;
+
+    /**
+     * @brief Update statistics for a regulatory change
+     * @param change The regulatory change
+     * @param is_new Whether this is a new change
+     */
+    void update_statistics_for_change(const RegulatoryChange& change, bool is_new);
+
+    /**
+     * @brief Load statistics from database
+     */
+    void load_statistics();
+
     // Configuration and dependencies
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
+
+    // PIMPL for database implementation
+    class RegulatoryKnowledgeBaseImpl;
+    std::unique_ptr<RegulatoryKnowledgeBaseImpl> pimpl_;
 
     // Storage
     mutable std::mutex storage_mutex_;

@@ -164,6 +164,83 @@ private:
     double calculate_confidence_score(ChangeDetectionMethod method,
                                     const std::vector<std::string>& changes) const;
 
+    /**
+     * @brief Advanced diff algorithms
+     */
+    enum class EditOp {
+        INSERT,
+        DELETE,
+        MATCH,
+        REPLACE
+    };
+
+    struct Edit {
+        EditOp operation;
+        size_t baseline_index;
+        size_t new_index;
+        std::string content;
+
+        Edit(EditOp op, size_t b_idx, size_t n_idx, std::string c = "")
+            : operation(op), baseline_index(b_idx), new_index(n_idx), content(std::move(c)) {}
+    };
+
+    struct DiffChunk {
+        size_t baseline_start;
+        size_t baseline_end;
+        size_t new_start;
+        size_t new_end;
+        std::vector<std::string> deleted_lines;
+        std::vector<std::string> inserted_lines;
+        double significance_score;
+
+        DiffChunk() : baseline_start(0), baseline_end(0), new_start(0), new_end(0), significance_score(0.0) {}
+    };
+
+    struct ChangeSummary {
+        std::string title;
+        std::string category;
+        double impact_score;
+        std::vector<std::string> details;
+    };
+
+    std::vector<Edit> compute_myers_diff(const std::vector<std::string>& baseline_lines,
+                                         const std::vector<std::string>& new_lines) const;
+    std::vector<Edit> backtrack_myers_diff(const std::vector<std::string>& baseline_lines,
+                                           const std::vector<std::string>& new_lines,
+                                           const std::vector<std::vector<int>>& trace,
+                                           size_t max_d) const;
+    std::vector<Edit> compute_simple_diff(const std::vector<std::string>& baseline_lines,
+                                          const std::vector<std::string>& new_lines) const;
+    std::vector<DiffChunk> compute_advanced_diff(const std::string& baseline_content,
+                                                 const std::string& new_content) const;
+    double calculate_chunk_significance(const DiffChunk& chunk) const;
+    double calculate_structural_confidence(const std::vector<DiffChunk>& chunks) const;
+
+    /**
+     * @brief Semantic analysis methods
+     */
+    std::unordered_map<std::string, double> calculate_term_frequency(const std::string& content) const;
+    double calculate_cosine_similarity(const std::unordered_map<std::string, double>& tf1,
+                                       const std::unordered_map<std::string, double>& tf2) const;
+    double calculate_structural_similarity(const std::string& baseline_content,
+                                          const std::string& new_content) const;
+    std::vector<std::string> extract_structural_elements(const std::string& content) const;
+
+    /**
+     * @brief Change analysis and categorization
+     */
+    std::vector<ChangeSummary> analyze_diff_chunks(const std::vector<DiffChunk>& chunks,
+                                                   const RegulatoryChangeMetadata& metadata) const;
+    std::string categorize_chunk(const DiffChunk& chunk) const;
+    std::string create_category_title(const std::string& category, size_t change_count) const;
+
+    /**
+     * @brief Utility methods
+     */
+    std::vector<std::string> split_into_lines(const std::string& content) const;
+    std::string normalize_content(const std::string& content) const;
+    std::string to_lowercase(const std::string& str) const;
+
     // Configuration and dependencies
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
@@ -279,6 +356,23 @@ private:
      * @return Document number
      */
     std::string extract_document_number(const std::string& content) const;
+
+    /**
+     * @brief Extract affected entities from content
+     * @param content Document content
+     * @return List of affected entities
+     */
+    std::vector<std::string> extract_affected_entities(const std::string& content) const;
+
+    /**
+     * @brief Utility methods
+     */
+    std::vector<std::string> split_into_lines(const std::string& content) const;
+    std::string to_lowercase(const std::string& str) const;
+    std::string strip_html_tags(const std::string& html) const;
+    std::string strip_xml_tags(const std::string& xml) const;
+    std::string extract_xml_field(const std::string& xml, const std::string& field_pattern) const;
+    std::vector<std::string> extract_keywords_from_text(const std::string& text) const;
 
     // Configuration and dependencies
     std::shared_ptr<ConfigurationManager> config_;

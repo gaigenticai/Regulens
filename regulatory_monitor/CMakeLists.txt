@@ -5,6 +5,7 @@ add_library(regulens_regulatory_monitor STATIC
     regulatory_monitor.hpp
     regulatory_source.cpp
     regulatory_source.hpp
+    change_detector.cpp
     change_detector.hpp
     production_regulatory_monitor.cpp
     production_regulatory_monitor.hpp

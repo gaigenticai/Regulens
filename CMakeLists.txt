@@ -213,6 +213,7 @@ target_link_libraries(regulens
     PRIVATE
         regulens_shared
         regulens_regulatory_monitor
+        regulens_web_ui
         Threads::Threads
         CURL::libcurl
         ${Boost_LIBRARIES}

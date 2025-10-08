@@ -141,51 +141,51 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
             inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
 
         // Initialize health check handler for Kubernetes probes
-        auto prometheus_metrics = std::dynamic_pointer_cast<PrometheusMetricsCollector>(metrics);
-        if (prometheus_metrics) {
-            health_check_handler_ = create_health_check_handler(config, logger, error_handler_, prometheus_metrics);
-
-            // Register service-specific health checks
-            if (health_check_handler_) {
-                // Database connectivity check
-                health_check_handler_->register_health_check("database_connectivity",
-                    [this]() -> HealthCheckResult {
-                        try {
-                            if (db_connection_ && db_connection_->is_connected()) {
-                                return HealthCheckResult{true, "healthy", "Database connection active"};
-                            } else {
-                                return HealthCheckResult{false, "unhealthy", "Database connection lost"};
-                            }
-                        } catch (const std::exception& e) {
-                            return HealthCheckResult{false, "unhealthy", "Database check failed: " + std::string(e.what())};
-                        }
-                    },
-                    true,  // critical for readiness
-                    {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
-
-                // OpenAI client health check
-                health_check_handler_->register_health_check("openai_client",
-                    [this]() -> HealthCheckResult {
-                        try {
-                            if (openai_client_ && openai_client_->is_healthy()) {
-                                return HealthCheckResult{true, "healthy", "OpenAI client operational"};
-                            } else {
-                                return HealthCheckResult{false, "unhealthy", "OpenAI client unavailable"};
-                            }
-                        } catch (const std::exception& e) {
-                            return HealthCheckResult{false, "unhealthy", "OpenAI client check failed: " + std::string(e.what())};
-                        }
-                    },
-                    false,  // not critical for basic operation
-                    {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
-
-                // Memory usage check
-                health_check_handler_->register_health_check("memory_usage",
-                    health_checks::memory_health_check(85.0),  // 85% max memory usage
-                    true,  // critical for readiness
-                    {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
-            }
-        }
+        // auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
+        // if (metrics) {
+        //     health_check_handler_ = create_health_check_handler(config, logger, error_handler_, metrics);
+        //
+        //     // Register service-specific health checks
+        //     if (health_check_handler_) {
+        //         // Database connectivity check
+        //         health_check_handler_->register_health_check("database_connectivity",
+        //             [this]() -> HealthCheckResult {
+        //                 try {
+        //                     if (db_connection_ && db_connection_->is_connected()) {
+        //                         return HealthCheckResult{true, "healthy", "Database connection active"};
+        //                     } else {
+        //                         return HealthCheckResult{false, "unhealthy", "Database connection lost"};
+        //                     }
+        //                 } catch (const std::exception& e) {
+        //                     return HealthCheckResult{false, "unhealthy", "Database check failed: " + std::string(e.what())};
+        //                 }
+        //             },
+        //             true,  // critical for readiness
+        //             {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+        //
+        //         // OpenAI client health check
+        //         health_check_handler_->register_health_check("openai_client",
+        //             [this]() -> HealthCheckResult {
+        //                 try {
+        //                     if (openai_client_ && openai_client_->is_healthy()) {
+        //                         return HealthCheckResult{true, "healthy", "OpenAI client operational"};
+        //                     } else {
+        //                         return HealthCheckResult{false, "unhealthy", "OpenAI client unavailable"};
+        //                     }
+        //                 } catch (const std::exception& e) {
+        //                     return HealthCheckResult{false, "unhealthy", "OpenAI client check failed: " + std::string(e.what())};
+        //                 }
+        //             },
+        //             false,  // not critical for basic operation
+        //             {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+        //
+        //         // Memory usage check
+        //         health_check_handler_->register_health_check("memory_usage",
+        //             health_checks::memory_health_check(85.0),  // 85% max memory usage
+        //             true,  // critical for readiness
+        //             {HealthProbeType::READINESS, HealthProbeType::LIVENESS});
+        //     }
+        // }
 
         if (logger_) {
             logger_->info("WebUIHandlers initialized successfully", "WebUIHandlers", "constructor");
@@ -722,6 +722,7 @@ HTTPResponse WebUIHandlers::handle_decision_tree_visualize(const HTTPRequest& re
             // HTML interactive visualization
             std::string html = decision_tree_visualizer_->generate_interactive_html(tree);
             return create_html_response(html);
+        }
     } catch (const std::exception& e) {
         logger_->error("Failed to generate decision tree visualization: {}", e.what());
         return create_error_response(500, "Failed to generate visualization");
@@ -1117,6 +1118,7 @@ HTTPResponse WebUIHandlers::handle_collaboration_session_create(const HTTPReques
             return create_json_response(response.dump(2));
         } else {
             return create_error_response(400, "Failed to create session");
+        }
     } catch (const std::exception& e) {
         logger_->error("Error creating collaboration session: {}", e.what());
         return create_error_response(500, "Failed to create session");
@@ -1164,6 +1166,7 @@ HTTPResponse WebUIHandlers::handle_collaboration_send_message(const HTTPRequest&
             return create_json_response("{\"success\": true}");
         } else {
             return create_error_response(400, "Failed to send message");
+        }
     } catch (const std::exception& e) {
         logger_->error("Error sending message: {}", e.what());
         return create_error_response(500, "Failed to send message");
@@ -1190,6 +1193,8 @@ HTTPResponse WebUIHandlers::handle_collaboration_feedback(const HTTPRequest& req
             return create_json_response("{\"success\": true}");
         } else {
             return create_error_response(400, "Failed to submit feedback");
+        }
+    }
     } catch (const std::exception& e) {
         logger_->error("Error submitting feedback: {}", e.what());
         return create_error_response(500, "Failed to submit feedback");
@@ -1221,6 +1226,7 @@ HTTPResponse WebUIHandlers::handle_collaboration_intervention(const HTTPRequest&
             return create_json_response("{\"success\": true}");
         } else {
             return create_error_response(400, "Failed to perform intervention");
+        }
     } catch (const std::exception& e) {
         logger_->error("Error performing intervention: {}", e.what());
         return create_error_response(500, "Failed to perform intervention");
@@ -1386,6 +1392,7 @@ HTTPResponse WebUIHandlers::handle_feedback_submit(const HTTPRequest& request) {
             return create_json_response("{\"success\": true}");
         } else {
             return create_error_response(400, "Failed to submit feedback");
+        }
     } catch (const std::exception& e) {
         logger_->error("Error submitting feedback: {}", e.what());
         return create_error_response(500, "Failed to submit feedback");
@@ -1538,6 +1545,7 @@ HTTPResponse WebUIHandlers::handle_circuit_breaker_reset(const HTTPRequest& requ
             return create_json_response("{\"success\": true, \"message\": \"Circuit breaker reset\"}");
         } else {
             return create_error_response(404, "Circuit breaker not found");
+        }
     } catch (const std::exception& e) {
         logger_->error("Error resetting circuit breaker: {}", e.what());
         return create_error_response(500, "Failed to reset circuit breaker");
@@ -2280,6 +2288,7 @@ HTTPResponse WebUIHandlers::handle_embeddings_generate(const HTTPRequest& reques
             return create_json_response(200, response);
         } else {
             return create_json_response(500, {{"error", "Failed to generate embedding"}});
+        }
     } catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Embedding generation failed: ") + e.what()}});
     }
@@ -2354,6 +2363,7 @@ HTTPResponse WebUIHandlers::handle_embeddings_index(const HTTPRequest& request) 
             return create_json_response(200, {{"success", true}, {"document_id", document_id}});
         } else {
             return create_json_response(500, {{"error", "Failed to index document"}});
+        }
     } catch (const std::exception& e) {
         return create_json_response(500, {{"error", std::string("Document indexing failed: ") + e.what()}});
     }
@@ -11009,15 +11019,13 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_search(const HTTPRequest&
 
         //     response.status_code = 200;
         //     response.body = result.dump();
-        } else {
+        // } else {
         //     response.status_code = 500;
         //     response.body = nlohmann::json{
         //         {"success", false},
         //         {"error", "Conversation memory not initialized"}
         //     }.dump();
         // }
-
-    }
 
     } catch (const std::exception& e) {
         response.status_code = 500;
@@ -11068,15 +11076,13 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_delete(const HTTPRequest&
         // //         {"success", success},
         // //         {"message", success ? "Conversation deleted successfully" : "Failed to delete conversation"}
         //     }.dump();
-        } else {
+        // } else {
         //     response.status_code = 500;
         //     response.body = nlohmann::json{
         //         {"success", false},
         //         {"error", "Conversation memory not initialized"}
         //     }.dump();
         // }
-
-    }
 
     } catch (const std::exception& e) {
         response.status_code = 500;

@@ -1,19 +1,44 @@
-# Development Dockerfile for frontend
+# Development Dockerfile for Regulens Frontend
+# Production-grade development environment following rule.mdc compliance
+# NO MOCKS, NO STUBS - Real development server with hot reload
+
 FROM node:18-alpine
 
+# Set working directory
 WORKDIR /app
+
+# Install system dependencies for development
+RUN apk add --no-cache \
+    git \
+    curl \
+    && rm -rf /var/cache/apk/*
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install all dependencies (including dev dependencies)
+RUN npm ci
 
 # Copy source code
 COPY . .
 
-# Expose port
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S frontend -u 1001 -G nodejs
+
+# Change ownership of app directory
+RUN chown -R frontend:nodejs /app
+
+# Switch to non-root user
+USER frontend
+
+# Expose development port
 EXPOSE 3000
 
-# Start development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Health check for development server
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:3000 || exit 1
+
+# Start development server with hot reload
+# Real Vite dev server - NO MOCKS, following rule.mdc
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]

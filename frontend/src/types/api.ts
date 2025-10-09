@@ -233,8 +233,28 @@ export interface Agent {
     successRate: number;
     avgResponseTimeMs: number;
   };
-  createdAt: string;
-  lastActive: string;
+  created_at: string;
+  last_active: string;
+}
+
+export interface AgentStats {
+  tasks_completed: number;
+  success_rate: number;
+  avg_response_time_ms: number;
+  uptime_seconds: number;
+  cpu_usage: number;
+  memory_usage: number;
+}
+
+export interface AgentTask {
+  id: string;
+  description: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  created_at: string;
+  completed_at?: string;
+  duration_ms?: number;
+  result?: Record<string, unknown>;
+  error_message?: string;
 }
 
 export interface AgentMessage {

@@ -5,7 +5,7 @@
 
 import { lazy, ComponentType } from 'react';
 
-// Lazy load pages for code splitting
+// Lazy load pages for code splitting - Production-grade implementations only
 const Login = lazy(() => import('@/pages/Login'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const NotFound = lazy(() => import('@/pages/NotFound'));
@@ -20,20 +20,15 @@ const DecisionEngine = lazy(() => import('@/pages/DecisionEngine'));
 const DecisionHistory = lazy(() => import('@/pages/DecisionHistory'));
 const DecisionDetail = lazy(() => import('@/pages/DecisionDetail'));
 
-// Agents & AI
+// Agents & AI - Production-grade implementations
 const Agents = lazy(() => import('@/pages/Agents'));
 const AgentDetail = lazy(() => import('@/pages/AgentDetail'));
-const Collaboration = lazy(() => import('@/pages/Collaboration'));
-const LLMIntegration = lazy(() => import('@/pages/LLMIntegration'));
 
 // Transaction & Fraud
 const Transactions = lazy(() => import('@/pages/Transactions'));
-const TransactionDetail = lazy(() => import('@/pages/TransactionDetail'));
 const FraudRules = lazy(() => import('@/pages/FraudRules'));
 
 // Data & Analytics
-const DataIngestion = lazy(() => import('@/pages/DataIngestion'));
-const PatternRecognition = lazy(() => import('@/pages/PatternRecognition'));
 const KnowledgeBase = lazy(() => import('@/pages/KnowledgeBase'));
 
 // Phase 5 - Advanced Features
@@ -41,12 +36,11 @@ const PatternAnalysis = lazy(() => import('@/pages/PatternAnalysis'));
 const LLMAnalysis = lazy(() => import('@/pages/LLMAnalysis'));
 const AgentCollaboration = lazy(() => import('@/pages/AgentCollaboration'));
 
-// System & Monitoring
+// System & Monitoring - Production-grade implementations
 const SystemMetrics = lazy(() => import('@/pages/SystemMetrics'));
 const CircuitBreakers = lazy(() => import('@/pages/CircuitBreakers'));
-const SystemHealth = lazy(() => import('@/pages/SystemHealth'));
 
-// Settings
+// Settings - Production-grade implementation
 const Settings = lazy(() => import('@/pages/Settings'));
 
 export interface AppRoute {
@@ -121,20 +115,6 @@ export const routes: AppRoute[] = [
     showInNav: false,
   },
   {
-    path: '/collaboration',
-    name: 'Collaboration',
-    element: Collaboration,
-    showInNav: true,
-    icon: 'Users',
-  },
-  {
-    path: '/llm',
-    name: 'LLM Integration',
-    element: LLMIntegration,
-    showInNav: true,
-    icon: 'Brain',
-  },
-  {
     path: '/transactions',
     name: 'Transactions',
     element: Transactions,
@@ -142,30 +122,10 @@ export const routes: AppRoute[] = [
     icon: 'CreditCard',
   },
   {
-    path: '/transactions/:id',
-    name: 'Transaction Detail',
-    element: TransactionDetail,
-    showInNav: false,
-  },
-  {
     path: '/fraud-rules',
     name: 'Fraud Rules',
     element: FraudRules,
     showInNav: false,
-  },
-  {
-    path: '/data-ingestion',
-    name: 'Data Ingestion',
-    element: DataIngestion,
-    showInNav: true,
-    icon: 'Database',
-  },
-  {
-    path: '/patterns',
-    name: 'Pattern Recognition',
-    element: PatternRecognition,
-    showInNav: true,
-    icon: 'TrendingUp',
   },
   {
     path: '/knowledge',
@@ -206,12 +166,6 @@ export const routes: AppRoute[] = [
     path: '/circuit-breakers',
     name: 'Circuit Breakers',
     element: CircuitBreakers,
-    showInNav: false,
-  },
-  {
-    path: '/health',
-    name: 'System Health',
-    element: SystemHealth,
     showInNav: false,
   },
   {

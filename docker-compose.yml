@@ -109,24 +109,30 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # Frontend Application (Development)
+  # Frontend Application (Production)
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
+      target: production
     container_name: regulens-frontend
     ports:
-      - "3000:3000"
+      - "3000:80"
     environment:
-      - NODE_ENV=development
-      - VITE_API_BASE_URL=http://localhost:8080
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - NODE_ENV=production
+      - VITE_API_BASE_URL=http://regulens:8080
+      - VITE_WS_BASE_URL=ws://regulens:8080
     networks:
       - regulens-network
     depends_on:
-      - regulens
+      regulens:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # Monitoring with Prometheus (Optional)
@@ -159,7 +165,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro

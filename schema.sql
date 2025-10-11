@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS regulatory_changes (
     extracted_entities JSONB, -- Named entities extracted from the document
     impact_assessment JSONB, -- AI-generated impact assessment
     status VARCHAR(20) NOT NULL DEFAULT 'DETECTED' CHECK (status IN ('DETECTED', 'ANALYZED', 'DISTRIBUTED', 'ARCHIVED')),
+    severity VARCHAR(20) DEFAULT 'MEDIUM' CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
     detected_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     analyzed_at TIMESTAMP WITH TIME ZONE,
     distributed_at TIMESTAMP WITH TIME ZONE,

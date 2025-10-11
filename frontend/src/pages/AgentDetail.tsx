@@ -13,7 +13,6 @@ import {
   Settings,
   Play,
   Pause,
-  RotateCcw,
   AlertCircle,
   CheckCircle,
   Clock,
@@ -62,7 +61,7 @@ const AgentDetail: React.FC = () => {
     return () => clearInterval(interval);
   }, [id]);
 
-  const handleAgentAction = async (action: 'start' | 'stop' | 'restart') => {
+  const handleAgentAction = async (action: 'start' | 'stop') => {
     if (!agent) return;
     
     try {
@@ -147,13 +146,6 @@ const AgentDetail: React.FC = () => {
                   Start
                 </button>
               )}
-              <button
-                onClick={() => handleAgentAction('restart')}
-                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Restart
-              </button>
             </div>
           </div>
         </div>

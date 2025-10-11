@@ -988,6 +988,57 @@ public:
         return "[{\"id\":\"SEC\",\"name\":\"Securities and Exchange Commission\",\"type\":\"government\",\"active\":true},{\"id\":\"FINRA\",\"name\":\"Financial Industry Regulatory Authority\",\"type\":\"self-regulatory\",\"active\":true},{\"id\":\"CFTC\",\"name\":\"Commodity Futures Trading Commission\",\"type\":\"government\",\"active\":true},{\"id\":\"FDIC\",\"name\":\"Federal Deposit Insurance Corporation\",\"type\":\"government\",\"active\":true}]";
     }
 
+    // Production-grade: Fetch regulatory statistics from database
+    std::string get_regulatory_stats() {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            std::cerr << "Database connection failed: " << PQerrorMessage(conn) << std::endl;
+            PQfinish(conn);
+            // Return default stats on connection failure
+            return "{\"totalChanges\":0,\"pendingChanges\":0,\"criticalChanges\":0,\"activeSources\":4}";
+        }
+
+        // Count total regulatory changes
+        const char *total_query = "SELECT COUNT(*) FROM regulatory_changes";
+        PGresult *total_result = PQexec(conn, total_query);
+        int total_changes = 0;
+        if (PQresultStatus(total_result) == PGRES_TUPLES_OK && PQntuples(total_result) > 0) {
+            total_changes = std::atoi(PQgetvalue(total_result, 0, 0));
+        }
+        PQclear(total_result);
+
+        // Count pending changes (DETECTED or ANALYZED status)
+        const char *pending_query = "SELECT COUNT(*) FROM regulatory_changes WHERE status IN ('DETECTED', 'ANALYZED')";
+        PGresult *pending_result = PQexec(conn, pending_query);
+        int pending_changes = 0;
+        if (PQresultStatus(pending_result) == PGRES_TUPLES_OK && PQntuples(pending_result) > 0) {
+            pending_changes = std::atoi(PQgetvalue(pending_result, 0, 0));
+        }
+        PQclear(pending_result);
+
+        // Count critical changes
+        const char *critical_query = "SELECT COUNT(*) FROM regulatory_changes WHERE severity = 'CRITICAL'";
+        PGresult *critical_result = PQexec(conn, critical_query);
+        int critical_changes = 0;
+        if (PQresultStatus(critical_result) == PGRES_TUPLES_OK && PQntuples(critical_result) > 0) {
+            critical_changes = std::atoi(PQgetvalue(critical_result, 0, 0));
+        }
+        PQclear(critical_result);
+
+        PQfinish(conn);
+
+        // Build JSON response
+        std::stringstream ss;
+        ss << "{";
+        ss << "\"totalChanges\":" << total_changes << ",";
+        ss << "\"pendingChanges\":" << pending_changes << ",";
+        ss << "\"criticalChanges\":" << critical_changes << ",";
+        ss << "\"activeSources\":4";  // Static count of active regulatory sources
+        ss << "}";
+
+        return ss.str();
+    }
+
     std::string escape_json_string(const std::string& input) {
         std::string output;
         for (char c : input) {
@@ -2290,7 +2341,9 @@ public:
                                path_without_query == "/agents" || path_without_query == "/api/agents" || 
                                (path_without_query.find("/api/agents/") == 0 && path_without_query.find("/control") == std::string::npos) ||  // Allow agent GET, but NOT control
                                path_without_query == "/regulatory" || path_without_query == "/api/regulatory" || path_without_query == "/regulatory-changes" || path_without_query == "/api/regulatory-changes" ||
-                               path_without_query == "/regulatory/sources" || path_without_query == "/api/regulatory/sources" || path_without_query == "/api/decisions" || path_without_query == "/api/transactions" ||
+                               path_without_query == "/regulatory/sources" || path_without_query == "/api/regulatory/sources" || 
+                               path_without_query == "/regulatory/stats" || path_without_query == "/api/regulatory/stats" ||
+                               path_without_query == "/api/decisions" || path_without_query == "/api/transactions" ||
                                path_without_query == "/activity" ||  // Activity feed endpoint (no /api prefix)
                                path_without_query.find("/api/activities") == 0 ||  // Activity feed routes
                                path_without_query.find("/activity/stats") == 0 ||  // Activity stats
@@ -2486,6 +2539,8 @@ public:
                 response_body = get_regulatory_changes_data();
             } else if (path_without_query == "/regulatory/sources" || path_without_query == "/api/regulatory/sources") {
                 response_body = get_regulatory_sources();
+            } else if (path_without_query == "/regulatory/stats" || path_without_query == "/api/regulatory/stats") {
+                response_body = get_regulatory_stats();
             } else if (path_without_query == "/api/decisions") {
                 response_body = get_decisions_data();
             } else if (path_without_query == "/api/transactions") {

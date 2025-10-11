@@ -1118,9 +1118,9 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
             return false;
         }
 
-        // Query users table for password hash
+        // Query user_authentication table for password hash
         auto query = "SELECT password_hash, is_active, failed_login_attempts "
-                    "FROM users WHERE username = $1";
+                    "FROM user_authentication WHERE username = $1";
 
         auto query_result = connection->execute_query(query, {username});
 
@@ -1234,7 +1234,7 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
 
         if (password_valid) {
             // Reset failed login counter on successful authentication
-            auto update_query = "UPDATE users SET failed_login_attempts = 0, "
+            auto update_query = "UPDATE user_authentication SET failed_login_attempts = 0, "
                                "last_login = NOW() WHERE username = $1";
             connection->execute_query(update_query, {username});
 
@@ -1243,7 +1243,7 @@ bool RESTAPIServer::authenticate_user(const std::string& username, const std::st
             return true;
         } else {
             // Increment failed login counter
-            auto update_query = "UPDATE users SET failed_login_attempts = failed_login_attempts + 1 "
+            auto update_query = "UPDATE user_authentication SET failed_login_attempts = failed_login_attempts + 1 "
                                "WHERE username = $1";
             connection->execute_query(update_query, {username});
 

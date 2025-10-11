@@ -1,31 +1,24 @@
 /**
  * MCP Tool Implementation
  *
- * Production-grade implementation of Model Context Protocol
- * for connecting agents to MCP-compatible tools and services.
+ * Production-grade implementation of Model Context Protocol using Boost.Beast
+ * for real-time agent tool discovery and communication.
  */
 
 #include "mcp_tool.hpp"
 #include "../tool_interface.hpp"
-#include <curl/curl.h>
 #include <sstream>
-// WebSocket support disabled until websocketpp is available
-// #include <websocketpp/client.hpp>
-// #include <websocketpp/config/asio_no_tls_client.hpp>
-// #include <websocketpp/common/thread.hpp>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <regex>
 
 namespace regulens {
 
-// WebSocket client type aliases (disabled)
-// typedef websocketpp::client<websocketpp::config::asio_client> ws_client;
-// typedef websocketpp::lib::shared_ptr<websocketpp::lib::thread> thread_ptr;
-
-// MCP Tool Implementation
+// MCP Tool Implementation with Production-Grade WebSocket Support
 MCPToolIntegration::MCPToolIntegration(const ToolConfig& config, StructuredLogger* logger)
-    : Tool(config, logger), server_connected_(false), ws_connected_(false) {
+    : Tool(config, logger), server_connected_(false), ws_connected_(false), 
+      stop_requested_(false), reconnect_attempts_(0) {
 
     // Parse MCP server configuration from tool config
     if (config.metadata.contains("mcp_server_url")) {
@@ -46,6 +39,9 @@ MCPToolIntegration::MCPToolIntegration(const ToolConfig& config, StructuredLogge
     if (config.metadata.contains("mcp_server_capabilities")) {
         mcp_config_.server_capabilities = config.metadata["mcp_server_capabilities"];
     }
+    
+    // Initialize io_context for async operations
+    io_context_ = std::make_shared<net::io_context>();
 }
 
 ToolResult MCPToolIntegration::execute_operation(const std::string& operation,
@@ -107,6 +103,8 @@ bool MCPToolIntegration::authenticate() {
 
 bool MCPToolIntegration::disconnect() {
     try {
+        stop_requested_ = true;
+        cleanup_websocket();
         server_connected_ = false;
         available_tools_.clear();
         available_resources_.clear();
@@ -248,18 +246,27 @@ ToolResult MCPToolIntegration::subscribe_to_resource(const std::string& uri) {
 
 bool MCPToolIntegration::initialize_mcp_connection() {
     try {
-        // Initialize WebSocket connection (optional for HTTP/STDIO transports)
-#ifdef USE_WEBSOCKET
+        // Initialize production-grade WebSocket connection using Boost.Beast
         if (!initialize_websocket_connection()) {
+            logger_->log(LogLevel::ERROR, "Failed to initialize WebSocket connection");
             return false;
         }
-#else
-        // WebSocket not available - will use HTTP or STDIO transport
-        if (logger_) {
-            logger_->debug("WebSocket support not compiled, using HTTP/STDIO transport",
-                          "MCPToolIntegration", "initialize_mcp_connection");
+
+        // Wait for connection to establish
+        auto timeout = std::chrono::seconds(mcp_config_.connection_timeout);
+        auto start = std::chrono::steady_clock::now();
+        
+        while (!ws_connected_ && !stop_requested_) {
+            if (std::chrono::steady_clock::now() - start > timeout) {
+                logger_->log(LogLevel::ERROR, "WebSocket connection timeout");
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-#endif
+
+        if (!ws_connected_) {
+            return false;
+        }
 
         // Perform MCP handshake
         nlohmann::json handshake_params = {
@@ -290,18 +297,10 @@ bool MCPToolIntegration::initialize_mcp_connection() {
                 {"params", nlohmann::json::object()}
             };
 
-#ifdef USE_WEBSOCKET
-            websocketpp::lib::error_code ec;
-            ws_client_->send(ws_connection_, initialized_notification.dump(),
-                           websocketpp::frame::opcode::text, ec);
-
-            if (ec) {
-                logger_->log(LogLevel::WARN, "Failed to send initialized notification: " + ec.message());
-            }
-#else
-            logger_->log(LogLevel::DEBUG, "Initialized notification skipped (WebSocket not available)",
-                        "MCPToolIntegration", "initialize_mcp_connection");
-#endif
+            websocket_write_message(initialized_notification.dump());
+            
+            // Start heartbeat mechanism
+            start_heartbeat();
 
             logger_->log(LogLevel::INFO, "MCP server initialized successfully");
             return true;
@@ -362,20 +361,150 @@ bool MCPToolIntegration::discover_mcp_resources() {
     }
 }
 
-#ifdef USE_WEBSOCKET
+// Production-grade WebSocket implementation using Boost.Beast
 bool MCPToolIntegration::initialize_websocket_connection() {
-    // WebSocket support temporarily disabled (requires websocketpp library)
-    logger_->log(LogLevel::WARN, "MCP WebSocket support not available - websocketpp library not installed");
-    logger_->log(LogLevel::INFO, "MCP tool will return stub responses until WebSocket support is enabled");
-    ws_connected_ = false;
-    return false;
+    try {
+        // Parse WebSocket URL
+        std::string host, port, path;
+        parse_websocket_url(mcp_config_.server_url, host, port, path);
+
+        if (host.empty() || port.empty()) {
+            logger_->log(LogLevel::ERROR, "Invalid WebSocket URL: " + mcp_config_.server_url);
+            return false;
+        }
+
+        // Resolve the endpoint
+        tcp::resolver resolver(*io_context_);
+        endpoints_ = resolver.resolve(host, port);
+
+        // Create WebSocket stream
+        ws_stream_ = std::make_unique<websocket::stream<beast::tcp_stream>>(*io_context_);
+
+        // Start async connection in separate thread
+        io_thread_ = std::thread([this]() {
+            websocket_connect();
+            io_context_->run();
+        });
+
+        logger_->log(LogLevel::INFO, "WebSocket connection initiated to " + host + ":" + port + path);
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to initialize WebSocket: " + std::string(e.what()));
+        return false;
+    }
+}
+
+void MCPToolIntegration::websocket_connect() {
+    try {
+        beast::get_lowest_layer(*ws_stream_).expires_after(std::chrono::seconds(mcp_config_.connection_timeout));
+
+        // Connect to the resolved endpoint
+        beast::get_lowest_layer(*ws_stream_).connect(endpoints_);
+
+        // Set WebSocket options
+        ws_stream_->set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
+        ws_stream_->set_option(websocket::stream_base::decorator(
+            [this](websocket::request_type& req) {
+                req.set(beast::http::field::user_agent, "Regulens-Agent/1.0");
+                if (!mcp_config_.auth_token.empty()) {
+                    req.set(beast::http::field::authorization, "Bearer " + mcp_config_.auth_token);
+                }
+            }));
+
+        // Perform WebSocket handshake
+        std::string host, port, path;
+        parse_websocket_url(mcp_config_.server_url, host, port, path);
+        ws_stream_->handshake(host, path);
+
+        ws_connected_ = true;
+        reconnect_attempts_ = 0;
+        last_heartbeat_ = std::chrono::steady_clock::now();
+
+        logger_->log(LogLevel::INFO, "WebSocket connected successfully");
+
+        // Start read loop
+        websocket_read_loop();
+
+    } catch (const beast::system_error& e) {
+        ws_connected_ = false;
+        logger_->log(LogLevel::ERROR, "WebSocket connection failed: " + std::string(e.what()));
+        
+        // Attempt reconnection if not stopped
+        if (!stop_requested_ && reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+            attempt_reconnect();
+        }
+    }
+}
+
+void MCPToolIntegration::websocket_read_loop() {
+    try {
+        while (!stop_requested_ && ws_connected_) {
+            beast::flat_buffer buffer;
+            
+            // Set timeout for read operation
+            beast::get_lowest_layer(*ws_stream_).expires_after(std::chrono::seconds(mcp_config_.read_timeout));
+            
+            // Read a message
+            ws_stream_->read(buffer);
+            
+            // Convert to string
+            std::string message = beast::buffers_to_string(buffer.data());
+            
+            // Handle the message
+            handle_websocket_message(message);
+            
+            // Update last heartbeat time
+            last_heartbeat_ = std::chrono::steady_clock::now();
+        }
+    } catch (const beast::system_error& e) {
+        if (e.code() != websocket::error::closed) {
+            ws_connected_ = false;
+            logger_->log(LogLevel::ERROR, "WebSocket read error: " + std::string(e.what()));
+            
+            // Attempt reconnection
+            if (!stop_requested_ && reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+                attempt_reconnect();
+            }
+        }
+    }
+}
+
+void MCPToolIntegration::websocket_write_message(const std::string& message) {
+    try {
+        if (!ws_connected_ || !ws_stream_) {
+            logger_->log(LogLevel::WARN, "Cannot write message: WebSocket not connected");
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(ws_mutex_);
+        
+        // Set timeout for write operation
+        beast::get_lowest_layer(*ws_stream_).expires_after(std::chrono::seconds(mcp_config_.connection_timeout));
+        
+        // Send the message
+        ws_stream_->write(net::buffer(message));
+        
+        logger_->log(LogLevel::DEBUG, "WebSocket message sent: " + message.substr(0, 100));
+
+    } catch (const beast::system_error& e) {
+        ws_connected_ = false;
+        logger_->log(LogLevel::ERROR, "WebSocket write error: " + std::string(e.what()));
+        
+        if (!stop_requested_) {
+            attempt_reconnect();
+        }
+    }
 }
 
 void MCPToolIntegration::handle_websocket_message(const std::string& message) {
     try {
         nlohmann::json response = nlohmann::json::parse(message);
 
+        logger_->log(LogLevel::DEBUG, "Received WebSocket message: " + message.substr(0, 200));
+
         if (response.contains("id")) {
+            // This is a response to a request
             std::string request_id = response["id"];
             std::lock_guard<std::mutex> lock(ws_mutex_);
             pending_responses_[request_id] = response;
@@ -383,38 +512,179 @@ void MCPToolIntegration::handle_websocket_message(const std::string& message) {
         } else if (response.contains("method")) {
             // Handle server-initiated messages (notifications)
             handle_mcp_notification(response);
+        } else {
+            logger_->log(LogLevel::WARN, "Received malformed WebSocket message");
         }
 
-    } catch (const std::exception& e) {
+    } catch (const nlohmann::json::parse_error& e) {
         logger_->log(LogLevel::ERROR, "Failed to parse WebSocket message: " + std::string(e.what()));
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Error handling WebSocket message: " + std::string(e.what()));
     }
 }
 
 void MCPToolIntegration::handle_mcp_notification(const nlohmann::json& notification) {
     std::string method = notification.value("method", "");
 
+    logger_->log(LogLevel::INFO, "Received MCP notification: " + method);
+
     if (method == "notifications/tools/list_changed") {
         // Tools list changed, rediscover tools
+        logger_->log(LogLevel::INFO, "MCP tools list changed, rediscovering...");
         discover_mcp_tools();
     } else if (method == "notifications/resources/list_changed") {
         // Resources list changed, rediscover resources
+        logger_->log(LogLevel::INFO, "MCP resources list changed, rediscovering...");
         discover_mcp_resources();
     } else if (method == "notifications/resources/updated") {
         // Resource updated
         if (notification.contains("params") && notification["params"].contains("uri")) {
             std::string uri = notification["params"]["uri"];
             logger_->log(LogLevel::INFO, "MCP resource updated: " + uri);
+            
+            // Update the resource in our cache if it exists
+            if (available_resources_.find(uri) != available_resources_.end()) {
+                // Refresh this specific resource
+                read_resource(uri);
+            }
+        }
+    } else if (method == "notifications/message") {
+        // Server-sent message notification
+        if (notification.contains("params")) {
+            logger_->log(LogLevel::INFO, "MCP server message: " + notification["params"].dump());
+        }
+    } else {
+        logger_->log(LogLevel::DEBUG, "Unknown MCP notification: " + method);
+    }
+}
+
+void MCPToolIntegration::start_heartbeat() {
+    if (!io_context_) {
+        return;
+    }
+
+    heartbeat_timer_ = std::make_unique<net::steady_timer>(*io_context_);
+    
+    // Schedule first heartbeat
+    heartbeat_timer_->expires_after(HEARTBEAT_INTERVAL);
+    heartbeat_timer_->async_wait([this](const beast::error_code& ec) {
+        if (!ec && !stop_requested_) {
+            send_heartbeat();
+        }
+    });
+}
+
+void MCPToolIntegration::send_heartbeat() {
+    try {
+        // Check if connection is still alive
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat_);
+        
+        if (elapsed > HEARTBEAT_INTERVAL * 2) {
+            logger_->log(LogLevel::WARN, "No heartbeat received, connection may be dead");
+            ws_connected_ = false;
+            attempt_reconnect();
+            return;
+        }
+
+        // Send ping frame
+        if (ws_connected_ && ws_stream_) {
+            ws_stream_->ping({});
+            logger_->log(LogLevel::DEBUG, "Heartbeat ping sent");
+        }
+
+        // Schedule next heartbeat
+        if (heartbeat_timer_ && !stop_requested_) {
+            heartbeat_timer_->expires_after(HEARTBEAT_INTERVAL);
+            heartbeat_timer_->async_wait([this](const beast::error_code& ec) {
+                if (!ec && !stop_requested_) {
+                    send_heartbeat();
+                }
+            });
+        }
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Heartbeat error: " + std::string(e.what()));
+    }
+}
+
+void MCPToolIntegration::attempt_reconnect() {
+    if (stop_requested_ || reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+        logger_->log(LogLevel::ERROR, "Max reconnection attempts reached, giving up");
+        ws_connected_ = false;
+        server_connected_ = false;
+        return;
+    }
+
+    reconnect_attempts_++;
+    logger_->log(LogLevel::INFO, "Attempting reconnection (" + std::to_string(reconnect_attempts_) + 
+                 "/" + std::to_string(MAX_RECONNECT_ATTEMPTS) + ")");
+
+    // Clean up existing connection
+    cleanup_websocket();
+
+    // Wait before reconnecting
+    std::this_thread::sleep_for(RECONNECT_DELAY);
+
+    if (!stop_requested_) {
+        // Reinitialize connection
+        if (initialize_websocket_connection()) {
+            logger_->log(LogLevel::INFO, "Reconnection successful");
+            
+            // Re-authenticate and rediscover
+            if (initialize_mcp_connection()) {
+                discover_mcp_tools();
+                discover_mcp_resources();
+            }
+        } else {
+            logger_->log(LogLevel::ERROR, "Reconnection failed");
         }
     }
 }
-#endif // USE_WEBSOCKET
+
+void MCPToolIntegration::cleanup_websocket() {
+    try {
+        if (heartbeat_timer_) {
+            heartbeat_timer_->cancel();
+        }
+
+        if (ws_stream_ && ws_connected_) {
+            beast::error_code ec;
+            ws_stream_->close(websocket::close_code::normal, ec);
+            if (ec) {
+                logger_->log(LogLevel::DEBUG, "WebSocket close error: " + ec.message());
+            }
+        }
+
+        ws_stream_.reset();
+        
+        if (io_context_) {
+            io_context_->stop();
+        }
+
+        if (io_thread_.joinable()) {
+            io_thread_.join();
+        }
+
+        // Restart io_context for potential reconnection
+        if (io_context_) {
+            io_context_->restart();
+        }
+
+        ws_connected_ = false;
+        logger_->log(LogLevel::INFO, "WebSocket cleanup completed");
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Cleanup error: " + std::string(e.what()));
+    }
+}
 
 nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, const nlohmann::json& params) {
     if (!ws_connected_) {
+        logger_->log(LogLevel::ERROR, "Cannot send MCP request: WebSocket not connected");
         return {{"error", "WebSocket not connected"}};
     }
 
-#ifdef USE_WEBSOCKET
     try {
         std::string request_id = generate_request_id();
 
@@ -427,14 +697,10 @@ nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, c
 
         std::string request_str = request.dump();
 
-        // Send request via WebSocket
-        websocketpp::lib::error_code ec;
-        ws_client_->send(ws_connection_, request_str, websocketpp::frame::opcode::text, ec);
+        logger_->log(LogLevel::DEBUG, "Sending MCP request: " + method + " (id: " + request_id + ")");
 
-        if (ec) {
-            logger_->log(LogLevel::ERROR, "WebSocket send failed: " + ec.message());
-            return {{"error", "WebSocket send failed: " + ec.message()}};
-        }
+        // Send request via WebSocket
+        websocket_write_message(request_str);
 
         // Wait for response with timeout
         {
@@ -451,6 +717,7 @@ nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, c
             if (it != pending_responses_.end()) {
                 nlohmann::json response = it->second;
                 pending_responses_.erase(it);
+                logger_->log(LogLevel::DEBUG, "Received MCP response for: " + method);
                 return response;
             }
         }
@@ -458,12 +725,9 @@ nlohmann::json MCPToolIntegration::send_mcp_request(const std::string& method, c
         return {{"error", "No response received"}};
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "MCP WebSocket request failed: " + std::string(e.what()));
+        logger_->log(LogLevel::ERROR, "MCP request failed: " + std::string(e.what()));
         return {{"error", e.what()}};
     }
-#else
-    return {{"error", "WebSocket support not compiled"}};
-#endif
 }
 
 ToolResult MCPToolIntegration::handle_mcp_response(const nlohmann::json& response) {
@@ -503,9 +767,29 @@ std::string MCPToolIntegration::generate_request_id() {
     return "req_" + std::to_string(++request_counter);
 }
 
-size_t MCPToolIntegration::write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
-    ((std::string*)userp)->append((char*)contents, size * nmemb);
-    return size * nmemb;
+std::string MCPToolIntegration::parse_websocket_url(const std::string& url, std::string& host, 
+                                                    std::string& port, std::string& path) {
+    try {
+        // Parse WebSocket URL (ws://host:port/path or wss://host:port/path)
+        std::regex ws_regex(R"((wss?):\/\/([^:\/]+)(?::(\d+))?(\/.*)?)", std::regex::icase);
+        std::smatch matches;
+
+        if (std::regex_match(url, matches, ws_regex)) {
+            std::string protocol = matches[1].str();
+            host = matches[2].str();
+            port = matches[3].matched ? matches[3].str() : (protocol == "wss" ? "443" : "80");
+            path = matches[4].matched ? matches[4].str() : "/";
+            
+            logger_->log(LogLevel::DEBUG, "Parsed WebSocket URL: " + host + ":" + port + path);
+            return protocol;
+        } else {
+            logger_->log(LogLevel::ERROR, "Invalid WebSocket URL format: " + url);
+            return "";
+        }
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "URL parsing error: " + std::string(e.what()));
+        return "";
+    }
 }
 
 // Factory function

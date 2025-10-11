@@ -11,7 +11,18 @@ add_executable(regulens_tests
     example_tests.cpp
     advanced_agent_tests.cpp
     advanced_agent_test_runner.cpp
+    unit_tests.cpp
     # Add more test files here as they are created
+)
+
+# API Integration Tests (separate executable)
+add_executable(api_integration_tests
+    api_integration_tests.cpp
+)
+
+# Production Features Integration Tests (separate executable)
+add_executable(production_features_tests
+    integration/production_features_test.cpp
 )
 
 target_include_directories(regulens_tests
@@ -80,3 +91,41 @@ target_link_libraries(regulens_advanced_tests
         regulens_core
         regulens_shared
 )
+
+# Link API Integration Tests
+if(GTest_FOUND)
+    target_link_libraries(api_integration_tests
+        PRIVATE
+            regulens_core
+            regulens_shared
+            GTest::gtest
+            GTest::gtest_main
+            curl
+    )
+    
+    target_include_directories(api_integration_tests
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    
+    # Enable test discovery for integration tests
+    gtest_discover_tests(api_integration_tests)
+    
+    # Link and discover production features tests
+    target_link_libraries(production_features_tests
+        PRIVATE
+            regulens_core
+            regulens_shared
+            GTest::gtest
+            GTest::gtest_main
+            pqxx
+            pq
+    )
+    
+    target_include_directories(production_features_tests
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    
+    gtest_discover_tests(production_features_tests)
+endif()

@@ -93,7 +93,7 @@ export const AgentStatus: React.FC<AgentStatusProps> = ({ agents, loading = fals
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h4 className="font-medium text-gray-900 text-sm truncate">
-                      {agent.name}
+                      {agent.displayName}
                     </h4>
                     <div className="flex items-center gap-1">
                       <Circle className={clsx('w-2 h-2 fill-current', statusDot)} />
@@ -110,7 +110,7 @@ export const AgentStatus: React.FC<AgentStatusProps> = ({ agents, loading = fals
                         {agent.performance.tasksCompleted.toLocaleString()} tasks
                       </span>
                       <span>
-                        {(agent.performance.successRate * 100).toFixed(0)}% success
+                        {agent.performance.successRate}% success
                       </span>
                     </div>
                   )}

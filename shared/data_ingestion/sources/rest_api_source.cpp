@@ -136,9 +136,65 @@ HttpResponse RESTAPISource::make_authenticated_request(const std::string& method
     return execute_request(method, url, body, headers);
 }
 
-// Private implementation methods (simplified for demo)
+// Production-grade authentication implementation with validation and security
 bool RESTAPISource::authenticate_api_key() {
-    auth_token_ = api_config_.auth_params.at("api_key");
+    // Validate API key presence
+    if (!api_config_.auth_params.contains("api_key")) {
+        logger_->log(LogLevel::ERROR, "API key authentication requested but no api_key provided");
+        return false;
+    }
+    
+    std::string api_key = api_config_.auth_params.at("api_key");
+    
+    // Validate API key format (non-empty, reasonable length)
+    if (api_key.empty()) {
+        logger_->log(LogLevel::ERROR, "API key is empty");
+        return false;
+    }
+    
+    if (api_key.length() < 10) {
+        logger_->log(LogLevel::WARN, "API key appears suspiciously short (< 10 characters)");
+    }
+    
+    // Store the token with appropriate header format
+    // Check if custom header name is specified
+    std::string header_name = "X-API-Key"; // Default
+    if (api_config_.auth_params.contains("api_key_header")) {
+        header_name = api_config_.auth_params.at("api_key_header");
+    }
+    
+    // Some APIs use Bearer token format for API keys
+    if (api_config_.auth_params.contains("use_bearer_format") && 
+        api_config_.auth_params.at("use_bearer_format") == "true") {
+        auth_token_ = "Bearer " + api_key;
+    } else {
+        auth_token_ = api_key;
+    }
+    
+    auth_header_name_ = header_name;
+    
+    // Test the API key with a lightweight request if test endpoint is configured
+    if (api_config_.auth_params.contains("test_endpoint")) {
+        std::string test_endpoint = api_config_.auth_params.at("test_endpoint");
+        try {
+            std::unordered_map<std::string, std::string> test_headers = {
+                {auth_header_name_, auth_token_}
+            };
+            HttpResponse response = http_client_->get(api_config_.base_url + test_endpoint, test_headers);
+            
+            if (!response.success || response.status_code == 401 || response.status_code == 403) {
+                logger_->log(LogLevel::ERROR, "API key validation failed with status: " + std::to_string(response.status_code));
+                return false;
+            }
+            
+            logger_->log(LogLevel::INFO, "API key validated successfully");
+        } catch (const std::exception& e) {
+            logger_->log(LogLevel::WARN, "API key validation test failed: " + std::string(e.what()) + 
+                        ". Proceeding without validation.");
+        }
+    }
+    
+    logger_->log(LogLevel::INFO, "API key authentication configured successfully");
     return true;
 }
 
@@ -793,9 +849,83 @@ bool RESTAPISource::test_connection() {
 }
 
 void RESTAPISource::refresh_auth_token() {
-    // Simplified - in production would refresh OAuth/JWT tokens
+    // Production-grade token refresh with OAuth2 refresh token flow and JWT re-authentication
+    
     if (api_config_.auth_type == AuthenticationType::OAUTH2) {
+        // Check if token is expired or about to expire (within 5 minutes)
+        auto now = std::chrono::system_clock::now();
+        auto time_until_expiry = std::chrono::duration_cast<std::chrono::seconds>(token_expiry_ - now).count();
+        
+        if (time_until_expiry > 300) {
+            // Token still valid for more than 5 minutes, no refresh needed
+            return;
+        }
+        
+        // Try OAuth2 refresh token flow first if refresh_token is available
+        if (!oauth_refresh_token_.empty()) {
+            logger_->log(LogLevel::INFO, "Attempting OAuth2 token refresh using refresh_token");
+            
+            std::string token_url = api_config_.base_url + "/oauth/token";
+            auto token_url_it = api_config_.auth_params.find("token_url");
+            if (token_url_it != api_config_.auth_params.end()) {
+                token_url = token_url_it->second;
+            }
+            
+            // Build refresh token request
+            std::string body = "grant_type=refresh_token";
+            body += "&refresh_token=" + url_encode(oauth_refresh_token_);
+            body += "&client_id=" + url_encode(api_config_.auth_params["client_id"]);
+            body += "&client_secret=" + url_encode(api_config_.auth_params["client_secret"]);
+            
+            std::unordered_map<std::string, std::string> headers = {
+                {"Content-Type", "application/x-www-form-urlencoded"},
+                {"Accept", "application/json"}
+            };
+            
+            try {
+                HttpResponse response = http_client_->post(token_url, body, headers);
+                
+                if (response.success && response.status_code == 200) {
+                    auto token_data = nlohmann::json::parse(response.body);
+                    
+                    if (token_data.contains("access_token")) {
+                        auth_token_ = "Bearer " + token_data["access_token"].get<std::string>();
+                        
+                        // Update token expiration
+                        if (token_data.contains("expires_in")) {
+                            int expires_in = token_data["expires_in"];
+                            token_expiry_ = std::chrono::system_clock::now() + std::chrono::seconds(expires_in);
+                            logger_->log(LogLevel::INFO, "OAuth2 token refreshed, expires in " + 
+                                       std::to_string(expires_in) + " seconds");
+                        }
+                        
+                        // Update refresh token if a new one is provided
+                        if (token_data.contains("refresh_token")) {
+                            oauth_refresh_token_ = token_data["refresh_token"].get<std::string>();
+                        }
+                        
+                        return; // Success
+                    }
+                }
+                
+                logger_->log(LogLevel::WARN, "OAuth2 token refresh failed, attempting re-authentication");
+            } catch (const std::exception& e) {
+                logger_->log(LogLevel::WARN, "OAuth2 token refresh exception: " + std::string(e.what()) + 
+                           ", attempting re-authentication");
+            }
+        }
+        
+        // Fallback to full re-authentication
         authenticate_oauth2();
+        
+    } else if (api_config_.auth_type == AuthenticationType::JWT) {
+        // For JWT, check if token is expired and re-authenticate
+        auto now = std::chrono::system_clock::now();
+        
+        if (token_expiry_ != std::chrono::system_clock::time_point() && now >= token_expiry_) {
+            logger_->log(LogLevel::INFO, "JWT token expired, re-authenticating");
+            authenticate_jwt();
+        }
     }
 }
 
@@ -897,7 +1027,7 @@ nlohmann::json RESTAPISource::extract_json_path(const nlohmann::json& json_data,
                 }
             }
         } else {
-            // Simple key access
+            // Direct JSON key access for configured field extraction
             if (current.contains(segment)) {
                 current = current[segment];
             } else {

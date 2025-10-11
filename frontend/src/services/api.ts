@@ -18,6 +18,7 @@ class RegulesAPIClient {
       headers: {
         'Content-Type': 'application/json',
       },
+      withCredentials: false, // Not needed for JWT in header
     });
 
     this.setupInterceptors();
@@ -74,69 +75,22 @@ class RegulesAPIClient {
   // AUTHENTICATION
   // ============================================================================
 
-  async login(credentials: API.LoginRequest): Promise<API.LoginResponse> {
-    // Development mode: bypass authentication for testing
-    if (import.meta.env.DEV) {
-      // Check against local credentials
-      const validUsers = [
-        { username: 'admin', password: 'admin123' },
-        { username: 'demo', password: 'demo123' },
-        { username: 'test', password: 'test123' },
-      ];
-
-      const isValid = validUsers.some(
-        (u) => u.username === credentials.username && u.password === credentials.password
-      );
-
-      if (isValid) {
-        const mockToken = 'dev-token-' + credentials.username + '-' + Date.now();
-        this.setToken(mockToken);
-        return {
-          token: mockToken,
-          user: {
-            id: '1',
-            username: credentials.username,
-            email: credentials.username + '@regulens.com',
-            role: credentials.username === 'admin' ? 'admin' : 'user',
-            permissions: ['view', 'edit'],
-          },
-          expiresIn: 86400, // 24 hours
-        };
-      } else {
-        throw new Error('Invalid credentials');
-      }
-    }
-
-    // Production mode: use real API
-    const response = await this.client.post<API.LoginResponse>('/auth/login', credentials);
+  async login(credentials: API.LoginRequest, config?: any): Promise<API.LoginResponse> {
+    // Production-grade authentication: Always use real backend API with JWT validation
+    // No development shortcuts - ensures consistent behavior across all environments
+    const response = await this.client.post<API.LoginResponse>('/auth/login', credentials, config);
     this.setToken(response.data.token);
     return response.data;
   }
 
-  async logout(): Promise<void> {
-    // Development mode: just clear token
-    if (import.meta.env.DEV) {
-      this.clearToken();
-      return;
-    }
-
-    await this.client.post('/auth/logout');
+  async logout(config?: any): Promise<void> {
+    // Production-grade logout: Always call backend to invalidate session
+    await this.client.post('/auth/logout', {}, config);
     this.clearToken();
   }
 
   async getCurrentUser(): Promise<API.User> {
-    // Development mode: return mock user if token exists
-    if (import.meta.env.DEV && this.token) {
-      const username = this.token.split('-')[2]; // Extract username from dev token
-      return {
-        id: '1',
-        username: username || 'admin',
-        email: (username || 'admin') + '@regulens.com',
-        role: username === 'admin' ? 'admin' : 'user',
-        permissions: ['view', 'edit'],
-      };
-    }
-
+    // Always use backend - no dev mocks for production parity
     const response = await this.client.get<API.User>('/auth/me');
     return response.data;
   }
@@ -557,11 +511,13 @@ class RegulesAPIClient {
   async controlAgent(id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
     const endpoints = [`/api/agents/${id}/control`, `/agents/${id}/action`, `/api/v1/agents/${id}/control`];
     
+    let lastError: Error | null = null;
     for (const endpoint of endpoints) {
       try {
         await this.client.post<void>(endpoint, { action });
         return;
       } catch (error: any) {
+        lastError = error;
         if (error?.response?.status !== 404) {
           console.warn(`Agent control endpoint ${endpoint} failed:`, error?.message);
         }
@@ -569,8 +525,8 @@ class RegulesAPIClient {
       }
     }
     
-    // Simulate successful control action
-    console.log(`Agent ${id} ${action} action simulated successfully`);
+    // All endpoints failed - throw error instead of simulating success
+    throw new Error(`Failed to ${action} agent ${id}: No valid control endpoint found. Last error: ${lastError?.message || 'Unknown error'}`);
   }
 
   private normalizeAgent(agent: any): API.Agent {
@@ -986,6 +942,15 @@ class RegulesAPIClient {
     minConfidence?: number;
   }): Promise<{ jobId: string; message: string }> {
     const response = await this.client.post<{ jobId: string; message: string }>('/patterns/detect', params);
+    return response.data;
+  }
+  
+  async getPatternAnalysisJobStatus(jobId: string): Promise<{ 
+    status: 'pending' | 'running' | 'completed' | 'failed'; 
+    progress?: number;
+    message?: string;
+  }> {
+    const response = await this.client.get(`/patterns/jobs/${jobId}/status`);
     return response.data;
   }
 
@@ -1449,5 +1414,7 @@ class RegulesAPIClient {
 }
 
 // Export singleton instance
-export const apiClient = new RegulesAPIClient();
+// For native development, point directly to backend to avoid proxy issues
+const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
+export const apiClient = new RegulesAPIClient(baseURL);
 export default apiClient;

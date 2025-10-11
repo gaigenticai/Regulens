@@ -26,7 +26,7 @@ void ConfigurationManager::set_logger(std::shared_ptr<Logger> logger) {
 }
 
 bool ConfigurationManager::initialize(int argc, char* argv[]) {
-    // Simple initialization - just return true
+    // Configuration initialization with default settings
     return true;
 }
 

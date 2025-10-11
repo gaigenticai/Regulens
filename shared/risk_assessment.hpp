@@ -405,6 +405,11 @@ private:
     double calculate_geographic_risk(const std::string& location);
 
     /**
+     * @brief Analyze ownership structure complexity
+     */
+    double analyze_ownership_complexity(const EntityProfile& entity);
+
+    /**
      * @brief Calculate behavioral risk score
      */
     double calculate_behavioral_risk(const TransactionData& transaction,

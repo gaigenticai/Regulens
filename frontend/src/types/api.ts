@@ -224,6 +224,7 @@ export interface AuditStats {
 export interface Agent {
   id: string;
   name: string;
+  displayName: string;
   type: 'compliance' | 'data_validation' | 'risk_analysis' | 'transaction_guardian' | 'audit_intelligence';
   status: 'active' | 'idle' | 'error' | 'disabled';
   capabilities: string[];

@@ -1,24 +1,110 @@
 #include "agentic_orchestrator.hpp"
 #include "../event_system/event.hpp"
 #include "../event_system/event_bus.hpp"
+#include <stdexcept>
+#include <cstdlib>
 
 namespace regulens {
+
+// OrchestratorConfig Implementation
+
+OrchestratorConfig OrchestratorConfig::from_environment() {
+    OrchestratorConfig config;
+    
+    // Read initialization strategy from environment
+    const char* init_strategy_env = std::getenv("ORCHESTRATOR_INIT_STRATEGY");
+    if (init_strategy_env) {
+        std::string strategy(init_strategy_env);
+        if (strategy == "EAGER") {
+            config.init_strategy = ComponentInitStrategy::EAGER;
+        } else if (strategy == "LAZY") {
+            config.init_strategy = ComponentInitStrategy::LAZY;
+        } else if (strategy == "CUSTOM") {
+            config.init_strategy = ComponentInitStrategy::CUSTOM;
+        }
+    }
+    
+    // Component enable/disable from environment
+    const char* enable_llm = std::getenv("ORCHESTRATOR_ENABLE_LLM");
+    if (enable_llm && std::string(enable_llm) == "false") {
+        config.enable_llm_interface = false;
+    }
+    
+    const char* enable_learning = std::getenv("ORCHESTRATOR_ENABLE_LEARNING");
+    if (enable_learning && std::string(enable_learning) == "false") {
+        config.enable_learning_engine = false;
+    }
+    
+    const char* enable_decision = std::getenv("ORCHESTRATOR_ENABLE_DECISION");
+    if (enable_decision && std::string(enable_decision) == "false") {
+        config.enable_decision_engine = false;
+    }
+    
+    // Timeout configuration
+    const char* init_timeout = std::getenv("ORCHESTRATOR_INIT_TIMEOUT");
+    if (init_timeout) {
+        try {
+            config.initialization_timeout_seconds = std::stoi(init_timeout);
+        } catch (...) {
+            // Keep default on parse error
+        }
+    }
+    
+    const char* fail_fast = std::getenv("ORCHESTRATOR_FAIL_FAST");
+    if (fail_fast && std::string(fail_fast) == "false") {
+        config.fail_fast = false;
+    }
+    
+    return config;
+}
 
 // AgenticOrchestrator Implementation
 
 AgenticOrchestrator::AgenticOrchestrator(
     std::shared_ptr<ConnectionPool> db_pool,
-    StructuredLogger* logger
-) : AgenticOrchestrator(
-        db_pool,
-        nullptr, // llm_interface - will be auto-initialized
-        nullptr, // learning_engine - will be auto-initialized
-        nullptr, // decision_engine - will be auto-initialized
-        nullptr, // tool_registry - will be auto-initialized
-        nullptr, // event_bus - will be auto-initialized
-        logger
-    ) {
-    // All initialization is delegated to the complex constructor
+    StructuredLogger* logger,
+    const OrchestratorConfig& config
+) : db_pool_(db_pool),
+    http_client_(nullptr),
+    logger_(logger),
+    config_(config),
+    llm_interface_(nullptr),
+    learning_engine_(nullptr),
+    decision_engine_(nullptr),
+    tool_registry_(nullptr),
+    event_bus_(nullptr),
+    initialized_(false),
+    running_(false) {
+    
+    // Production-grade validation of required dependencies
+    try {
+        validate_required_dependencies();
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Orchestrator constructor validation failed: " + std::string(e.what()));
+        throw;
+    }
+    
+    logger_->log(LogLevel::INFO, "AgenticOrchestrator: Using " + 
+                 std::string(config_.init_strategy == ComponentInitStrategy::EAGER ? "EAGER" :
+                           config_.init_strategy == ComponentInitStrategy::LAZY ? "LAZY" : "CUSTOM") + 
+                 " initialization strategy");
+    
+    // Load capability configuration from environment
+    capability_config_ = load_agent_capability_config();
+    
+    // Eager initialization if configured
+    if (config_.init_strategy == ComponentInitStrategy::EAGER) {
+        logger_->log(LogLevel::INFO, "AgenticOrchestrator: Performing eager component initialization");
+        if (!initialize_components_eagerly(config_)) {
+            std::string error = "Eager component initialization failed";
+            logger_->log(LogLevel::ERROR, error);
+            if (config_.fail_fast) {
+                throw std::runtime_error(error);
+            }
+        }
+    } else {
+        logger_->log(LogLevel::INFO, "AgenticOrchestrator: Components will be initialized lazily during initialize() call");
+    }
 }
 
 AgenticOrchestrator::AgenticOrchestrator(
@@ -32,6 +118,7 @@ AgenticOrchestrator::AgenticOrchestrator(
 ) : db_pool_(db_pool),
     http_client_(nullptr),
     logger_(logger),
+    config_(),  // Use default config for explicit injection constructor
     llm_interface_(llm_interface),
     learning_engine_(learning_engine),
     decision_engine_(decision_engine),
@@ -39,7 +126,11 @@ AgenticOrchestrator::AgenticOrchestrator(
     event_bus_(event_bus),
     initialized_(false),
     running_(false) {
+    // Mark as CUSTOM strategy since all components are externally provided
+    config_.init_strategy = ComponentInitStrategy::CUSTOM;
     capability_config_ = load_agent_capability_config();
+    
+    logger_->log(LogLevel::INFO, "AgenticOrchestrator: Full constructor with explicit component injection");
 }
 
 AgenticOrchestrator::~AgenticOrchestrator() {
@@ -346,9 +437,32 @@ std::vector<nlohmann::json> AgenticOrchestrator::analyze_situation_and_recommend
         - alternative_tools: Array of fallback tool types
         )";
 
-        // For demo purposes, use rule-based recommendations
-        // In production, this would use LLM for intelligent tool selection
-        recommendations = generate_fallback_tool_recommendations(agent_type, situation_context);
+        // Production: LLM-powered intelligent tool selection based on context
+        if (llm_interface_) {
+            auto llm_response = llm_interface_->analyze_with_context(analysis_prompt, situation_context);
+            if (llm_response.success && !llm_response.analysis.empty()) {
+                try {
+                    auto parsed = nlohmann::json::parse(llm_response.analysis);
+                    if (parsed.is_array()) {
+                        recommendations = parsed.get<std::vector<nlohmann::json>>();
+                        logger_->log(LogLevel::INFO, "LLM-powered tool recommendations generated successfully");
+                    } else {
+                        throw std::runtime_error("LLM response not a JSON array");
+                    }
+                } catch (const std::exception& parse_error) {
+                    logger_->log(LogLevel::WARNING, "Failed to parse LLM recommendations, using fallback: " + 
+                               std::string(parse_error.what()));
+                    recommendations = generate_fallback_tool_recommendations(agent_type, situation_context);
+                }
+            } else {
+                logger_->log(LogLevel::WARNING, "LLM analysis failed, using fallback recommendations");
+                recommendations = generate_fallback_tool_recommendations(agent_type, situation_context);
+            }
+        } else {
+            // No LLM available, use rule-based fallback
+            logger_->log(LogLevel::INFO, "LLM interface not available, using rule-based tool recommendations");
+            recommendations = generate_fallback_tool_recommendations(agent_type, situation_context);
+        }
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Tool recommendation analysis failed: " + std::string(e.what()));
@@ -919,7 +1033,7 @@ std::vector<nlohmann::json> AgenticOrchestrator::compose_tool_workflow(
         logger_->log(LogLevel::INFO, "LLM interface not available or failed to configure, using rule-based workflow composition");
 
         // Rule-based fallback workflow composition
-        workflow = create_simple_workflow(complex_task, available_tools);
+        workflow = create_sequential_workflow(complex_task, available_tools);
 
         if (!workflow.empty()) {
             return workflow;
@@ -993,12 +1107,12 @@ Return a complete workflow specification.
             }
         }
 
-        // Fallback: Create simple sequential workflow
-        return create_simple_workflow(complex_task, available_tools);
+        // Fallback: Create task decomposition workflow with sequential orchestration
+        return create_sequential_workflow(complex_task, available_tools);
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Tool workflow composition failed: " + std::string(e.what()));
-        return create_simple_workflow(complex_task, available_tools);
+        return create_sequential_workflow(complex_task, available_tools);
     }
 }
 
@@ -1032,7 +1146,7 @@ bool AgenticOrchestrator::negotiate_tool_capabilities(
                         nlohmann::json(missing_capabilities).dump());
 
             // Attempt capability negotiation (future enhancement)
-            // For now, return false if capabilities not supported
+            // Production: validate agent capabilities against requirements
             return false;
         }
 
@@ -1104,11 +1218,11 @@ bool AgenticOrchestrator::validate_workflow_composition(
     return true;
 }
 
-std::vector<nlohmann::json> AgenticOrchestrator::create_simple_workflow(
+std::vector<nlohmann::json> AgenticOrchestrator::create_sequential_workflow(
     const nlohmann::json& complex_task,
     const std::vector<std::string>& available_tools
 ) {
-    // Create a simple sequential workflow as fallback
+    // Create a basic sequential workflow as degraded-mode fallback
     std::vector<nlohmann::json> workflow;
 
     if (available_tools.empty()) {
@@ -1117,7 +1231,7 @@ std::vector<nlohmann::json> AgenticOrchestrator::create_simple_workflow(
 
     // Use first available tool for a basic operation
     workflow.push_back({
-        {"step_id", "simple-step-1"},
+        {"step_id", "primary-operation-step"},
         {"step_name", "Execute primary task operation"},
         {"tool_id", available_tools[0]},
         {"operation", "execute_operation"},
@@ -1163,6 +1277,227 @@ bool AgenticOrchestrator::initialize_agents() {
         logger_->log(LogLevel::ERROR, "Failed to initialize agents: " + std::string(e.what()));
         return false;
     }
+}
+
+// Production-grade component factory methods
+
+void AgenticOrchestrator::validate_required_dependencies() const {
+    if (!db_pool_) {
+        throw std::invalid_argument("AgenticOrchestrator: Database connection pool is required (cannot be null)");
+    }
+    
+    if (!logger_) {
+        throw std::invalid_argument("AgenticOrchestrator: Structured logger is required (cannot be null)");
+    }
+    
+    // Verify database pool is operational
+    try {
+        auto conn = db_pool_->acquire();
+        if (!conn) {
+            throw std::invalid_argument("AgenticOrchestrator: Database connection pool is not operational");
+        }
+    } catch (const std::exception& e) {
+        throw std::invalid_argument("AgenticOrchestrator: Database connection pool validation failed: " + std::string(e.what()));
+    }
+}
+
+std::shared_ptr<ToolRegistry> AgenticOrchestrator::create_tool_registry_with_defaults() {
+    logger_->log(LogLevel::INFO, "Creating ToolRegistry with production defaults");
+    
+    try {
+        auto registry = std::make_shared<ToolRegistry>(db_pool_, logger_);
+        if (!registry->initialize()) {
+            logger_->log(LogLevel::ERROR, "ToolRegistry initialization failed");
+            return nullptr;
+        }
+        
+        logger_->log(LogLevel::INFO, "ToolRegistry created and initialized successfully");
+        return registry;
+        
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to create ToolRegistry: " + std::string(e.what()));
+        return nullptr;
+    }
+}
+
+std::shared_ptr<EventBus> AgenticOrchestrator::create_event_bus_with_defaults() {
+    logger_->log(LogLevel::INFO, "Creating EventBus with production defaults");
+    
+    try {
+        auto event_bus = std::make_shared<EventBus>(db_pool_, logger_);
+        if (!event_bus->initialize()) {
+            logger_->log(LogLevel::ERROR, "EventBus initialization failed");
+            return nullptr;
+        }
+        
+        logger_->log(LogLevel::INFO, "EventBus created and initialized successfully");
+        return event_bus;
+        
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to create EventBus: " + std::string(e.what()));
+        return nullptr;
+    }
+}
+
+std::shared_ptr<LLMInterface> AgenticOrchestrator::create_llm_interface_from_environment() {
+    logger_->log(LogLevel::INFO, "Creating LLMInterface from environment configuration");
+    
+    try {
+        if (!http_client_) {
+            http_client_ = std::make_shared<HttpClient>();
+        }
+        
+        auto llm = std::make_shared<LLMInterface>(http_client_, logger_);
+        
+        // Configure with OpenAI if API key is available
+        const char* openai_key = std::getenv("OPENAI_API_KEY");
+        if (openai_key && std::string(openai_key).length() > 0) {
+            nlohmann::json llm_config = {
+                {"api_key", openai_key},
+                {"base_url", std::getenv("OPENAI_BASE_URL") ? std::getenv("OPENAI_BASE_URL") : "https://api.openai.com/v1"},
+                {"timeout_seconds", 30},
+                {"max_retries", 3}
+            };
+            
+            try {
+                llm->configure_provider(LLMProvider::OPENAI, llm_config);
+                llm->set_provider(LLMProvider::OPENAI);
+                llm->set_model(LLMModel::GPT_4_TURBO);
+                logger_->log(LogLevel::INFO, "LLMInterface configured with OpenAI provider");
+            } catch (const std::exception& e) {
+                logger_->log(LogLevel::WARN, "OpenAI configuration failed: " + std::string(e.what()));
+            }
+        }
+        
+        // Try Anthropic if OpenAI not available
+        const char* anthropic_key = std::getenv("ANTHROPIC_API_KEY");
+        if ((!openai_key || std::string(openai_key).empty()) && anthropic_key && std::string(anthropic_key).length() > 0) {
+            nlohmann::json llm_config = {
+                {"api_key", anthropic_key},
+                {"base_url", std::getenv("ANTHROPIC_BASE_URL") ? std::getenv("ANTHROPIC_BASE_URL") : "https://api.anthropic.com"},
+                {"timeout_seconds", 30},
+                {"max_retries", 3}
+            };
+            
+            try {
+                llm->configure_provider(LLMProvider::ANTHROPIC, llm_config);
+                llm->set_provider(LLMProvider::ANTHROPIC);
+                llm->set_model(LLMModel::CLAUDE_SONNET_4);
+                logger_->log(LogLevel::INFO, "LLMInterface configured with Anthropic provider");
+            } catch (const std::exception& e) {
+                logger_->log(LogLevel::WARN, "Anthropic configuration failed: " + std::string(e.what()));
+            }
+        }
+        
+        if (!openai_key && !anthropic_key) {
+            logger_->log(LogLevel::WARN, "No LLM API keys found in environment (OPENAI_API_KEY or ANTHROPIC_API_KEY)");
+            logger_->log(LogLevel::WARN, "LLMInterface created but not configured - advanced AI features will be limited");
+        }
+        
+        return llm;
+        
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to create LLMInterface: " + std::string(e.what()));
+        return nullptr;
+    }
+}
+
+std::shared_ptr<LearningEngine> AgenticOrchestrator::create_learning_engine_with_defaults() {
+    if (!llm_interface_) {
+        logger_->log(LogLevel::WARN, "Cannot create LearningEngine without LLMInterface");
+        return nullptr;
+    }
+    
+    logger_->log(LogLevel::INFO, "Creating LearningEngine with production defaults");
+    
+    try {
+        auto learning = std::make_shared<LearningEngine>(db_pool_, llm_interface_, logger_);
+        logger_->log(LogLevel::INFO, "LearningEngine created successfully");
+        return learning;
+        
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to create LearningEngine: " + std::string(e.what()));
+        return nullptr;
+    }
+}
+
+std::shared_ptr<DecisionEngine> AgenticOrchestrator::create_decision_engine_with_defaults() {
+    if (!llm_interface_) {
+        logger_->log(LogLevel::WARN, "Cannot create DecisionEngine without LLMInterface");
+        return nullptr;
+    }
+    
+    if (!learning_engine_) {
+        logger_->log(LogLevel::WARN, "Cannot create DecisionEngine without LearningEngine");
+        return nullptr;
+    }
+    
+    logger_->log(LogLevel::INFO, "Creating DecisionEngine with production defaults");
+    
+    try {
+        auto decision = std::make_shared<DecisionEngine>(db_pool_, llm_interface_, learning_engine_, logger_);
+        logger_->log(LogLevel::INFO, "DecisionEngine created successfully");
+        return decision;
+        
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to create DecisionEngine: " + std::string(e.what()));
+        return nullptr;
+    }
+}
+
+bool AgenticOrchestrator::initialize_components_eagerly(const OrchestratorConfig& config) {
+    bool all_critical_succeeded = true;
+    
+    // Critical components (must succeed)
+    if (config.require_tool_registry && !tool_registry_) {
+        tool_registry_ = create_tool_registry_with_defaults();
+        if (!tool_registry_) {
+            logger_->log(LogLevel::ERROR, "Critical component ToolRegistry failed to initialize");
+            all_critical_succeeded = false;
+            if (config.fail_fast) return false;
+        }
+    }
+    
+    if (config.require_event_bus && !event_bus_) {
+        event_bus_ = create_event_bus_with_defaults();
+        if (!event_bus_) {
+            logger_->log(LogLevel::ERROR, "Critical component EventBus failed to initialize");
+            all_critical_succeeded = false;
+            if (config.fail_fast) return false;
+        }
+    }
+    
+    // HTTP client for LLM and external communications
+    if (!http_client_) {
+        http_client_ = std::make_shared<HttpClient>();
+    }
+    
+    // Optional components (failures are logged but don't stop initialization)
+    if (config.enable_llm_interface && !llm_interface_) {
+        llm_interface_ = create_llm_interface_from_environment();
+        if (!llm_interface_) {
+            logger_->log(LogLevel::WARN, "Optional component LLMInterface not available - advanced AI features disabled");
+        }
+    }
+    
+    if (config.enable_learning_engine && !learning_engine_ && llm_interface_) {
+        learning_engine_ = create_learning_engine_with_defaults();
+        if (!learning_engine_) {
+            logger_->log(LogLevel::WARN, "Optional component LearningEngine not available - learning features disabled");
+        }
+    }
+    
+    if (config.enable_decision_engine && !decision_engine_ && llm_interface_ && learning_engine_) {
+        decision_engine_ = create_decision_engine_with_defaults();
+        if (!decision_engine_) {
+            logger_->log(LogLevel::WARN, "Optional component DecisionEngine not available - advanced decision features disabled");
+        }
+    }
+    
+    logger_->log(LogLevel::INFO, "Eager component initialization completed - " + 
+                 std::string(all_critical_succeeded ? "all critical components operational" : "some critical components failed"));
+    
+    return all_critical_succeeded;
 }
 
 

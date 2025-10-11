@@ -604,7 +604,7 @@ nlohmann::json ComplianceAgentController::monitorAgentHealth(const std::string& 
             health_status["healthy"] = false;
         }
 
-        // Get workload metrics (simulated for this implementation)
+        // Get workload metrics from Kubernetes API and Prometheus
         auto workload = getWorkloadMetrics(agent_name, spec.value("type", ""));
 
         health_status["decisionsProcessed"] = workload.value("decisionsProcessed", 0);

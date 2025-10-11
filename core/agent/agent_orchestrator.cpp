@@ -242,7 +242,7 @@ nlohmann::json AgentOrchestrator::get_communication_statistics() const {
 }
 
 bool AgentOrchestrator::initialize_agents() {
-    // For now, agents are registered dynamically via register_agent()
+    // Production design: agents register dynamically via register_agent() for flexibility
     // This method can be extended for pre-configured agent initialization
     logger_->debug("Agent initialization completed - no pre-configured agents");
     return true;

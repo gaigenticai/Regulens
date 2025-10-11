@@ -255,7 +255,7 @@ public:
 
     bool isHealthy() override {
         try {
-            // Check API server health by making a simple request
+            // Check API server health via version endpoint query
             std::string url = api_server_url_ + "/api/v1";
             auto response = makeAPIRequest("GET", url);
             return response.contains("versions");

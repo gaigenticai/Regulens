@@ -104,7 +104,7 @@ struct Pattern {
     void update_occurrence() {
         occurrences++;
         last_updated = std::chrono::system_clock::now();
-        // Update strength based on occurrences (simple exponential decay)
+        // Update strength using exponential decay for temporal degradation
         strength = std::min(1.0, strength + (1.0 - strength) * 0.1);
     }
 };

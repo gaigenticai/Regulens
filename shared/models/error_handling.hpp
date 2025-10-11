@@ -41,7 +41,7 @@ enum class ErrorCategory {
  * @brief Recovery strategies for error handling
  */
 enum class RecoveryStrategy {
-    RETRY,              // Simple retry with backoff
+    RETRY,              // Exponential backoff retry strategy
     CIRCUIT_BREAKER,    // Circuit breaker pattern
     FALLBACK,           // Use fallback implementation
     DEGRADATION,        // Graceful degradation

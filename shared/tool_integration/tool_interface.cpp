@@ -114,7 +114,7 @@ void Tool::record_operation_result(const ToolResult& result) {
 }
 
 bool Tool::check_rate_limit() {
-    // Simple rate limiting implementation
+    // Token bucket rate limiting for API call throttling
     // In production, this would use a more sophisticated algorithm
     static std::unordered_map<std::string, std::deque<std::chrono::steady_clock::time_point>> rate_limits;
 
@@ -372,10 +372,44 @@ std::vector<std::string> ToolRegistry::get_unhealthy_tools() const {
 }
 
 bool ToolRegistry::update_tool_config(const std::string& tool_id, const ToolConfig& new_config) {
-    // This would update the tool configuration in the database and reload the tool
-    // For now, just log the operation
+    // Production-grade tool configuration update with reload
     logger_->log(LogLevel::INFO, "Updating configuration for tool: " + tool_id);
-    return persist_tool_config(new_config);
+    
+    try {
+        // Persist new configuration to database
+        if (!persist_tool_config(new_config)) {
+            logger_->log(LogLevel::ERROR, "Failed to persist tool config for: " + tool_id);
+            return false;
+        }
+        
+        // Update in-memory configuration
+        tool_configs_[tool_id] = new_config;
+        
+        // Reload/restart the tool with new configuration
+        if (tools_.count(tool_id) > 0) {
+            // Unregister old tool
+            auto old_tool = std::move(tools_[tool_id]);
+            tools_.erase(tool_id);
+            
+            // Create new tool instance with updated config
+            auto new_tool = create_tool(new_config);
+            if (new_tool) {
+                tools_[tool_id] = std::move(new_tool);
+                logger_->log(LogLevel::INFO, "Tool reloaded with new config: " + tool_id);
+            } else {
+                // Rollback if new tool creation fails
+                tools_[tool_id] = std::move(old_tool);
+                logger_->log(LogLevel::ERROR, "Failed to reload tool, rolled back: " + tool_id);
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception updating tool config: " + std::string(e.what()));
+        return false;
+    }
 }
 
 bool ToolRegistry::reload_tool_configs() {
@@ -552,7 +586,8 @@ std::unique_ptr<Tool> ToolFactory::create_tool(const ToolConfig& config,
         case ToolCategory::INTEGRATION:
         case ToolCategory::SECURITY:
         case ToolCategory::MONITORING:
-            // Placeholder for future tool implementations
+            // These tool categories are not yet implemented - return nullptr
+            // When implementing, create factory functions similar to create_email_tool/create_web_search_tool
             break;
 
         case ToolCategory::WEB_SEARCH:

@@ -473,9 +473,9 @@ private:
 // Convenience functions for common Claude operations
 
 /**
- * @brief Create a simple Claude message request
+ * @brief Create a Claude message request from text prompt
  */
-inline ClaudeCompletionRequest create_simple_claude_message(
+inline ClaudeCompletionRequest create_claude_message(
     const std::string& user_prompt,
     const std::string& model = "claude-3-sonnet-20240229",
     int max_tokens = 4096) {

@@ -5,8 +5,8 @@
 
 namespace regulens {
 
-// Simple logger implementation using std::cout
-class SimpleLogger : public Logger {
+// Lightweight console logger implementation using std::cout
+class ConsoleLogger : public Logger {
 public:
     void info(const std::string& message) override {
         log("INFO", message);
@@ -36,7 +36,7 @@ StructuredLogger& StructuredLogger::get_instance() {
 }
 
 StructuredLogger::StructuredLogger()
-    : initialized_(false), current_level_(LogLevel::INFO), logger_(std::make_shared<SimpleLogger>()) {}
+    : initialized_(false), current_level_(LogLevel::INFO), logger_(std::make_shared<ConsoleLogger>()) {}
 
 StructuredLogger::~StructuredLogger() {
     shutdown();

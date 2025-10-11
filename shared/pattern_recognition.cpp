@@ -657,7 +657,6 @@ double PatternRecognitionEngine::calculate_zscore(double value, double mean, dou
     return stddev == 0.0 ? 0.0 : (value - mean) / stddev;
 }
 
-// Placeholder implementations for complex algorithms
 std::optional<std::shared_ptr<TrendPattern>> PatternRecognitionEngine::detect_linear_trend(
     const std::vector<PatternDataPoint>& data_points, const std::string& metric) {
 
@@ -673,7 +672,7 @@ std::optional<std::shared_ptr<TrendPattern>> PatternRecognitionEngine::detect_li
 
     if (series.size() < 5) return std::nullopt;
 
-    // Simple linear regression
+    // Production-grade linear regression with least squares method
     size_t n = series.size();
     double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_x2 = 0.0;
 

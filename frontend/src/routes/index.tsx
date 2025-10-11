@@ -43,6 +43,16 @@ const CircuitBreakers = lazy(() => import('@/pages/CircuitBreakers'));
 // Settings - Production-grade implementation
 const Settings = lazy(() => import('@/pages/Settings'));
 
+// New Advanced Features - Production-grade implementations
+const MemoryManagement = lazy(() => import('@/pages/MemoryManagement'));
+const FeedbackAnalytics = lazy(() => import('@/pages/FeedbackAnalytics'));
+const MCDAAdvanced = lazy(() => import('@/pages/MCDAAdvanced'));
+const RiskDashboard = lazy(() => import('@/pages/RiskDashboard'));
+const EmbeddingsExplorer = lazy(() => import('@/pages/EmbeddingsExplorer'));
+const AgentCommunicationConsole = lazy(() => import('@/pages/AgentCommunicationConsole'));
+const FunctionCallingDebugger = lazy(() => import('@/pages/FunctionCallingDebugger'));
+const DataQualityMonitor = lazy(() => import('@/pages/DataQualityMonitor'));
+
 export interface AppRoute {
   path: string;
   name?: string;
@@ -174,6 +184,62 @@ export const routes: AppRoute[] = [
     element: Settings,
     showInNav: true,
     icon: 'Settings',
+  },
+  {
+    path: '/memory-management',
+    name: 'Memory Management',
+    element: MemoryManagement,
+    showInNav: true,
+    icon: 'Database',
+  },
+  {
+    path: '/feedback-analytics',
+    name: 'Feedback Analytics',
+    element: FeedbackAnalytics,
+    showInNav: true,
+    icon: 'TrendingUp',
+  },
+  {
+    path: '/mcda-advanced',
+    name: 'MCDA Advanced',
+    element: MCDAAdvanced,
+    showInNav: true,
+    icon: 'Sliders',
+  },
+  {
+    path: '/risk-dashboard',
+    name: 'Risk Dashboard',
+    element: RiskDashboard,
+    showInNav: true,
+    icon: 'AlertTriangle',
+  },
+  {
+    path: '/embeddings-explorer',
+    name: 'Embeddings Explorer',
+    element: EmbeddingsExplorer,
+    showInNav: true,
+    icon: 'Search',
+  },
+  {
+    path: '/agent-communication-console',
+    name: 'Agent Communication',
+    element: AgentCommunicationConsole,
+    showInNav: true,
+    icon: 'MessageSquare',
+  },
+  {
+    path: '/function-calling-debugger',
+    name: 'Function Debugger',
+    element: FunctionCallingDebugger,
+    showInNav: true,
+    icon: 'Bug',
+  },
+  {
+    path: '/data-quality-monitor',
+    name: 'Data Quality',
+    element: DataQualityMonitor,
+    showInNav: true,
+    icon: 'CheckCircle',
   },
 ];
 

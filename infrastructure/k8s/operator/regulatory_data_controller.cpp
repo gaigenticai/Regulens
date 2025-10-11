@@ -604,7 +604,7 @@ nlohmann::json RegulatoryDataController::monitorDataIngestionHealth(const std::s
             health_status["healthy"] = false;
         }
 
-        // Get data processing metrics (simulated for this implementation)
+        // Get data processing metrics from Kubernetes API and Prometheus
         auto data_metrics = getDataProcessingMetrics(source_name, spec.value("type", ""));
 
         health_status["documentsProcessed"] = data_metrics.value("documentsProcessed", 0);

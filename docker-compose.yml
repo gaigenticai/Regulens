@@ -1,198 +1,57 @@
-version: '3.8'
+# Regulens Development Environment
+# Run ONLY databases in Docker - Backend/Frontend run natively for hot reload
 
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: regulens-postgres
     environment:
-      POSTGRES_DB: regulens_compliance
-      POSTGRES_USER: regulens_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-CHANGE_THIS_STRONG_PASSWORD}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+      POSTGRES_DB: ${DB_NAME:-regulens_compliance}
+      POSTGRES_USER: ${DB_USER:-regulens_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./seed_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./backups/postgres:/backups
     ports:
       - "5432:5432"
-    networks:
-      - regulens-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U regulens_user -d regulens_compliance"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-regulens_user} -d ${DB_NAME:-regulens_compliance}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
+    networks:
+      - regulens-network
 
-  # Redis for caching and session management
+  # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: regulens-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-CHANGE_THIS_STRONG_PASSWORD}
-    volumes:
-      - redis_data:/data
+    command: redis-server --requirepass ${REDIS_PASSWORD:-dev_redis_password}
     ports:
       - "6379:6379"
-    networks:
-      - regulens-network
+    volumes:
+      - redis_data:/data
+      - ./backups/redis:/backups
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-dev_redis_password}", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  # Main Regulens Application
-  regulens:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
-    container_name: regulens-app
-    environment:
-      # Database Configuration
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: regulens_compliance
-      DB_USER: regulens_user
-      DB_PASSWORD: ${DB_PASSWORD:-CHANGE_THIS_STRONG_PASSWORD}
-      DB_SSL_MODE: require
-      DB_CONNECTION_POOL_SIZE: 10
-
-      # Redis Configuration
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-CHANGE_THIS_STRONG_PASSWORD}
-
-      # Application Configuration
-      REGULENS_ENVIRONMENT: production
-      REGULENS_VERSION: 1.0.0
-      REGULENS_INSTANCE_ID: docker-instance-1
-      REGULENS_DATACENTER: docker
-
-      # Agent Capabilities
-      AGENT_ENABLE_WEB_SEARCH: ${AGENT_ENABLE_WEB_SEARCH:-false}
-      AGENT_ENABLE_AUTONOMOUS_INTEGRATION: ${AGENT_ENABLE_AUTONOMOUS_INTEGRATION:-false}
-      AGENT_ENABLE_ADVANCED_DISCOVERY: ${AGENT_ENABLE_ADVANCED_DISCOVERY:-false}
-      AGENT_ENABLE_WORKFLOW_OPTIMIZATION: ${AGENT_ENABLE_WORKFLOW_OPTIMIZATION:-true}
-      AGENT_ENABLE_TOOL_COMPOSITION: ${AGENT_ENABLE_TOOL_COMPOSITION:-true}
-
-      # LLM Configuration (optional - fallback logic will be used if not provided)
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-
-      # Web Server Configuration
-      WEB_SERVER_HOST: 0.0.0.0
-      WEB_SERVER_PORT: 8080
-
-      # Security
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-CHANGE_THIS_TO_A_STRONG_64_CHARACTER_SECRET_KEY_FOR_PRODUCTION}
-
-    ports:
-      - "8080:8080"
-    networks:
-      - regulens-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./logs:/app/logs
-      - ./config:/app/config:ro
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://${WEB_SERVER_HOST:-localhost}:${WEB_SERVER_PORT:-8080}/health"]
-      interval: 30s
-      timeout: 10s
+      timeout: 3s
       retries: 3
-      start_period: 60s
     restart: unless-stopped
-
-  # Frontend Application (Production)
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      target: production
-    container_name: regulens-frontend
-    ports:
-      - "3000:80"
-    environment:
-      - NODE_ENV=production
-      - VITE_API_BASE_URL=http://regulens:8080
-      - VITE_WS_BASE_URL=ws://regulens:8080
     networks:
       - regulens-network
-    depends_on:
-      regulens:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-
-  # Monitoring with Prometheus (Optional)
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: regulens-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    networks:
-      - regulens-network
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    profiles:
-      - monitoring
-
-  # Grafana for dashboards (Optional)
-  grafana:
-    image: grafana/grafana:latest
-    container_name: regulens-grafana
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    networks:
-      - regulens-network
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-    profiles:
-      - monitoring
 
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
-    driver: local
-  nginx_logs:
-    driver: local
 
 networks:
   regulens-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16

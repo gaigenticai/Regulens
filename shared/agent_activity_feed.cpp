@@ -10,7 +10,8 @@ namespace regulens {
 
 AgentActivityFeed::AgentActivityFeed(std::shared_ptr<ConfigurationManager> config,
                                    std::shared_ptr<StructuredLogger> logger)
-    : config_manager_(config), logger_(logger), running_(false) {
+    : config_manager_(config), logger_(logger), running_(false), 
+      start_time_(std::chrono::system_clock::now()) {
     // Load configuration from environment
     config_.max_events_buffer = static_cast<size_t>(config_manager_->get_int("ACTIVITY_FEED_MAX_BUFFER").value_or(10000));
     config_.max_events_per_agent = static_cast<size_t>(config_manager_->get_int("ACTIVITY_FEED_MAX_PER_AGENT").value_or(1000));
@@ -257,14 +258,18 @@ nlohmann::json AgentActivityFeed::get_feed_stats() {
         activity_counts_json[std::to_string(type)] = count;
     }
 
+    // Calculate actual uptime since initialization
+    auto uptime_duration = std::chrono::system_clock::now() - start_time_;
+    auto uptime_seconds = std::chrono::duration_cast<std::chrono::seconds>(uptime_duration).count();
+    
     return {
         {"total_events", total_events},
         {"total_agents", total_agents},
         {"total_subscriptions", total_subscriptions},
         {"activity_type_counts", activity_counts_json},
         {"config", config_.to_json()},
-        {"uptime_seconds", std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now() - std::chrono::system_clock::now()).count()} // Placeholder
+        {"uptime_seconds", uptime_seconds},
+        {"start_time", std::chrono::system_clock::to_time_t(start_time_)}
     };
 }
 

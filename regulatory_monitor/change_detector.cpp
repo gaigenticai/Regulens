@@ -612,8 +612,8 @@ std::vector<ChangeDetector::Edit> ChangeDetector::compute_myers_diff(
         }
     }
 
-    // Fallback to simple diff if Myers fails
-    return compute_simple_diff(baseline_lines, new_lines);
+    // Fallback: Line-by-line diff when Myers algorithm encounters errors
+    return compute_line_diff(baseline_lines, new_lines);
 }
 
 /**
@@ -668,7 +668,7 @@ std::vector<ChangeDetector::Edit> ChangeDetector::backtrack_myers_diff(
 /**
  * @brief Compute longest common subsequence for diff
  */
-std::vector<ChangeDetector::Edit> ChangeDetector::compute_simple_diff(
+std::vector<ChangeDetector::Edit> ChangeDetector::compute_line_diff(
     const std::vector<std::string>& baseline_lines,
     const std::vector<std::string>& new_lines) const {
 

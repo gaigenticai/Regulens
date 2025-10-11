@@ -115,16 +115,51 @@ ToolResult EmailTool::execute_operation(const std::string& operation,
 }
 
 bool EmailTool::authenticate() {
-    // SMTP authentication happens during send operations
-    // For now, just validate configuration
+    // Production-grade SMTP authentication with connection test
     if (email_config_.smtp_server.empty()) {
         logger_->log(LogLevel::ERROR, "SMTP server not configured");
         return false;
     }
-
-    authenticated_ = true;
-    logger_->log(LogLevel::INFO, "Email tool authentication successful");
-    return true;
+    
+    try {
+        // Test SMTP connection and authentication
+        SMTPClient smtp_client;
+        smtp_client.set_server(email_config_.smtp_server, email_config_.smtp_port);
+        smtp_client.set_timeout(std::chrono::seconds(10));
+        
+        // Enable TLS/SSL if configured
+        if (email_config_.use_tls) {
+            smtp_client.enable_tls();
+        }
+        
+        // Connect to SMTP server
+        if (!smtp_client.connect()) {
+            logger_->log(LogLevel::ERROR, "Failed to connect to SMTP server: " + 
+                        email_config_.smtp_server + ":" + std::to_string(email_config_.smtp_port));
+            return false;
+        }
+        
+        // Authenticate if credentials provided
+        if (!email_config_.smtp_username.empty()) {
+            if (!smtp_client.authenticate(email_config_.smtp_username, email_config_.smtp_password)) {
+                logger_->log(LogLevel::ERROR, "SMTP authentication failed for user: " + 
+                            email_config_.smtp_username);
+                smtp_client.disconnect();
+                return false;
+            }
+        }
+        
+        // Successful authentication - disconnect test connection
+        smtp_client.disconnect();
+        
+        authenticated_ = true;
+        logger_->log(LogLevel::INFO, "Email tool SMTP authentication successful");
+        return true;
+    }
+    catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "SMTP authentication exception: " + std::string(e.what()));
+        return false;
+    }
 }
 
 bool EmailTool::disconnect() {

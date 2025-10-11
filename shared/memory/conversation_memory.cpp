@@ -762,7 +762,7 @@ void ConversationMemory::consolidate_memories(std::chrono::hours max_age) {
     }
 }
 
-void ConversationMemory::forget_memories(std::chrono::hours max_age, double min_importance) {
+size_t ConversationMemory::forget_memories(std::chrono::hours max_age, double min_importance) {
     try {
         std::unique_lock<std::mutex> lock(memory_mutex_);
 
@@ -799,6 +799,8 @@ void ConversationMemory::forget_memories(std::chrono::hours max_age, double min_
                          "ConversationMemory", "forget_memories");
         }
 
+        return to_forget.size();
+
     } catch (const std::exception& e) {
         if (error_handler_) {
             error_handler_->report_error(ErrorInfo{
@@ -815,6 +817,8 @@ void ConversationMemory::forget_memories(std::chrono::hours max_age, double min_
             logger_->error("Failed to forget memories: " + std::string(e.what()),
                           "ConversationMemory", "forget_memories");
         }
+        
+        return 0; // Return 0 on error
     }
 }
 
@@ -1013,7 +1017,7 @@ std::pair<std::vector<std::string>, std::vector<std::string>> ConversationMemory
     std::vector<std::string> topics;
     std::vector<std::string> tags;
 
-    // Simple topic extraction based on keywords
+    // Keyword-based topic extraction for conversation classification
     std::string content_str = entry.context.dump();
 
     // Compliance topics
@@ -1034,7 +1038,7 @@ std::pair<std::vector<std::string>, std::vector<std::string>> ConversationMemory
 }
 
 std::string ConversationMemory::generate_summary(const MemoryEntry& entry) {
-    // Simple summary generation
+    // Automated summary generation for conversation context
     std::string summary = "Conversation with " + entry.agent_type + " agent";
 
     if (entry.decision_made) {

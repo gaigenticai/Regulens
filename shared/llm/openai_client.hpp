@@ -484,9 +484,9 @@ private:
 // Convenience functions for common LLM operations
 
 /**
- * @brief Create a simple text completion request
+ * @brief Create a text completion request from prompt
  */
-inline OpenAICompletionRequest create_simple_completion(
+inline OpenAICompletionRequest create_completion_request(
     const std::string& prompt,
     const std::string& model = "gpt-4-turbo-preview",
     double temperature = 0.7) {

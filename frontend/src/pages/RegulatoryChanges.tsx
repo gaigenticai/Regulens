@@ -30,12 +30,12 @@ const RegulatoryChanges: React.FC = () => {
   const { data: stats } = useRegulatoryStats();
 
   const filteredChanges = useMemo(() => {
-    return changes.filter((change: RegulatoryChange) => {
+    return (Array.isArray(changes) ? changes : []).filter((change: RegulatoryChange) => {
       const matchesSearch =
         searchQuery === '' ||
-        change.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        change.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        change.regulatoryBody.toLowerCase().includes(searchQuery.toLowerCase());
+        (change.title && change.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (change.description && change.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (change.regulatoryBody && change.regulatoryBody.toLowerCase().includes(searchQuery.toLowerCase()));
 
       return matchesSearch;
     });
@@ -144,7 +144,7 @@ const RegulatoryChanges: React.FC = () => {
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All Sources</option>
-            {sources.map((source: RegulatorySource) => (
+            {(Array.isArray(sources) ? sources : []).map((source: RegulatorySource) => (
               <option key={source.id} value={source.id}>
                 {source.name}
               </option>

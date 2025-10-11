@@ -4,7 +4,7 @@
  * NO MOCKS - All data fetched from real API endpoints
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Activity,
   Bot,
@@ -31,27 +31,32 @@ const Dashboard: React.FC = () => {
     return <LoadingSpinner fullScreen message="Loading dashboard..." />;
   }
 
-  // Calculate derived statistics
-  const activeAgents = data.agents.filter((a) => a.status === 'active').length;
-  const totalAgents = data.agents.length;
+  // Calculate derived statistics with defensive checks
+  const agents = Array.isArray(data.agents) ? data.agents : [];
+  const recentDecisions = Array.isArray(data.recentDecisions) ? data.recentDecisions : [];
+  const recentRegChanges = Array.isArray(data.recentRegChanges) ? data.recentRegChanges : [];
+  const recentTransactions = Array.isArray(data.recentTransactions) ? data.recentTransactions : [];
 
-  const decisionsToday = data.recentDecisions.filter((d) => {
+  const activeAgents = agents.filter((a) => a.status === 'active').length;
+  const totalAgents = agents.length;
+
+  const decisionsToday = recentDecisions.filter((d) => {
     const today = new Date().setHours(0, 0, 0, 0);
     const decisionDate = new Date(d.timestamp).setHours(0, 0, 0, 0);
     return decisionDate === today;
   }).length;
 
-  const criticalAlerts = data.recentRegChanges.filter(
+  const criticalAlerts = recentRegChanges.filter(
     (c) => c.severity === 'critical'
   ).length;
 
-  const avgConfidence = data.recentDecisions.length > 0
-    ? data.recentDecisions.reduce((sum, d) => sum + (d.confidenceScore || 0), 0) /
-      data.recentDecisions.length
+  const avgConfidence = recentDecisions.length > 0
+    ? recentDecisions.reduce((sum, d) => sum + (d.confidenceScore || 0), 0) /
+      recentDecisions.length
     : 0;
 
   // Calculate high-risk transactions
-  const highRiskTransactions = data.recentTransactions.filter(
+  const highRiskTransactions = recentTransactions.filter(
     (t) => t.riskLevel === 'high' || t.riskLevel === 'critical'
   ).length;
 
@@ -225,44 +230,56 @@ const Dashboard: React.FC = () => {
 
       {/* Widgets Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecentDecisions decisions={data.recentDecisions} loading={isLoading} />
-        <AgentStatus agents={data.agents} loading={isLoading} />
+        <RecentDecisions decisions={recentDecisions} loading={isLoading} />
+        <AgentStatus agents={agents} loading={isLoading} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RegulatoryAlerts changes={data.recentRegChanges} loading={isLoading} />
+        <RegulatoryAlerts changes={recentRegChanges} loading={isLoading} />
 
         {/* Activity Summary */}
-        {data.activityStats && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Activity className="w-5 h-5 text-blue-600" />
-              Activity Summary
-            </h3>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-blue-600" />
+            Activity Summary
+          </h3>
 
+          {data.activityStats ? (
             <div className="space-y-3">
-              {Object.entries(data.activityStats.byType).map(([type, count]) => (
+              {Object.entries(data.activityStats.byType || {}).map(([type, count]) => (
                 <div key={type} className="flex items-center justify-between">
                   <span className="text-sm text-gray-600 capitalize">
                     {type.replace(/_/g, ' ')}
                   </span>
                   <span className="text-sm font-semibold text-gray-900">
-                    {count.toLocaleString()}
+                    {(count as number).toLocaleString()}
                   </span>
                 </div>
               ))}
-            </div>
 
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-gray-900">Total Activities</span>
-                <span className="font-bold text-blue-600">
-                  {data.activityStats.total.toLocaleString()}
-                </span>
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-gray-900">Total Activities (24h)</span>
+                  <span className="font-bold text-blue-600">
+                    {(data.activityStats.total || 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-2">
+                  <span className="text-gray-600">Active Sessions</span>
+                  <span className="font-semibold text-gray-900">
+                    {data.activityStats.last24Hours || 0}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="text-center py-8">
+              <Activity className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No activity data available</p>
+              <p className="text-sm text-gray-400 mt-1">Activity metrics will appear once the system processes compliance events</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Real-time indicator */}

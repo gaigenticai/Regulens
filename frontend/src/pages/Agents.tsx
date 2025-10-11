@@ -95,16 +95,17 @@ const Agents: React.FC = () => {
     }
   };
 
-  const filteredAgents = agents.filter(agent => {
-    const matchesSearch = agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         agent.description.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredAgents = (Array.isArray(agents) ? agents : []).filter(agent => {
+    const matchesSearch = agent.displayName && (agent.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (agent.description && agent.description.toLowerCase().includes(searchTerm.toLowerCase())));
     const matchesStatus = statusFilter === 'all' || agent.status === statusFilter;
     const matchesType = typeFilter === 'all' || agent.type === typeFilter;
-    
+
     return matchesSearch && matchesStatus && matchesType;
   });
 
-  const agentTypes = [...new Set(agents.map(agent => agent.type))];
+  const agentTypes = [...new Set((Array.isArray(agents) ? agents : []).map(agent => agent.type).filter(Boolean))];
   const agentStatuses = ['active', 'idle', 'error', 'disabled'];
 
   if (isLoading) {
@@ -220,7 +221,7 @@ const Agents: React.FC = () => {
                       <Bot className="w-6 h-6 text-blue-600" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900">{agent.name}</h3>
+                      <h3 className="text-lg font-semibold text-gray-900">{agent.displayName}</h3>
                       <p className="text-sm text-gray-500 capitalize">{agent.type.replace('_', ' ')}</p>
                     </div>
                   </div>

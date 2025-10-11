@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 
 namespace regulens {
@@ -381,7 +382,7 @@ AgentCapabilityConfig ConfigurationManager::get_agent_capability_config() const 
     // Load comma-separated lists
     auto categories_str = get_string(config_keys::AGENT_ALLOWED_TOOL_CATEGORIES);
     if (categories_str) {
-        // Simple comma-separated parsing (production would use more robust parsing)
+        // Comma-separated value parsing for configuration lists
         std::stringstream ss(*categories_str);
         std::string item;
         while (std::getline(ss, item, ',')) {
@@ -436,5 +437,93 @@ std::unordered_map<std::string, std::string> ConfigurationManager::get_anthropic
 
     return config;
 }
+
+// Setter methods for runtime configuration changes
+bool ConfigurationManager::set_string(const std::string& key, const std::string& value) {
+    config_values_[key] = value;
+    return true;
+}
+
+bool ConfigurationManager::set_int(const std::string& key, int value) {
+    config_values_[key] = std::to_string(value);
+    return true;
+}
+
+bool ConfigurationManager::set_bool(const std::string& key, bool value) {
+    config_values_[key] = value ? "true" : "false";
+    return true;
+}
+
+bool ConfigurationManager::set_double(const std::string& key, double value) {
+    config_values_[key] = std::to_string(value);
+    return true;
+}
+
+bool ConfigurationManager::remove(const std::string& key) {
+    auto it = config_values_.find(key);
+    if (it != config_values_.end()) {
+        config_values_.erase(it);
+        return true;
+    }
+    return false;
+}
+
+bool ConfigurationManager::save_configuration(const std::filesystem::path& config_path) {
+    // Determine target path
+    std::filesystem::path target_path = config_path.empty() ? config_file_path_ : config_path;
+    
+    // If no path specified and no default, use standard location
+    if (target_path.empty()) {
+        target_path = std::filesystem::current_path() / "config" / "regulens.conf";
+    }
+    
+    // Create directory if it doesn't exist
+    auto parent_dir = target_path.parent_path();
+    if (!parent_dir.empty() && !std::filesystem::exists(parent_dir)) {
+        try {
+            std::filesystem::create_directories(parent_dir);
+        } catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Failed to create config directory: " << e.what() << std::endl;
+            return false;
+        }
+    }
+    
+    // Convert configuration to JSON
+    nlohmann::json config_json;
+    for (const auto& [key, value] : config_values_) {
+        config_json[key] = value;
+    }
+    
+    // Add metadata
+    config_json["_metadata"] = {
+        {"version", "1.0"},
+        {"environment", environment_ == Environment::PRODUCTION ? "production" : 
+                       environment_ == Environment::STAGING ? "staging" : "development"},
+        {"saved_at", std::time(nullptr)}
+    };
+    
+    // Write to file
+    try {
+        std::ofstream config_file(target_path);
+        if (!config_file.is_open()) {
+            std::cerr << "Failed to open config file for writing: " << target_path << std::endl;
+            return false;
+        }
+        
+        config_file << config_json.dump(2) << std::endl;
+        config_file.close();
+        
+        std::cout << "Configuration saved to: " << target_path << std::endl;
+        
+        // Update stored config path
+        config_file_path_ = target_path;
+        
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to save configuration: " << e.what() << std::endl;
+        return false;
+    }
+}
+
 }
 

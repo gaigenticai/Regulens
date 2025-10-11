@@ -22,7 +22,7 @@ bool StructuredLogger::initialize(const std::string& /*config_path*/, LogLevel l
     current_level_ = log_level;
 
     try {
-        // Create simple console logger
+        // Create console logger for stdout/stderr output
         console_logger_ = spdlog::stdout_color_mt("console");
         console_logger_->set_level(spdlog_level(log_level));
         console_logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");

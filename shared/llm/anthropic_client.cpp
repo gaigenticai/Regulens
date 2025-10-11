@@ -7,6 +7,7 @@
 #include <regex>
 #include <random>
 #include <unistd.h>
+#include <openssl/sha.h>
 
 namespace regulens {
 
@@ -1030,8 +1031,48 @@ std::optional<std::shared_ptr<StreamingSession>> AnthropicClient::create_streami
 }
 
 bool AnthropicClient::is_healthy() const {
-    // Simple health check - could be enhanced with actual API ping
-    return !api_key_.empty() && !base_url_.empty();
+    // Production-grade health check with actual API connectivity verification
+    if (api_key_.empty() || base_url_.empty()) {
+        return false;
+    }
+    
+    try {
+        // Make lightweight API call to test Anthropic connectivity
+        // Use a minimal message request to verify API accessibility
+        nlohmann::json test_payload = {
+            {"model", anthropic_model_},
+            {"max_tokens", 1},
+            {"messages", nlohmann::json::array({
+                {{"role", "user"}, {"content", "ping"}}
+            })}
+        };
+        
+        nlohmann::json headers = {
+            {"x-api-key", api_key_},
+            {"anthropic-version", api_version_},
+            {"Content-Type", "application/json"}
+        };
+        
+        auto response = http_client_->post(base_url_ + "/v1/messages", test_payload, headers);
+        
+        // Check if we got a successful response (200-299 status code)
+        if (response.status_code >= 200 && response.status_code < 300) {
+            return true;
+        }
+        
+        if (logger_) {
+            logger_->warn("Anthropic health check failed with status: " + std::to_string(response.status_code),
+                         "AnthropicClient", "is_healthy");
+        }
+        return false;
+        
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Anthropic health check exception: " + std::string(e.what()),
+                         "AnthropicClient", "is_healthy");
+        }
+        return false;
+    }
 }
 
 std::string AnthropicClient::generate_prompt_hash(const ClaudeCompletionRequest& request) {
@@ -1053,13 +1094,16 @@ std::string AnthropicClient::generate_prompt_hash(const ClaudeCompletionRequest&
     content << "max_tokens:" << request.max_tokens << "|";
     content << "temperature:" << (request.temperature ? std::to_string(*request.temperature) : "null") << "|";
 
-    // Simple hash function (in production, use proper crypto hash)
-    std::hash<std::string> hasher;
-    size_t hash_value = hasher(content.str());
+    // Production-grade SHA-256 hashing for request fingerprinting and caching
+    std::string content_str = content.str();
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(content_str.c_str()), content_str.length(), hash);
 
     // Convert to hex string
     std::stringstream hash_stream;
-    hash_stream << std::hex << hash_value;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        hash_stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    }
     return hash_stream.str();
 }
 

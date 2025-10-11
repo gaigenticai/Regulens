@@ -953,16 +953,31 @@ bool VectorKnowledgeBase::rebuild_indexes() {
             domain_index_[domain].insert(entity_id);
             type_index_[type].insert(entity_id);
 
-            // Parse and index tags - row["tags"] is already a string from database
+            // Parse and index tags using proper JSON parsing
             try {
                 // Tags are stored as JSON array strings in database
                 std::string tags_str = row["tags"];
-                if (!tags_str.empty() && tags_str != "{}") {
-                    // Simple parsing - in production would use proper JSON parsing
-                    // For now, skip complex tag parsing to avoid compilation issues
+                if (!tags_str.empty() && tags_str != "{}" && tags_str != "null") {
+                    // Parse JSON array of tags
+                    nlohmann::json tags_json = nlohmann::json::parse(tags_str);
+                    
+                    if (tags_json.is_array()) {
+                        // Build inverted index: tag -> set of entity_ids
+                        for (const auto& tag : tags_json) {
+                            if (tag.is_string()) {
+                                std::string tag_str = tag.get<std::string>();
+                                // Store in tag index for fast tag-based lookups
+                                tag_index_[tag_str].insert(entity_id);
+                            }
+                        }
+                    }
                 }
-            } catch (const std::exception&) {
-                // Skip malformed tags
+            } catch (const nlohmann::json::parse_error& e) {
+                logger_->log(LogLevel::WARN, "Failed to parse tags for entity " + entity_id + 
+                           ": " + std::string(e.what()));
+            } catch (const std::exception& e) {
+                logger_->log(LogLevel::WARN, "Error processing tags for entity " + entity_id + 
+                           ": " + std::string(e.what()));
             }
         }
 

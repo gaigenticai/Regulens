@@ -517,6 +517,59 @@ SELECT
     CURRENT_TIMESTAMP - (random() * INTERVAL '90 days')
 FROM generate_series(1, 50000);
 
+-- =============================================================================
+-- DEFAULT USERS FOR AUTHENTICATION
+-- =============================================================================
+
+-- Create default admin user (password: Admin123)
+-- Password hash generated using PBKDF2 with SHA256 (hex-encoded)
+INSERT INTO user_authentication (
+    user_id, username, password_hash, password_algorithm, email,
+    is_active, failed_login_attempts, last_login_at, created_at
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440000'::uuid,
+    'admin',
+    'pbkdf2_sha256$100000$2e8609fba15497fd983f202a9dfb9299$2848e4384cdad347ee2da056f59faddc8be7202c3c9437d162ce2ea716c35a6c', -- PBKDF2 hash for "Admin123"
+    'pbkdf2_sha256',
+    'admin@regulens.com',
+    true,
+    0,
+    NULL,
+    CURRENT_TIMESTAMP
+);
+
+-- Create demo user (password: Demo123)
+INSERT INTO user_authentication (
+    user_id, username, password_hash, password_algorithm, email,
+    is_active, failed_login_attempts, last_login_at, created_at
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440001'::uuid,
+    'demo',
+    'pbkdf2_sha256$100000$08d6085f899fc15bad9e598cc1b0d777$abbc4df349797cd4498734718cb782a789b3e3f26d9c37c6a37d2338232d0b50', -- PBKDF2 hash for "Demo123"
+    'pbkdf2_sha256',
+    'demo@regulens.com',
+    true,
+    0,
+    NULL,
+    CURRENT_TIMESTAMP
+);
+
+-- Create test user (password: Test123)
+INSERT INTO user_authentication (
+    user_id, username, password_hash, password_algorithm, email,
+    is_active, failed_login_attempts, last_login_at, created_at
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440002'::uuid,
+    'test',
+    'pbkdf2_sha256$100000$2440cced036bc5380c680d03c69ab0a4$53c31f9615aed72863bcb2cd0455aa90d6a7bd8e9926ebcbf69277b7b3313497', -- PBKDF2 hash for "Test123"
+    'pbkdf2_sha256',
+    'test@regulens.com',
+    true,
+    0,
+    NULL,
+    CURRENT_TIMESTAMP
+);
+
 -- Insert audit anomalies (AI-detected patterns)
 INSERT INTO audit_anomalies (
     anomaly_type, severity, description, affected_systems, affected_users,

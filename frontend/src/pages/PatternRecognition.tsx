@@ -103,25 +103,38 @@ const PatternRecognition: React.FC = () => {
 
       setAnalysisJobs(prev => [...prev, newJob]);
       
-      // Simulate progress updates (in production, this would be WebSocket or polling)
-      setTimeout(() => {
-        setAnalysisJobs(prev => prev.map(job => 
-          job.jobId === result.jobId ? { ...job, progress: 50 } : job
-        ));
-      }, 2000);
-
-      setTimeout(() => {
-        setAnalysisJobs(prev => prev.map(job => 
-          job.jobId === result.jobId ? {
-            ...job, 
-            status: 'completed',
-            progress: 100,
-            endTime: new Date().toISOString()
-          } : job
-        ));
-        // Reload patterns after completion
-        loadPatternData();
-      }, 5000);
+      // Poll for job status updates from backend
+      const pollJobStatus = async () => {
+        try {
+          const jobStatus = await apiClient.getPatternAnalysisJobStatus(result.jobId);
+          
+          setAnalysisJobs(prev => prev.map(job => 
+            job.jobId === result.jobId ? {
+              ...job,
+              status: jobStatus.status,
+              progress: jobStatus.progress || job.progress,
+              endTime: jobStatus.status === 'completed' ? new Date().toISOString() : undefined
+            } : job
+          ));
+          
+          // Continue polling if job is still running
+          if (jobStatus.status === 'running' || jobStatus.status === 'pending') {
+            setTimeout(pollJobStatus, 2000); // Poll every 2 seconds
+          } else if (jobStatus.status === 'completed') {
+            // Reload patterns after completion
+            loadPatternData();
+          }
+        } catch (pollError) {
+          console.error('Error polling job status:', pollError);
+          // Mark job as failed if polling fails
+          setAnalysisJobs(prev => prev.map(job => 
+            job.jobId === result.jobId ? { ...job, status: 'failed' } : job
+          ));
+        }
+      };
+      
+      // Start polling after a short delay
+      setTimeout(pollJobStatus, 1000);
 
     } catch (err) {
       console.error('Failed to start pattern analysis:', err);

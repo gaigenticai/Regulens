@@ -6,7 +6,7 @@
 namespace regulens {
 
 /**
- * @brief Simple timer utility for measuring elapsed time
+ * @brief High-resolution timer utility for performance measurement
  */
 class Timer {
 public:

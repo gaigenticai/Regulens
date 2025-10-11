@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import {
   BarChart3,
   Cpu,
-  Memory,
+  Zap,
   HardDrive,
   Network,
   Activity,
@@ -170,7 +170,7 @@ const SystemMetricsPage: React.FC = () => {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2">
-                <Memory className="w-5 h-5 text-green-500" />
+                <Zap className="w-5 h-5 text-green-500" />
                 <h3 className="text-sm font-medium text-gray-700">Memory Usage</h3>
               </div>
               {getStatusIcon(metrics.memoryUsage, { warning: 80, critical: 95 })}

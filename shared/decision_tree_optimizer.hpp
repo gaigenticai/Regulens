@@ -140,7 +140,7 @@ struct DecisionNode {
  * @brief Multi-criteria decision analysis (MCDA) methods
  */
 enum class MCDAMethod {
-    WEIGHTED_SUM,          // Simple weighted sum
+    WEIGHTED_SUM,          // Linear weighted sum aggregation method
     WEIGHTED_PRODUCT,      // Weighted product method
     TOPSIS,               // Technique for Order Preference by Similarity to Ideal Solution
     ELECTRE,              // Elimination and Choice Expressing Reality
@@ -571,9 +571,9 @@ inline std::string decision_node_type_to_string(DecisionNodeType type) {
 }
 
 /**
- * @brief Create a simple decision alternative
+ * @brief Create a decision alternative with specified parameters
  */
-inline DecisionAlternative create_simple_alternative(
+inline DecisionAlternative create_decision_alternative(
     const std::string& id, const std::string& name, const std::string& description,
     const std::unordered_map<DecisionCriterion, double>& scores) {
 

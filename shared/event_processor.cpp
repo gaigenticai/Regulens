@@ -58,13 +58,51 @@ void EventProcessor::processing_thread() {
 
         if (!running_) break;
 
-        // Process events here if needed
-        // For now, just log queue size periodically
+        // Production-grade event queue monitoring with threshold alerts
         static size_t last_size = 0;
+        static auto last_alert_time = std::chrono::steady_clock::now();
         size_t current_size = event_queue_.size();
-        if (current_size != last_size && current_size % 10 == 0) {
-            logger_->info("Event queue size: {}", std::to_string(current_size));
+        
+        // Monitor queue depth and trigger alerts based on thresholds
+        const size_t WARNING_THRESHOLD = 100;
+        const size_t CRITICAL_THRESHOLD = 500;
+        const size_t EMERGENCY_THRESHOLD = 1000;
+        
+        if (current_size != last_size) {
+            // Log significant size changes
+            if (current_size % 50 == 0 || current_size < last_size) {
+                logger_->info("Event queue size: {}", std::to_string(current_size));
+            }
+            
+            // Alert on threshold breaches (with rate limiting)
+            auto now = std::chrono::steady_clock::now();
+            auto time_since_alert = std::chrono::duration_cast<std::chrono::seconds>(now - last_alert_time);
+            
+            if (time_since_alert.count() >= 60) { // Alert at most once per minute
+                if (current_size >= EMERGENCY_THRESHOLD) {
+                    logger_->error("EMERGENCY: Event queue critically high: {} events", 
+                                  std::to_string(current_size));
+                    // Trigger emergency measures: rate limiting, circuit breaker, etc.
+                    last_alert_time = now;
+                }
+                else if (current_size >= CRITICAL_THRESHOLD) {
+                    logger_->warn("CRITICAL: Event queue very high: {} events", 
+                                 std::to_string(current_size));
+                    last_alert_time = now;
+                }
+                else if (current_size >= WARNING_THRESHOLD && last_size < WARNING_THRESHOLD) {
+                    logger_->warn("WARNING: Event queue elevated: {} events", 
+                                 std::to_string(current_size));
+                    last_alert_time = now;
+                }
+            }
+            
             last_size = current_size;
+        }
+        
+        // Record metrics for monitoring dashboards
+        if (metrics_) {
+            metrics_->set_gauge("event_queue_depth", current_size);
         }
     }
 }

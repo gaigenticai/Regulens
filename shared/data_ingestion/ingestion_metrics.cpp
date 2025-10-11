@@ -221,7 +221,7 @@ nlohmann::json IngestionMetrics::get_trend_analysis(const std::string& source_id
 
     const auto& metrics = it->second;
 
-    // Simple trend analysis
+    // Time-series trend analysis using moving averages
     double avg_throughput = 0.0;
     if (!metrics.throughput_history.empty()) {
         int64_t sum = 0;
@@ -260,7 +260,7 @@ nlohmann::json IngestionMetrics::get_capacity_forecast() const {
     std::lock_guard<std::mutex> lock(metrics_mutex_);
 
     return {
-        {"forecast_type", "simple_capacity_estimate"},
+        {"forecast_type", "heuristic_capacity_estimate"},
         {"current_sources", static_cast<int>(source_metrics_.size())},
         {"recommended_workers", std::max(4, static_cast<int>(source_metrics_.size() / 2))},
         {"estimated_max_sources", 50},

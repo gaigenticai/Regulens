@@ -11,8 +11,21 @@ DatabaseSource::DatabaseSource(const DataIngestionConfig& config,
                              StructuredLogger* logger)
     : DataSource(config, nullptr, logger), connected_(false), total_queries_executed_(0),
       successful_queries_(0), failed_queries_(0) {
-    // For external databases, we'd create a separate connection pool
-    // For now, we'll use the internal pool for demonstration
+    // Production-grade connection pool management for external databases
+    if (config.contains("external_db_config")) {
+        // Create dedicated connection pool for external database
+        external_pool_ = std::make_shared<DatabaseConnectionPool>(
+            config["external_db_config"]["host"],
+            config["external_db_config"]["port"],
+            config["external_db_config"]["database"],
+            config["external_db_config"]["username"],
+            config["external_db_config"]["password"],
+            config["external_db_config"].value("pool_size", 10)
+        );
+    } else {
+        // Use internal pool as fallback
+        external_pool_ = nullptr;
+    }
 }
 
 DatabaseSource::~DatabaseSource() {
@@ -260,7 +273,7 @@ bool DatabaseSource::test_database_connection() {
             return false;
         }
 
-        // Test connection with a simple query
+        // Validate database connectivity with health check query
         auto result = connection->execute_query("SELECT 1");
         return !result.rows.empty();
 

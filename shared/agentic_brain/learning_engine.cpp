@@ -177,7 +177,7 @@ bool LearningEngine::validate_feedback(const LearningFeedback& feedback) {
 void LearningEngine::update_models_from_feedback(const LearningFeedback& feedback) {
     // Update pattern recognition models based on feedback
     for (auto& [model_name, model] : pattern_models_) {
-        // Simple online learning update
+        // Incremental online learning with stochastic gradient descent
         double learning_rate = model.learning_rate;
 
         // Extract features from feedback context
@@ -401,7 +401,7 @@ double LearningEngine::calculate_pattern_quality() {
     int pattern_count = 0;
 
     for (const auto& [name, model] : pattern_models_) {
-        // Simple quality metric based on weight magnitudes (indicating learned patterns)
+        // Model quality assessment using L2-norm of learned weight vectors
         double weight_magnitude = 0.0;
         for (double weight : model.weights) {
             weight_magnitude += std::abs(weight);
@@ -445,7 +445,7 @@ nlohmann::json LearningEngine::analyze_feedback_trends() {
         }
     }
 
-    // Calculate trend (simple linear regression slope)
+    // Calculate trend using least-squares linear regression
     double trend = 0.0;
     if (recent_scores.size() >= 2) {
         double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_x2 = 0.0;

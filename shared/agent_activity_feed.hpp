@@ -139,6 +139,9 @@ private:
 
     // Database persistence (when enabled)
     std::unique_ptr<PostgreSQLConnection> db_connection_;
+    
+    // Start time for uptime calculation
+    std::chrono::system_clock::time_point start_time_;
 
     // Helper methods
     void update_agent_stats(const AgentActivityEvent& event);

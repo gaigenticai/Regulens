@@ -6,6 +6,7 @@
 #include <cmath>
 #include <thread>
 #include <regex>
+#include <openssl/sha.h>
 
 namespace regulens {
 
@@ -1020,8 +1021,38 @@ bool OpenAIClient::response_contains_function_calls(const OpenAIResponse& respon
 }
 
 bool OpenAIClient::is_healthy() const {
-    // Simple health check - could be enhanced with actual API ping
-    return !api_key_.empty() && !base_url_.empty();
+    // Production-grade health check with actual API connectivity verification
+    if (api_key_.empty() || base_url_.empty()) {
+        return false;
+    }
+    
+    try {
+        // Make lightweight API call to /v1/models endpoint to verify connectivity
+        nlohmann::json headers = {
+            {"Authorization", "Bearer " + api_key_},
+            {"Content-Type", "application/json"}
+        };
+        
+        auto response = http_client_->get(base_url_ + "/v1/models", headers);
+        
+        // Check if we got a successful response (200-299 status code)
+        if (response.status_code >= 200 && response.status_code < 300) {
+            return true;
+        }
+        
+        if (logger_) {
+            logger_->warn("OpenAI health check failed with status: " + std::to_string(response.status_code),
+                         "OpenAIClient", "is_healthy");
+        }
+        return false;
+        
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("OpenAI health check exception: " + std::string(e.what()),
+                         "OpenAIClient", "is_healthy");
+        }
+        return false;
+    }
 }
 
 std::string OpenAIClient::generate_prompt_hash(const OpenAICompletionRequest& request) {
@@ -1049,13 +1080,16 @@ std::string OpenAIClient::generate_prompt_hash(const OpenAICompletionRequest& re
         content << "tools:" << request.tools->dump() << "|";
     }
 
-    // Simple hash function (in production, use proper crypto hash)
-    std::hash<std::string> hasher;
-    size_t hash_value = hasher(content.str());
+    // Production-grade SHA-256 hashing for request fingerprinting and caching
+    std::string content_str = content.str();
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(content_str.c_str()), content_str.length(), hash);
 
     // Convert to hex string
     std::stringstream hash_stream;
-    hash_stream << std::hex << hash_value;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        hash_stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    }
     return hash_stream.str();
 }
 

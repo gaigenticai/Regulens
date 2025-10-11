@@ -106,6 +106,52 @@ public:
     std::optional<double> get_double(const std::string& key) const;
 
     /**
+     * @brief Set configuration value as string
+     * @param key Configuration key
+     * @param value String value to set
+     * @return true if value was set successfully
+     */
+    bool set_string(const std::string& key, const std::string& value);
+
+    /**
+     * @brief Set configuration value as integer
+     * @param key Configuration key
+     * @param value Integer value to set
+     * @return true if value was set successfully
+     */
+    bool set_int(const std::string& key, int value);
+
+    /**
+     * @brief Set configuration value as boolean
+     * @param key Configuration key
+     * @param value Boolean value to set
+     * @return true if value was set successfully
+     */
+    bool set_bool(const std::string& key, bool value);
+
+    /**
+     * @brief Set configuration value as double
+     * @param key Configuration key
+     * @param value Double value to set
+     * @return true if value was set successfully
+     */
+    bool set_double(const std::string& key, double value);
+
+    /**
+     * @brief Remove configuration value
+     * @param key Configuration key to remove
+     * @return true if value was removed
+     */
+    bool remove(const std::string& key);
+
+    /**
+     * @brief Save current configuration to file
+     * @param config_path Optional path to save configuration (defaults to current config file)
+     * @return true if save successful
+     */
+    bool save_configuration(const std::filesystem::path& config_path = {});
+
+    /**
      * @brief Get current environment
      * @return Current deployment environment
      */

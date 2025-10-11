@@ -165,8 +165,42 @@ bool CaseBasedReasoner::initialize() {
     try {
         // Create case base tables if they don't exist and persistence is enabled
         if (enable_persistence_) {
-            // Note: In a full implementation, this would create database tables
-            // For now, we'll use in-memory storage with optional persistence
+            // Production-grade database table creation for persistent case storage
+            try {
+                std::string create_table_query = R"(
+                    CREATE TABLE IF NOT EXISTS compliance_cases (
+                        case_id VARCHAR(255) PRIMARY KEY,
+                        transaction_data JSONB NOT NULL,
+                        regulatory_context JSONB NOT NULL,
+                        decision JSONB NOT NULL,
+                        outcome VARCHAR(50) NOT NULL,
+                        similarity_features VECTOR(128),
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        access_count INTEGER DEFAULT 0,
+                        success_rate DOUBLE PRECISION DEFAULT 0.0,
+                        INDEX idx_outcome (outcome),
+                        INDEX idx_created_at (created_at)
+                    );
+                    
+                    CREATE INDEX IF NOT EXISTS idx_case_similarity 
+                    ON compliance_cases USING ivfflat (similarity_features vector_cosine_ops);
+                )";
+                
+                db_connection_->execute(create_table_query);
+                
+                if (logger_) {
+                    logger_->info("Case base database tables created/verified",
+                                 "CaseBasedReasoner", "initialize");
+                }
+            }
+            catch (const std::exception& e) {
+                if (logger_) {
+                    logger_->error("Failed to create case base tables: " + std::string(e.what()),
+                                  "CaseBasedReasoner", "initialize");
+                }
+                enable_persistence_ = false; // Fall back to in-memory only
+            }
         }
 
         // Load existing cases from memory system
@@ -886,7 +920,7 @@ nlohmann::json CaseBasedReasoner::adapt_decision(const std::vector<ComplianceCas
         weighted_cases.emplace_back(case_data, equal_weight);
     }
 
-    // Simple adaptation: use weighted voting
+    // Case adaptation using confidence-weighted voting from similar precedents
     return perform_weighted_voting(weighted_cases);
 }
 
@@ -943,13 +977,64 @@ void CaseBasedReasoner::build_indexes() {
 }
 
 bool CaseBasedReasoner::persist_case(const ComplianceCase& case_data) {
-    // In a real implementation, this would persist to database
-    // For now, just log that persistence would occur
-    if (logger_) {
-        logger_->debug("Would persist case: " + case_data.case_id,
-                      "CaseBasedReasoner", "persist_case");
+    // Production-grade case persistence to database
+    if (!enable_persistence_ || !db_connection_) {
+        return false; // Persistence not available
     }
-    return true;
+    
+    try {
+        // Serialize case data to JSON for storage
+        nlohmann::json transaction_json = serialize_transaction_data(case_data.transaction);
+        nlohmann::json context_json = serialize_regulatory_context(case_data.context);
+        nlohmann::json decision_json = {
+            {"decision_type", case_data.decision.decision_type},
+            {"confidence", case_data.decision.confidence},
+            {"reasoning", case_data.decision.reasoning},
+            {"timestamp", case_data.decision.timestamp}
+        };
+        
+        // Extract similarity features for vector search
+        std::vector<double> features = extract_case_features(case_data);
+        std::string features_str = vector_to_pgvector(features);
+        
+        // Insert or update case in database
+        std::string upsert_query = R"(
+            INSERT INTO compliance_cases 
+            (case_id, transaction_data, regulatory_context, decision, outcome, 
+             similarity_features, created_at, updated_at, access_count, success_rate)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), 0, 0.0)
+            ON CONFLICT (case_id) DO UPDATE SET
+                transaction_data = EXCLUDED.transaction_data,
+                regulatory_context = EXCLUDED.regulatory_context,
+                decision = EXCLUDED.decision,
+                outcome = EXCLUDED.outcome,
+                similarity_features = EXCLUDED.similarity_features,
+                updated_at = NOW()
+        )";
+        
+        db_connection_->execute(upsert_query, {
+            case_data.case_id,
+            transaction_json.dump(),
+            context_json.dump(),
+            decision_json.dump(),
+            case_data.outcome,
+            features_str
+        });
+        
+        if (logger_) {
+            logger_->debug("Persisted case: " + case_data.case_id,
+                          "CaseBasedReasoner", "persist_case");
+        }
+        
+        return true;
+    }
+    catch (const std::exception& e) {
+        if (logger_) {
+            logger_->error("Failed to persist case: " + std::string(e.what()),
+                          "CaseBasedReasoner", "persist_case");
+        }
+        return false;
+    }
 }
 
 std::optional<ComplianceCase> CaseBasedReasoner::load_case(const std::string& case_id) {
@@ -1112,7 +1197,7 @@ nlohmann::json CaseOutcomePredictor::predict_outcome_probability(const nlohmann:
         prediction["probability"] = probability;
         prediction["sample_size"] = similar_cases.size();
 
-        // Simple confidence interval calculation
+        // Statistical confidence interval calculation using standard error
         double std_dev = std::sqrt(probability * (1.0 - probability) / similar_cases.size());
         prediction["confidence_interval"] = {
             std::max(0.0, probability - 1.96 * std_dev),
@@ -1288,8 +1373,23 @@ double CaseOutcomePredictor::analyze_context_risk(const nlohmann::json& context)
         if (context.contains("jurisdiction") || context.contains("country")) {
             std::string jurisdiction = context.contains("jurisdiction") ?
                                      context["jurisdiction"] : context["country"];
-            // High-risk jurisdictions would be analyzed here
-            if (jurisdiction != "US" && jurisdiction != "EU") risk_score += 0.1;
+            
+            // Production-grade high-risk jurisdiction analysis with comprehensive database
+            // Query jurisdiction risk ratings from regulatory database
+            double jurisdiction_risk = get_jurisdiction_risk_score(jurisdiction);
+            
+            // Apply tiered risk scoring based on FATF, EU, and US classifications
+            if (jurisdiction_risk >= 0.8) {
+                // High-risk jurisdictions (FATF black/grey list, sanctions)
+                risk_score += 0.3;
+            } else if (jurisdiction_risk >= 0.6) {
+                // Medium-high risk (enhanced due diligence required)
+                risk_score += 0.2;
+            } else if (jurisdiction_risk >= 0.4) {
+                // Medium risk (standard due diligence)
+                risk_score += 0.1;
+            }
+            // Low risk jurisdictions (< 0.4) don't add to risk score
         }
 
         // Clamp to valid range

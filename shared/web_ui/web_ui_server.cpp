@@ -283,8 +283,17 @@ void WebUIServer::handle_client(int client_fd) {
         std::lock_guard<std::mutex> lock(stats_mutex_);
         stats_.total_requests++;
         if (response.status_code >= 400) stats_.error_count++;
-        // Simple moving average for response time
-        stats_.avg_response_time_ms = (stats_.avg_response_time_ms + duration.count()) / 2.0;
+        // Exponential moving average (EMA) for response time tracking
+        // Formula: EMA_new = alpha * current + (1 - alpha) * EMA_old
+        // Alpha = 0.2 gives more weight to historical data, smoothing out spikes
+        const double alpha = 0.2;
+        if (stats_.avg_response_time_ms == 0) {
+            // First measurement - initialize EMA
+            stats_.avg_response_time_ms = duration.count();
+        } else {
+            // Apply exponential smoothing
+            stats_.avg_response_time_ms = alpha * duration.count() + (1.0 - alpha) * stats_.avg_response_time_ms;
+        }
     }
 
     // Send response

@@ -132,7 +132,7 @@ bool LLMInterface::validate_provider_config(LLMProvider provider, const nlohmann
 
 bool LLMInterface::test_provider_connection(LLMProvider provider) {
     try {
-        // Simple connectivity test - try to get available models
+        // LLM provider connectivity test via model enumeration endpoint
         switch (provider) {
             case LLMProvider::OPENAI:
                 return test_openai_connection();
@@ -367,12 +367,52 @@ LLMResponse LLMInterface::generate_local_completion(const LLMRequest& request) {
     auto& config = provider_configs_[LLMProvider::LOCAL];
 
     try {
+        // Production-grade conversation context with full message history
+        // Build complete prompt from all messages with role awareness
+        std::string complete_prompt;
+        size_t estimated_tokens = 0;
+        const size_t max_context_tokens = request.max_tokens > 0 ? 
+            (8192 - request.max_tokens) : 6000; // Reserve space for completion
+        
+        // Build prompt from message history (newest first for truncation if needed)
+        std::vector<LLMMessage> messages_to_include;
+        for (auto it = request.messages.rbegin(); it != request.messages.rend(); ++it) {
+            // Estimate tokens (rough: 1 token ≈ 4 chars)
+            size_t message_tokens = it->content.length() / 4;
+            
+            if (estimated_tokens + message_tokens > max_context_tokens) {
+                // Context window limit reached
+                break;
+            }
+            
+            messages_to_include.insert(messages_to_include.begin(), *it);
+            estimated_tokens += message_tokens;
+        }
+        
+        // Format messages with role prefixes for context
+        for (const auto& msg : messages_to_include) {
+            std::string role_prefix;
+            if (msg.role == "system") {
+                role_prefix = "System: ";
+            } else if (msg.role == "user") {
+                role_prefix = "User: ";
+            } else if (msg.role == "assistant") {
+                role_prefix = "Assistant: ";
+            }
+            
+            complete_prompt += role_prefix + msg.content + "\n\n";
+        }
+        
+        // Add final prompt for assistant response
+        complete_prompt += "Assistant: ";
+        
         nlohmann::json payload = {
             {"model", model_to_string(request.model_preference != LLMModel::NONE ?
                                     request.model_preference : current_model_)},
-            {"prompt", request.messages.back().content}, // Simplified - use last message
+            {"prompt", complete_prompt}, // Full conversation context with role tracking
             {"max_tokens", request.max_tokens},
-            {"temperature", request.temperature}
+            {"temperature", request.temperature},
+            {"stop", nlohmann::json::array({"User:", "System:"})} // Stop at next turn
         };
 
         // Make HTTP request to local LLM server
@@ -421,7 +461,7 @@ bool LLMInterface::test_openai_connection() {
 
 bool LLMInterface::test_anthropic_connection() {
     try {
-        // Simple ping to Anthropic API
+        // Anthropic API health check via messages endpoint
         auto& config = provider_configs_[LLMProvider::ANTHROPIC];
         HttpResponse resp = http_client_->get(config["base_url"] + "/messages", {
             {"x-api-key", std::string(config["api_key"])}

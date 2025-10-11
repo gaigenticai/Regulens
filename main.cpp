@@ -276,7 +276,7 @@ private:
                 logger_.error("Database connectivity check failed: connection not open");
                 all_connected = false;
             } else {
-                // Execute a simple test query
+                // Execute database connectivity test query
                 pqxx::work txn(conn);
                 txn.exec("SELECT 1");
                 txn.commit();

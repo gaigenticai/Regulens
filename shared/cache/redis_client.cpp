@@ -33,9 +33,57 @@ RedisConnectionWrapper::~RedisConnectionWrapper() {
 bool RedisConnectionWrapper::connect() {
     try {
         // Production Redis connection using hiredis
-        // In production deployment, this requires hiredis library to be installed
-        // For now, we'll create a minimal working connection that can be enhanced with hiredis
-        connection_ = reinterpret_cast<RedisConnection*>(1); // Minimal connection handle
+        // Requires hiredis library to be installed and linked
+        auto redis_context = redisConnect(connection_config_.host.c_str(), connection_config_.port);
+        
+        if (!redis_context || redis_context->err) {
+            std::string error_msg = "Failed to connect to Redis: ";
+            if (redis_context) {
+                error_msg += redis_context->errstr;
+                redisFree(redis_context);
+            } else {
+                error_msg += "Unable to allocate redis context";
+            }
+            throw std::runtime_error(error_msg);
+        }
+        
+        // Set connection timeout
+        struct timeval timeout = { connection_config_.connect_timeout_ms / 1000, 
+                                   (connection_config_.connect_timeout_ms % 1000) * 1000 };
+        redisSetTimeout(redis_context, timeout);
+        
+        // Authenticate if password is provided
+        if (!connection_config_.password.empty()) {
+            redisReply* reply = static_cast<redisReply*>(
+                redisCommand(redis_context, "AUTH %s", connection_config_.password.c_str()));
+            if (!reply || reply->type == REDIS_REPLY_ERROR) {
+                std::string error_msg = "Redis authentication failed";
+                if (reply) {
+                    error_msg += ": " + std::string(reply->str);
+                    freeReplyObject(reply);
+                }
+                redisFree(redis_context);
+                throw std::runtime_error(error_msg);
+            }
+            freeReplyObject(reply);
+        }
+        
+        // Select database
+        if (connection_config_.database > 0) {
+            redisReply* reply = static_cast<redisReply*>(
+                redisCommand(redis_context, "SELECT %d", connection_config_.database));
+            if (!reply || reply->type == REDIS_REPLY_ERROR) {
+                std::string error_msg = "Failed to select Redis database";
+                if (reply) {
+                    freeReplyObject(reply);
+                }
+                redisFree(redis_context);
+                throw std::runtime_error(error_msg);
+            }
+            freeReplyObject(reply);
+        }
+        
+        connection_ = redis_context;
         creation_time_ = std::chrono::system_clock::now();
         last_activity_ = creation_time_;
 

@@ -525,11 +525,29 @@ double DecisionEngine::calculate_transaction_risk_score(const nlohmann::json& tr
         risk_score += 0.2;
     }
 
-    // Time-based risk (unusual hours)
-    auto timestamp = std::chrono::system_clock::now();
+    // Time-based risk (unusual hours) - production-grade analysis
     if (transaction.contains("timestamp")) {
-        // Add time-based risk calculation
-        risk_score += 0.1; // Placeholder for time analysis
+        try {
+            int64_t timestamp_val = transaction["timestamp"].get<int64_t>();
+            auto transaction_time = std::chrono::system_clock::from_time_t(timestamp_val);
+            std::time_t t = std::chrono::system_clock::to_time_t(transaction_time);
+            std::tm* local_time = std::localtime(&t);
+            
+            int hour = local_time->tm_hour;
+            int day_of_week = local_time->tm_wday; // 0 = Sunday
+            
+            // Off-hours risk (late night/early morning: 11pm-6am)
+            if (hour >= 23 || hour < 6) {
+                risk_score += 0.15;
+            }
+            // Weekend transactions add additional risk
+            if (day_of_week == 0 || day_of_week == 6) {
+                risk_score += 0.05;
+            }
+        } catch (const std::exception&) {
+            // If timestamp parsing fails, apply minimal risk increase
+            risk_score += 0.02;
+        }
     }
 
     return std::min(1.0, risk_score);
@@ -927,17 +945,44 @@ nlohmann::json DecisionEngine::apply_learned_patterns(const DecisionContext& con
 }
 
 bool DecisionEngine::matches_learned_pattern(const nlohmann::json& data, const LearningPattern& pattern) {
-    // Simple pattern matching - check if key characteristics match
+    // Production-grade pattern matching with fuzzy logic and scoring
+    double match_score = 0.0;
+    double total_weight = 0.0;
+    
     for (const auto& [key, expected_value] : pattern.characteristics) {
         if (data.contains(key)) {
-            // Simple string matching for now
+            double characteristic_weight = pattern.weights.count(key) > 0 ? 
+                pattern.weights.at(key) : 1.0;
+            total_weight += characteristic_weight;
+            
+            // Type-aware matching with tolerance
             if (data[key].is_string() && expected_value.is_string()) {
-                if (data[key] == expected_value) {
-                    return true;
-                }
+                std::string data_str = data[key].get<std::string>();
+                std::string expected_str = expected_value.get<std::string>();
+                
+                // Fuzzy string matching with Levenshtein distance
+                double string_similarity = calculate_string_similarity(data_str, expected_str);
+                match_score += string_similarity * characteristic_weight;
+            }
+            else if (data[key].is_number() && expected_value.is_number()) {
+                double data_val = data[key].get<double>();
+                double expected_val = expected_value.get<double>();
+                
+                // Numerical matching with tolerance (10% range)
+                double tolerance = std::abs(expected_val) * 0.1;
+                double diff = std::abs(data_val - expected_val);
+                double num_similarity = std::max(0.0, 1.0 - (diff / (tolerance + 0.001)));
+                match_score += num_similarity * characteristic_weight;
+            }
+            else if (data[key] == expected_value) {
+                // Exact match for other types
+                match_score += characteristic_weight;
             }
         }
     }
+    
+    // Return true if match score exceeds threshold (70%)
+    return total_weight > 0 && (match_score / total_weight) >= 0.7;
     return false;
 }
 
@@ -1259,28 +1304,123 @@ std::vector<ProactiveAction> DecisionEngine::identify_proactive_actions() {
 std::vector<nlohmann::json> DecisionEngine::detect_anomalous_patterns() {
     std::vector<nlohmann::json> anomalies;
 
-    // Simple anomaly detection based on decision patterns
-    auto recent_decisions = get_recent_decisions("all", 100);
+    // Statistical anomaly detection using z-score and IQR methods
+    auto recent_decisions = get_recent_decisions("all", 200);
 
-    // Look for unusual decision frequencies
-    std::map<std::string, int> outcome_counts;
-    for (const auto& decision : recent_decisions) {
-        outcome_counts[decision.decision_outcome]++;
+    if (recent_decisions.size() < 30) {
+        return anomalies; // Need sufficient data for statistical analysis
     }
 
-    // Check for unusual rejection rates
-    int total_decisions = recent_decisions.size();
-    if (total_decisions > 20) {
-        int rejections = outcome_counts["REJECTED"] + outcome_counts["CRITICAL_VIOLATION"];
-        double rejection_rate = static_cast<double>(rejections) / total_decisions;
+    // Extract time-series metrics for anomaly detection
+    std::vector<double> processing_times;
+    std::vector<double> risk_scores;
+    std::vector<int> decision_outcomes; // 0=approved, 1=rejected, 2=critical
+    
+    for (const auto& decision : recent_decisions) {
+        processing_times.push_back(decision.processing_time_ms);
+        
+        if (decision.decision_metadata.contains("risk_assessment") &&
+            decision.decision_metadata["risk_assessment"].contains("score")) {
+            risk_scores.push_back(decision.decision_metadata["risk_assessment"]["score"]);
+        }
+        
+        if (decision.decision_outcome == "REJECTED") decision_outcomes.push_back(1);
+        else if (decision.decision_outcome == "CRITICAL_VIOLATION") decision_outcomes.push_back(2);
+        else decision_outcomes.push_back(0);
+    }
 
-        if (rejection_rate > 0.4) { // More than 40% rejections
+    // 1. Detect processing time anomalies using z-score method
+    if (!processing_times.empty()) {
+        double mean = std::accumulate(processing_times.begin(), processing_times.end(), 0.0) / processing_times.size();
+        double sq_sum = std::inner_product(processing_times.begin(), processing_times.end(), 
+                                          processing_times.begin(), 0.0);
+        double stdev = std::sqrt(sq_sum / processing_times.size() - mean * mean);
+        
+        if (stdev > 0) {
+            for (size_t i = 0; i < std::min(size_t(10), processing_times.size()); ++i) {
+                double z_score = (processing_times[i] - mean) / stdev;
+                if (std::abs(z_score) > 3.0) { // 3-sigma rule
+                    anomalies.push_back({
+                        {"type", "PROCESSING_TIME_ANOMALY"},
+                        {"severity", std::abs(z_score) > 4.0 ? "HIGH" : "MEDIUM"},
+                        {"description", "Decision processing time significantly deviates from normal"},
+                        {"z_score", z_score},
+                        {"processing_time_ms", processing_times[i]},
+                        {"mean_processing_time_ms", mean},
+                        {"standard_deviation", stdev}
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. Detect risk score anomalies using IQR method (outlier detection)
+    if (risk_scores.size() >= 30) {
+        std::vector<double> sorted_risks = risk_scores;
+        std::sort(sorted_risks.begin(), sorted_risks.end());
+        
+        size_t q1_idx = sorted_risks.size() / 4;
+        size_t q3_idx = 3 * sorted_risks.size() / 4;
+        double q1 = sorted_risks[q1_idx];
+        double q3 = sorted_risks[q3_idx];
+        double iqr = q3 - q1;
+        double lower_bound = q1 - 1.5 * iqr;
+        double upper_bound = q3 + 1.5 * iqr;
+        
+        int outlier_count = 0;
+        for (double risk : risk_scores) {
+            if (risk < lower_bound || risk > upper_bound) {
+                outlier_count++;
+            }
+        }
+        
+        double outlier_rate = static_cast<double>(outlier_count) / risk_scores.size();
+        if (outlier_rate > 0.15) { // More than 15% outliers indicates systemic issue
             anomalies.push_back({
-                {"type", "HIGH_REJECTION_RATE"},
-                {"severity", "MEDIUM"},
-                {"description", "Unusually high decision rejection rate detected"},
-                {"rejection_rate", rejection_rate},
-                {"time_window", "Last 100 decisions"}
+                {"type", "RISK_SCORE_DISTRIBUTION_ANOMALY"},
+                {"severity", "HIGH"},
+                {"description", "Risk score distribution shows unusual pattern with excessive outliers"},
+                {"outlier_rate", outlier_rate},
+                {"iqr", iqr},
+                {"q1", q1},
+                {"q3", q3},
+                {"samples", risk_scores.size()}
+            });
+        }
+    }
+
+    // 3. Detect decision outcome anomalies using exponentially weighted moving average (EWMA)
+    if (decision_outcomes.size() >= 30) {
+        double ewma = decision_outcomes[0];
+        double alpha = 0.2; // Smoothing factor
+        std::vector<double> ewma_values;
+        
+        for (size_t i = 1; i < decision_outcomes.size(); ++i) {
+            ewma = alpha * decision_outcomes[i] + (1 - alpha) * ewma;
+            ewma_values.push_back(ewma);
+        }
+        
+        // Calculate control limits (3-sigma)
+        double ewma_mean = std::accumulate(ewma_values.begin(), ewma_values.end(), 0.0) / ewma_values.size();
+        double ewma_variance = 0.0;
+        for (double val : ewma_values) {
+            ewma_variance += (val - ewma_mean) * (val - ewma_mean);
+        }
+        ewma_variance /= ewma_values.size();
+        double ewma_stdev = std::sqrt(ewma_variance);
+        
+        double ucl = ewma_mean + 3 * ewma_stdev; // Upper control limit
+        
+        // Check recent EWMA against control limits
+        if (!ewma_values.empty() && ewma_values.back() > ucl) {
+            anomalies.push_back({
+                {"type", "DECISION_OUTCOME_SHIFT"},
+                {"severity", "HIGH"},
+                {"description", "Statistical process control detected shift in decision outcomes"},
+                {"current_ewma", ewma_values.back()},
+                {"control_limit", ucl},
+                {"mean", ewma_mean},
+                {"standard_deviation", ewma_stdev}
             });
         }
     }
@@ -1291,44 +1431,113 @@ std::vector<nlohmann::json> DecisionEngine::detect_anomalous_patterns() {
 std::vector<nlohmann::json> DecisionEngine::predict_future_risks() {
     std::vector<nlohmann::json> predictions;
 
-    // Simple trend-based prediction
+    // Production-grade time-series analysis using multiple methods
     auto recent_decisions = get_recent_decisions("all", 200);
 
     // Analyze risk trends over time
     std::vector<double> risk_scores;
+    std::vector<size_t> timestamps;
     for (const auto& decision : recent_decisions) {
         if (decision.decision_metadata.contains("risk_assessment")) {
             auto risk = decision.decision_metadata["risk_assessment"];
             if (risk.contains("score")) {
                 risk_scores.push_back(risk["score"]);
+                timestamps.push_back(decision.timestamp);
             }
         }
     }
 
-    if (risk_scores.size() >= 10) {
-        // Calculate trend
-        double recent_avg = 0.0;
-        double earlier_avg = 0.0;
-
-        size_t half_point = risk_scores.size() / 2;
-        for (size_t i = 0; i < half_point; ++i) {
-            earlier_avg += risk_scores[i];
+    if (risk_scores.size() >= 20) {
+        // 1. Linear Regression Trend Analysis (Least Squares Method)
+        size_t n = risk_scores.size();
+        double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_x2 = 0.0;
+        
+        for (size_t i = 0; i < n; ++i) {
+            double x = static_cast<double>(i); // Use index as time
+            double y = risk_scores[i];
+            sum_x += x;
+            sum_y += y;
+            sum_xy += x * y;
+            sum_x2 += x * x;
         }
-        earlier_avg /= half_point;
-
-        for (size_t i = half_point; i < risk_scores.size(); ++i) {
-            recent_avg += risk_scores[i];
+        
+        double slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
+        double intercept = (sum_y - slope * sum_x) / n;
+        
+        // Calculate R-squared for trend confidence
+        double mean_y = sum_y / n;
+        double ss_tot = 0.0, ss_res = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            double predicted = slope * i + intercept;
+            ss_tot += (risk_scores[i] - mean_y) * (risk_scores[i] - mean_y);
+            ss_res += (risk_scores[i] - predicted) * (risk_scores[i] - predicted);
         }
-        recent_avg /= (risk_scores.size() - half_point);
-
-        if (recent_avg > earlier_avg + 0.1) { // Increasing trend
+        double r_squared = 1.0 - (ss_res / ss_tot);
+        
+        // 2. Exponential Smoothing for short-term prediction
+        double alpha = 0.3; // Smoothing parameter
+        double smoothed = risk_scores[0];
+        std::vector<double> smoothed_series;
+        for (double score : risk_scores) {
+            smoothed = alpha * score + (1 - alpha) * smoothed;
+            smoothed_series.push_back(smoothed);
+        }
+        
+        // 3. Calculate Moving Average Convergence/Divergence (MACD)
+        size_t short_window = std::min(size_t(12), n / 4);
+        size_t long_window = std::min(size_t(26), n / 2);
+        
+        double short_ema = std::accumulate(risk_scores.end() - short_window, risk_scores.end(), 0.0) / short_window;
+        double long_ema = std::accumulate(risk_scores.end() - long_window, risk_scores.end(), 0.0) / long_window;
+        double macd = short_ema - long_ema;
+        
+        // Generate predictions based on analysis
+        if (std::abs(slope) > 0.001 && r_squared > 0.3) { // Significant trend with reasonable fit
+            std::string direction = slope > 0 ? "increasing" : "decreasing";
+            std::string severity = (std::abs(slope) > 0.005 && r_squared > 0.5) ? "HIGH" : "MEDIUM";
+            
+            // Forecast next 10 time points
+            double forecast_10 = slope * (n + 10) + intercept;
+            
             predictions.push_back({
-                {"type", "INCREASING_RISK_TREND"},
-                {"severity", "HIGH"},
-                {"description", "Risk scores are trending upward"},
-                {"trend_direction", "increasing"},
-                {"earlier_average", earlier_avg},
-                {"recent_average", recent_avg}
+                {"type", slope > 0 ? "INCREASING_RISK_TREND" : "DECREASING_RISK_TREND"},
+                {"severity", severity},
+                {"description", "Time-series regression analysis indicates " + direction + " risk trend"},
+                {"trend_direction", direction},
+                {"slope", slope},
+                {"r_squared", r_squared},
+                {"current_level", risk_scores.back()},
+                {"forecast_10_periods", forecast_10},
+                {"confidence", r_squared > 0.7 ? "HIGH" : (r_squared > 0.5 ? "MEDIUM" : "LOW")}
+            });
+        }
+        
+        // MACD-based momentum prediction
+        if (std::abs(macd) > 0.05) { // Significant divergence
+            predictions.push_back({
+                {"type", "RISK_MOMENTUM_SHIFT"},
+                {"severity", std::abs(macd) > 0.1 ? "HIGH" : "MEDIUM"},
+                {"description", "MACD analysis indicates momentum shift in risk patterns"},
+                {"macd_value", macd},
+                {"short_term_ema", short_ema},
+                {"long_term_ema", long_ema},
+                {"signal", macd > 0 ? "bullish_risk" : "bearish_risk"}
+            });
+        }
+        
+        // Exponential smoothing prediction
+        double smoothed_current = smoothed_series.back();
+        double smoothed_trend = smoothed_series.back() - smoothed_series[smoothed_series.size() - 2];
+        double forecast_smoothed = smoothed_current + smoothed_trend;
+        
+        if (std::abs(smoothed_trend) > 0.02) {
+            predictions.push_back({
+                {"type", "SHORT_TERM_RISK_FORECAST"},
+                {"severity", "MEDIUM"},
+                {"description", "Exponential smoothing predicts near-term risk level change"},
+                {"current_smoothed", smoothed_current},
+                {"forecast_next_period", forecast_smoothed},
+                {"trend_magnitude", smoothed_trend}
             });
         }
     }

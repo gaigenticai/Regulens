@@ -415,11 +415,58 @@ void StreamingResponseHandler::cleanup_expired_sessions() {
     std::lock_guard<std::mutex> lock(sessions_mutex_);
 
     // Implementation for cleanup would go here
-    (void)std::chrono::steady_clock::now(); // Suppress unused variable warning
+    // Production-grade session expiry tracking and cleanup
+    auto now = std::chrono::steady_clock::now();
     std::vector<std::string> to_remove;
-
-    // In a production system, you would track session creation times
-    // and remove expired ones. For now, we'll just log the cleanup.
+    
+    // Find expired sessions (default: 1 hour timeout)
+    const auto SESSION_TIMEOUT = std::chrono::hours(1);
+    
+    {
+        std::lock_guard<std::mutex> lock(sessions_mutex_);
+        for (const auto& [session_id, session] : active_sessions_) {
+            auto session_age = now - session->created_at;
+            
+            if (session_age > SESSION_TIMEOUT) {
+                to_remove.push_back(session_id);
+                
+                // Log expiration for monitoring
+                if (logger_) {
+                    logger_->warn("Streaming session expired: " + session_id + 
+                                 " (age: " + std::to_string(std::chrono::duration_cast<std::chrono::minutes>(session_age).count()) + 
+                                 " minutes)",
+                                 "StreamingResponseHandler", "cleanup_expired_sessions");
+                }
+            }
+        }
+        
+        // Remove expired sessions
+        size_t removed_count = 0;
+        for (const auto& session_id : to_remove) {
+            // Close any active streams
+            if (active_sessions_[session_id]->stream_active) {
+                active_sessions_[session_id]->stream_active = false;
+            }
+            
+            // Persist session metrics before removal
+            if (metrics_) {
+                metrics_->record_session_duration(session_id, 
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        now - active_sessions_[session_id]->created_at
+                    ).count());
+            }
+            
+            active_sessions_.erase(session_id);
+            removed_count++;
+        }
+        
+        if (removed_count > 0) {
+            logger_->info("Cleaned up " + std::to_string(removed_count) + 
+                         " expired streaming sessions",
+                         "StreamingResponseHandler", "cleanup_expired_sessions");
+        }
+    }
+    
     logger_->debug("Streaming session cleanup completed - " +
                    std::to_string(active_sessions_.size()) + " active sessions",
                    "StreamingResponseHandler", "cleanup_expired_sessions");

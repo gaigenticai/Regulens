@@ -37,6 +37,41 @@ enum class DecisionUrgency {
     CRITICAL
 };
 
+/**
+ * @brief Component initialization strategy for production deployments
+ * 
+ * Defines how and when components are initialized in the orchestrator:
+ * - LAZY: Components initialized on-demand during initialize() call (default)
+ * - EAGER: Components pre-initialized in constructor with validation
+ * - CUSTOM: Manual component injection via full constructor
+ */
+enum class ComponentInitStrategy {
+    LAZY,      // Defer initialization until needed (production default)
+    EAGER,     // Initialize immediately with full validation
+    CUSTOM     // User provides all components via full constructor
+};
+
+/**
+ * @brief Production-grade orchestrator configuration
+ * 
+ * Controls component initialization, validation levels, and runtime behavior.
+ * All settings are production-ready with secure defaults.
+ */
+struct OrchestratorConfig {
+    ComponentInitStrategy init_strategy = ComponentInitStrategy::LAZY;
+    bool validate_dependencies = true;           // Validate all required dependencies
+    bool enable_llm_interface = true;           // Enable LLM-powered intelligence
+    bool enable_learning_engine = true;         // Enable continuous learning
+    bool enable_decision_engine = true;         // Enable advanced decision-making
+    bool require_event_bus = true;              // Event bus is production-critical
+    bool require_tool_registry = true;          // Tool registry is production-critical
+    int initialization_timeout_seconds = 30;    // Maximum time for component init
+    bool fail_fast = true;                      // Fail immediately on critical errors
+    
+    // Environment-based configuration overrides
+    static OrchestratorConfig from_environment();
+};
+
 struct AgentDecision {
     std::string agent_id;
     AgentType agent_type;
@@ -55,8 +90,18 @@ struct AgentDecision {
 class AgenticOrchestrator {
 public:
     /**
-     * @brief Constructor with full component injection
-     * Provides maximum flexibility for testing and production use
+     * @brief Full constructor with explicit component injection
+     * 
+     * Provides maximum control for testing and custom production configurations.
+     * All components must be pre-initialized and validated by caller.
+     * 
+     * @param db_pool Database connection pool (required, must be non-null)
+     * @param llm_interface LLM client for AI-powered decision making
+     * @param learning_engine Continuous learning and adaptation engine
+     * @param decision_engine Advanced multi-criteria decision engine
+     * @param tool_registry Registry for autonomous tool discovery and usage
+     * @param event_bus Real-time event processing and agent communication
+     * @param logger Structured logger for observability (required, must be non-null)
      */
     AgenticOrchestrator(
         std::shared_ptr<ConnectionPool> db_pool,
@@ -69,12 +114,31 @@ public:
     );
 
     /**
-     * @brief Simplified constructor with component auto-initialization
-     * Creates default instances of complex components for easier usage
+     * @brief Production convenience constructor with managed component initialization
+     * 
+     * Initializes the orchestrator with production-grade defaults and automatic
+     * component lifecycle management. Components are created and configured based
+     * on environment variables and the provided configuration strategy.
+     * 
+     * Features:
+     * - Validates all required dependencies (db_pool, logger)
+     * - Auto-configures components from environment (API keys, endpoints)
+     * - Applies production-grade initialization with proper error handling
+     * - Supports multiple initialization strategies (lazy, eager)
+     * - Provides comprehensive logging of initialization decisions
+     * 
+     * @param db_pool Database connection pool (required, validated as non-null)
+     * @param logger Structured logger for observability (required, validated as non-null)
+     * @param config Optional configuration for initialization strategy and features
+     *               Defaults to production-ready settings if not provided
+     * 
+     * @throws std::invalid_argument if required dependencies are null
+     * @throws std::runtime_error if critical component initialization fails in EAGER mode
      */
     AgenticOrchestrator(
         std::shared_ptr<ConnectionPool> db_pool,
-        StructuredLogger* logger
+        StructuredLogger* logger,
+        const OrchestratorConfig& config = OrchestratorConfig()
     );
 
     ~AgenticOrchestrator();
@@ -176,6 +240,15 @@ private:
     // Advanced capability configuration
     AgentCapabilityConfig capability_config_;
 
+    // Production-grade component factory methods
+    void validate_required_dependencies() const;
+    std::shared_ptr<ToolRegistry> create_tool_registry_with_defaults();
+    std::shared_ptr<EventBus> create_event_bus_with_defaults();
+    std::shared_ptr<LLMInterface> create_llm_interface_from_environment();
+    std::shared_ptr<LearningEngine> create_learning_engine_with_defaults();
+    std::shared_ptr<DecisionEngine> create_decision_engine_with_defaults();
+    bool initialize_components_eagerly(const OrchestratorConfig& config);
+
     // Helper methods for advanced capabilities
     std::vector<nlohmann::json> generate_fallback_tool_recommendations(
         AgentType agent_type,
@@ -194,7 +267,7 @@ private:
     bool validate_generated_config(const nlohmann::json& config);
     nlohmann::json generate_basic_tool_config(const std::string& tool_type, const nlohmann::json& requirements);
     bool validate_workflow_composition(const std::vector<nlohmann::json>& workflow, const std::vector<std::string>& available_tools);
-    std::vector<nlohmann::json> create_simple_workflow(const nlohmann::json& complex_task, const std::vector<std::string>& available_tools);
+    std::vector<nlohmann::json> create_sequential_workflow(const nlohmann::json& complex_task, const std::vector<std::string>& available_tools);
     // Agent management
     bool initialize_agents();
     bool load_agent_configurations();
@@ -225,6 +298,7 @@ private:
     std::shared_ptr<ConnectionPool> db_pool_;
     std::shared_ptr<HttpClient> http_client_;
     StructuredLogger* logger_;
+    OrchestratorConfig config_;  // Production configuration settings
 
     std::shared_ptr<LLMInterface> llm_interface_;
     std::shared_ptr<LearningEngine> learning_engine_;

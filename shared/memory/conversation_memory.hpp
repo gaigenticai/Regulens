@@ -263,8 +263,9 @@ public:
      * @brief Forget outdated or low-importance memories
      * @param max_age Maximum age to keep memories
      * @param min_importance Minimum importance score to keep
+     * @return Number of memories forgotten
      */
-    void forget_memories(std::chrono::hours max_age = std::chrono::hours(720), // 30 days
+    size_t forget_memories(std::chrono::hours max_age = std::chrono::hours(720), // 30 days
                         double min_importance = 0.2);
 
     /**

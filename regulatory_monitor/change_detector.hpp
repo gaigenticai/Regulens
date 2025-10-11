@@ -209,7 +209,7 @@ private:
                                            const std::vector<std::string>& new_lines,
                                            const std::vector<std::vector<int>>& trace,
                                            size_t max_d) const;
-    std::vector<Edit> compute_simple_diff(const std::vector<std::string>& baseline_lines,
+    std::vector<Edit> compute_line_diff(const std::vector<std::string>& baseline_lines,
                                           const std::vector<std::string>& new_lines) const;
     std::vector<DiffChunk> compute_advanced_diff(const std::string& baseline_content,
                                                  const std::string& new_content) const;

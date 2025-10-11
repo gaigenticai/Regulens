@@ -18,7 +18,7 @@ import {
   CheckCircle,
   Clock,
   Cpu,
-  Memory,
+  Zap,
   HardDrive
 } from 'lucide-react';
 import { apiClient } from '@/services/api';
@@ -266,7 +266,7 @@ const AgentDetail: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <Memory className="w-4 h-4 text-green-500" />
+                    <Zap className="w-4 h-4 text-green-500" />
                     <span className="text-sm font-medium text-gray-700">Memory</span>
                   </div>
                   <span className="text-sm font-semibold text-gray-900">256 MB</span>

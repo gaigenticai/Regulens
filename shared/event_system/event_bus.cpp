@@ -312,9 +312,10 @@ size_t EventBus::get_pending_event_count() const {
 }
 
 size_t EventBus::get_processing_event_count() const {
-    // For production: track events currently being processed by workers
-    // For now, return 0 as events are processed synchronously in worker threads
-    return 0;
+    // Production-grade tracking of events currently being processed
+    // Count events in PROCESSING state across all worker threads
+    std::lock_guard<std::mutex> lock(processing_mutex_);
+    return currently_processing_events_.size();
 }
 
 size_t EventBus::get_failed_event_count() const {
@@ -393,9 +394,64 @@ void EventBus::cleanup_expired_events_loop() {
 }
 
 void EventBus::cleanup_expired_events() {
-    // In a production system, this would clean up expired events from database
-    // For now, we just log the activity
-    logger_->log(LogLevel::DEBUG, "Event cleanup cycle completed");
+    // Production-grade expired event cleanup with database persistence
+    try {
+        auto now = std::chrono::system_clock::now();
+        auto cutoff_time = now - std::chrono::hours(24); // Keep events for 24 hours
+        
+        // Clean up from database
+        if (db_connection_) {
+            std::string cleanup_query = R"(
+                DELETE FROM event_log
+                WHERE status IN ('COMPLETED', 'FAILED', 'EXPIRED')
+                  AND created_at < $1
+                  AND (expiry_time IS NULL OR expiry_time < $2)
+                RETURNING event_id
+            )";
+            
+            auto cutoff_timestamp = std::chrono::system_clock::to_time_t(cutoff_time);
+            auto now_timestamp = std::chrono::system_clock::to_time_t(now);
+            
+            auto result = db_connection_->execute_query(cleanup_query, {
+                std::to_string(cutoff_timestamp),
+                std::to_string(now_timestamp)
+            });
+            
+            size_t cleaned_count = result.size();
+            
+            if (cleaned_count > 0) {
+                logger_->log(LogLevel::INFO, "Cleaned up " + std::to_string(cleaned_count) + 
+                            " expired events from database");
+                
+                // Update metrics
+                if (metrics_) {
+                    metrics_->increment_counter("events_cleaned_up", cleaned_count);
+                }
+            }
+        }
+        
+        // Also cleanup from in-memory caches if applicable
+        std::lock_guard<std::mutex> lock(event_cache_mutex_);
+        size_t memory_cleaned = 0;
+        for (auto it = event_cache_.begin(); it != event_cache_.end();) {
+            if (it->second->get_timestamp() < cutoff_time) {
+                it = event_cache_.erase(it);
+                memory_cleaned++;
+            } else {
+                ++it;
+            }
+        }
+        
+        if (memory_cleaned > 0) {
+            logger_->log(LogLevel::DEBUG, "Cleaned up " + std::to_string(memory_cleaned) + 
+                        " expired events from memory cache");
+        }
+        
+        logger_->log(LogLevel::DEBUG, "Event cleanup cycle completed");
+    }
+    catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Event cleanup failed: " + std::string(e.what()));
+    }
 }
 
 bool EventBus::route_event(std::unique_ptr<Event> event) {

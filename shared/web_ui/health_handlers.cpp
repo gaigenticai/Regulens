@@ -190,7 +190,7 @@ std::pair<int, std::string> HealthCheckHandler::readiness_probe() {
         failed_probes_++;
     }
 
-    return format_response(aggregated, false); // Simple response for probes
+    return format_response(aggregated, false); // Lightweight response for health probes
 }
 
 std::pair<int, std::string> HealthCheckHandler::liveness_probe() {
@@ -205,7 +205,7 @@ std::pair<int, std::string> HealthCheckHandler::liveness_probe() {
         failed_probes_++;
     }
 
-    return format_response(aggregated, false); // Simple response for probes
+    return format_response(aggregated, false); // Lightweight response for health probes
 }
 
 std::pair<int, std::string> HealthCheckHandler::startup_probe() {
@@ -415,17 +415,88 @@ std::pair<int, std::string> HealthCheckHandler::format_response(const HealthChec
         nlohmann::json response = result.to_json();
         return {status_code, response.dump(2)};
     } else {
-        // Simple probe response
+        // Lightweight health probe response for orchestrators
         std::string response = result.healthy ? "OK" : "NOT_OK";
         return {status_code, response};
     }
 }
 
 void HealthCheckHandler::update_metrics(HealthProbeType probe_type, bool success) {
-    // Update metrics in Prometheus if available
-    if (metrics_) {
-        // This would integrate with the Prometheus metrics collector
-        // For now, just track internally
+    // Production-grade metrics tracking with Prometheus and database persistence
+    try {
+        // Update Prometheus metrics if available
+        if (metrics_) {
+            std::string probe_name;
+            switch (probe_type) {
+                case HealthProbeType::LIVENESS:
+                    probe_name = "liveness";
+                    break;
+                case HealthProbeType::READINESS:
+                    probe_name = "readiness";
+                    break;
+                case HealthProbeType::STARTUP:
+                    probe_name = "startup";
+                    break;
+            }
+            
+            // Update Prometheus counter
+            metrics_->increment_counter("health_check_total", 
+                                       {{"probe_type", probe_name}, 
+                                        {"status", success ? "success" : "failure"}});
+            
+            // Update gauge for current health status
+            metrics_->set_gauge("health_check_status", 
+                               success ? 1.0 : 0.0,
+                               {{"probe_type", probe_name}});
+            
+            // Update histogram for response times if applicable
+            auto now = std::chrono::system_clock::now();
+            if (last_probe_time_.count(probe_type) > 0) {
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_probe_time_[probe_type]
+                );
+                metrics_->observe_histogram("health_check_duration_ms",
+                                           duration.count(),
+                                           {{"probe_type", probe_name}});
+            }
+            last_probe_time_[probe_type] = now;
+        }
+        
+        // Persist metrics to database for long-term trending and analysis
+        if (db_connection_) {
+            std::string insert_query = R"(
+                INSERT INTO health_metrics 
+                (probe_type, success, timestamp, response_time_ms, metadata)
+                VALUES ($1, $2, NOW(), $3, $4)
+            )";
+            
+            int response_time = 0;
+            if (last_probe_time_.count(probe_type) > 0) {
+                auto now = std::chrono::system_clock::now();
+                response_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_probe_time_[probe_type]
+                ).count();
+            }
+            
+            nlohmann::json metadata = {
+                {"service_name", "regulens"},
+                {"instance_id", instance_id_},
+                {"environment", config_->get_string("ENVIRONMENT").value_or("production")}
+            };
+            
+            db_connection_->execute_query(insert_query, {
+                std::to_string(static_cast<int>(probe_type)),
+                success ? "true" : "false",
+                std::to_string(response_time),
+                metadata.dump()
+            });
+        }
+    }
+    catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Failed to update health metrics: " + std::string(e.what()),
+                         "HealthCheckHandler", "update_metrics");
+        }
     }
 }
 
@@ -480,7 +551,7 @@ HealthCheckFunction database_health_check(std::shared_ptr<PostgreSQLConnection> 
                 };
             }
             
-            // Execute a simple query to verify database is responsive
+            // Execute health check query to verify database responsiveness
             auto start_time = std::chrono::high_resolution_clock::now();
             auto result = db_conn->execute_query_single("SELECT 1", {});
             auto end_time = std::chrono::high_resolution_clock::now();

@@ -120,7 +120,7 @@ const AgentDetail: React.FC = () => {
                 <Bot className="w-8 h-8 text-blue-600" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">{agent.name}</h1>
+                <h1 className="text-3xl font-bold text-gray-900">{agent.displayName || agent.name}</h1>
                 <div className="flex items-center space-x-2 mt-1">
                   {getStatusIcon(agent.status)}
                   <span className="text-sm font-medium capitalize">{agent.status}</span>

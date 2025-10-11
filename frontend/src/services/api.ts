@@ -9,7 +9,6 @@ import type * as API from '@/types/api';
 
 class RegulesAPIClient {
   private client: AxiosInstance;
-  private token: string | null = null;
 
   constructor(baseURL: string = '/api') {
     this.client = axios.create({
@@ -18,31 +17,21 @@ class RegulesAPIClient {
       headers: {
         'Content-Type': 'application/json',
       },
-      withCredentials: false, // Not needed for JWT in header
+      // DATABASE-BACKED SESSIONS: Enable credentials to send/receive HttpOnly cookies
+      withCredentials: true,
     });
 
     this.setupInterceptors();
-    this.loadTokenFromStorage();
+    // NO TOKEN LOADING - Sessions are handled via HttpOnly cookies
   }
 
   private setupInterceptors(): void {
-    // Request interceptor - add auth token
-    this.client.interceptors.request.use(
-      (config: InternalAxiosRequestConfig) => {
-        if (this.token && config.headers) {
-          config.headers.Authorization = `Bearer ${this.token}`;
-        }
-        return config;
-      },
-      (error: AxiosError) => Promise.reject(error)
-    );
-
     // Response interceptor - handle errors
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError<API.APIError>) => {
         if (error.response?.status === 401) {
-          this.clearToken();
+          // Session expired or invalid - trigger logout
           window.dispatchEvent(new Event('auth:logout'));
         }
         return Promise.reject(error);
@@ -50,25 +39,10 @@ class RegulesAPIClient {
     );
   }
 
-  private loadTokenFromStorage(): void {
-    const stored = localStorage.getItem('regulens_token');
-    if (stored) {
-      this.token = stored;
-    }
-  }
-
-  setToken(token: string): void {
-    this.token = token;
-    localStorage.setItem('regulens_token', token);
-  }
-
-  clearToken(): void {
-    this.token = null;
-    localStorage.removeItem('regulens_token');
-  }
-
+  // NO TOKEN METHODS - Everything handled via HttpOnly cookies
+  // More secure: JavaScript cannot access session tokens
   getToken(): string | null {
-    return this.token;
+    return null; // Token is in HttpOnly cookie, not accessible to JS
   }
 
   // ============================================================================
@@ -76,17 +50,16 @@ class RegulesAPIClient {
   // ============================================================================
 
   async login(credentials: API.LoginRequest, config?: any): Promise<API.LoginResponse> {
-    // Production-grade authentication: Always use real backend API with JWT validation
-    // No development shortcuts - ensures consistent behavior across all environments
+    // DATABASE-BACKED SESSIONS: Backend returns user data + sets HttpOnly cookie
+    // No token storage needed - cookie is automatically sent with future requests
     const response = await this.client.post<API.LoginResponse>('/auth/login', credentials, config);
-    this.setToken(response.data.token);
     return response.data;
   }
 
   async logout(config?: any): Promise<void> {
-    // Production-grade logout: Always call backend to invalidate session
+    // DATABASE-BACKED SESSIONS: Backend invalidates session in DB and clears cookie
     await this.client.post('/auth/logout', {}, config);
-    this.clearToken();
+    // No client-side cleanup needed - cookie is cleared by backend
   }
 
   async getCurrentUser(): Promise<API.User> {
@@ -100,38 +73,20 @@ class RegulesAPIClient {
   // ============================================================================
 
   async getRecentActivity(limit: number = 50): Promise<API.ActivityItem[]> {
-    // Try multiple endpoints to ensure compatibility with backend
-    const endpoints = [
-      '/activity',
-      '/api/activity', 
-      '/api/activities/recent',
-      '/api/v1/compliance/activities'
-    ];
+    // Production-grade: Fetch from real database only
+    const response = await this.client.get<any>('/activities', {
+      params: { limit },
+    });
     
-    for (const endpoint of endpoints) {
-      try {
-        const response = await this.client.get<any>(endpoint, {
-          params: { limit },
-        });
-        
-        // Handle different response formats
-        if (Array.isArray(response.data)) {
-          return this.normalizeActivityItems(response.data);
-        } else if (response.data.activities && Array.isArray(response.data.activities)) {
-          return this.normalizeActivityItems(response.data.activities);
-        } else if (response.data.data && Array.isArray(response.data.data)) {
-          return this.normalizeActivityItems(response.data.data);
-        }
-      } catch (error: any) {
-        if (error?.response?.status !== 404) {
-          console.warn(`Activity endpoint ${endpoint} failed:`, error?.message);
-        }
-        continue;
-      }
+    // Handle response - production data only, no fallbacks
+    if (Array.isArray(response.data)) {
+      return this.normalizeActivityItems(response.data);
+    } else if (response.data.activities && Array.isArray(response.data.activities)) {
+      return this.normalizeActivityItems(response.data.activities);
     }
     
-    // If all endpoints fail, generate production-grade synthetic data based on system metrics
-    return this.generateProductionActivityData(limit);
+    // Return empty array if no data (database may be empty)
+    return [];
   }
 
   private normalizeActivityItems(rawData: any[]): API.ActivityItem[] {
@@ -172,157 +127,18 @@ class RegulesAPIClient {
     return 'low';
   }
 
-  private async generateProductionActivityData(limit: number): Promise<API.ActivityItem[]> {
-    try {
-      // Get real system metrics to generate meaningful activity data
-      const systemMetrics = await this.getSystemMetrics();
-      const healthStatus = await this.getHealth();
-      
-      const activities: API.ActivityItem[] = [];
-      const now = new Date();
-      
-      // Generate system monitoring activities based on real metrics
-      if (systemMetrics) {
-        activities.push({
-          id: `sys_${Date.now()}_1`,
-          timestamp: new Date(now.getTime() - 1000 * 60 * 5).toISOString(),
-          type: 'compliance_alert',
-          title: 'System Performance Monitor',
-          description: `System metrics: CPU ${systemMetrics.cpuUsage}%, Memory ${systemMetrics.memoryUsage}%, Disk ${systemMetrics.diskUsage}%`,
-          priority: systemMetrics.cpuUsage > 80 ? 'high' : 'low',
-          actor: 'System Monitor',
-          metadata: { metrics: systemMetrics }
-        });
-      }
-      
-      if (healthStatus) {
-        activities.push({
-          id: `health_${Date.now()}_2`,
-          timestamp: new Date(now.getTime() - 1000 * 60 * 2).toISOString(),
-          type: 'agent_action',
-          title: 'Health Check Completed',
-          description: `System health status: ${healthStatus.status} - Service ${healthStatus.service} v${healthStatus.version}`,
-          priority: healthStatus.status === 'healthy' ? 'low' : 'high',
-          actor: 'Health Monitor',
-          metadata: { health: healthStatus }
-        });
-      }
-      
-      // Generate compliance monitoring activities
-      const complianceActivities = [
-        {
-          type: 'regulatory_change' as const,
-          title: 'Regulatory Compliance Scan',
-          description: 'Automated compliance rule validation completed',
-          priority: 'medium' as const,
-          actor: 'Compliance Engine'
-        },
-        {
-          type: 'decision_made' as const,
-          title: 'Risk Assessment Decision',
-          description: 'Transaction risk analysis completed with confidence score',
-          priority: 'low' as const,
-          actor: 'Decision Engine'
-        },
-        {
-          type: 'data_ingestion' as const,
-          title: 'Data Ingestion Process',
-          description: 'Regulatory data sources synchronized successfully',
-          priority: 'low' as const,
-          actor: 'Data Ingestion Service'
-        }
-      ];
-      
-      complianceActivities.forEach((activity, index) => {
-        activities.push({
-          id: `comp_${Date.now()}_${index + 3}`,
-          timestamp: new Date(now.getTime() - 1000 * 60 * (10 + index * 5)).toISOString(),
-          ...activity,
-          metadata: { generated: true, timestamp: now.getTime() }
-        });
-      });
-      
-      return activities.slice(0, limit);
-    } catch (error) {
-      console.warn('Failed to generate activity data:', error);
-      return [];
-    }
-  }
 
   async getActivityStats(): Promise<API.ActivityStats> {
-    // Try multiple endpoints for activity stats
-    const endpoints = [
-      '/activity/stats',
-      '/api/activity/stats',
-      '/api/activities/stats',
-      '/api/v1/compliance/stats'
-    ];
+    // Production-grade: Fetch from real database
+    const response = await this.client.get<any>('/activity/stats');
     
-    for (const endpoint of endpoints) {
-      try {
-        const response = await this.client.get<any>(endpoint);
-        
-        // Normalize different response formats
-        const data = response.data;
-        return {
-          total: data.total || data.total_events || data.count || 0,
-          byType: data.byType || data.by_type || data.types || {
-            regulatory_change: 0,
-            decision_made: 0,
-            data_ingestion: 0,
-            agent_action: 0,
-            compliance_alert: 0
-          },
-          byPriority: data.byPriority || data.by_priority || data.priorities || {
-            low: 0,
-            medium: 0,
-            high: 0,
-            critical: 0
-          },
-          last24Hours: data.last24Hours || data.recent || data.daily || 0
-        };
-      } catch (error: any) {
-        if (error?.response?.status !== 404) {
-          console.warn(`Activity stats endpoint ${endpoint} failed:`, error?.message);
-        }
-        continue;
-      }
-    }
-    
-    // Generate stats based on available system data
-    try {
-      const activities = await this.getRecentActivity(100);
-      const now = new Date();
-      const last24Hours = activities.filter(a => {
-        const activityTime = new Date(a.timestamp);
-        return (now.getTime() - activityTime.getTime()) <= 24 * 60 * 60 * 1000;
-      });
-      
-      const byType = activities.reduce((acc, activity) => {
-        acc[activity.type] = (acc[activity.type] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-      
-      const byPriority = activities.reduce((acc, activity) => {
-        acc[activity.priority] = (acc[activity.priority] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-      
-      return {
-        total: activities.length,
-        byType,
-        byPriority,
-        last24Hours: last24Hours.length
-      };
-    } catch (error) {
-      console.warn('Failed to generate activity stats:', error);
-      return {
-        total: 0,
-        byType: {},
-        byPriority: {},
-        last24Hours: 0
-      };
-    }
+    const data = response.data;
+    return {
+      total: data.total_activities || data.total || 0,
+      byType: data.by_type || data.byType || {},
+      byPriority: data.by_priority || data.byPriority || {},
+      last24Hours: data.total_activities || data.last24Hours || 0
+    };
   }
 
   // ============================================================================
@@ -433,7 +249,7 @@ class RegulesAPIClient {
   // ============================================================================
 
   async getAgent(id: string): Promise<API.Agent> {
-    const endpoints = [`/api/agents/${id}`, `/agents/${id}`, `/api/v1/agents/${id}`];
+    const endpoints = [`/agents/${id}`, `/v1/agents/${id}`];
     
     for (const endpoint of endpoints) {
       try {
@@ -451,7 +267,7 @@ class RegulesAPIClient {
   }
 
   async getAgentStats(id: string): Promise<API.AgentStats> {
-    const endpoints = [`/api/agents/${id}/stats`, `/agents/${id}/performance`, `/api/v1/agents/${id}/metrics`];
+    const endpoints = [`/agents/${id}/stats`, `/agents/${id}/performance`, `/v1/agents/${id}/metrics`];
     
     for (const endpoint of endpoints) {
       try {
@@ -509,30 +325,15 @@ class RegulesAPIClient {
   }
 
   async controlAgent(id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-    const endpoints = [`/api/agents/${id}/control`, `/agents/${id}/action`, `/api/v1/agents/${id}/control`];
-    
-    let lastError: Error | null = null;
-    for (const endpoint of endpoints) {
-      try {
-        await this.client.post<void>(endpoint, { action });
-        return;
-      } catch (error: any) {
-        lastError = error;
-        if (error?.response?.status !== 404) {
-          console.warn(`Agent control endpoint ${endpoint} failed:`, error?.message);
-        }
-        continue;
-      }
-    }
-    
-    // All endpoints failed - throw error instead of simulating success
-    throw new Error(`Failed to ${action} agent ${id}: No valid control endpoint found. Last error: ${lastError?.message || 'Unknown error'}`);
+    // baseURL already includes /api, so endpoint should start with /agents
+    await this.client.post<void>(`/agents/${id}/control`, { action });
   }
 
   private normalizeAgent(agent: any): API.Agent {
     return {
       id: agent.id || agent.agent_id,
       name: agent.name || agent.agent_name || `Agent ${agent.id}`,
+      displayName: agent.displayName || agent.display_name || agent.name || `Agent ${agent.id}`,
       type: agent.type || agent.agent_type || 'compliance',
       status: agent.status || 'idle',
       capabilities: agent.capabilities || agent.features || [],
@@ -860,7 +661,7 @@ class RegulesAPIClient {
   }
 
   async getSystemMetrics(): Promise<API.SystemMetrics> {
-    const response = await this.client.get<any>('/api/v1/metrics/system');
+    const response = await this.client.get<any>('/v1/metrics/system');
     const data = response.data;
     
     // Normalize backend response format to match our types
@@ -877,7 +678,7 @@ class RegulesAPIClient {
   }
 
   async getCircuitBreakerStatus(): Promise<API.CircuitBreakerStatus[]> {
-    const response = await this.client.get<API.CircuitBreakerStatus[]>('/api/circuit-breaker/status');
+    const response = await this.client.get<API.CircuitBreakerStatus[]>('/circuit-breaker/status');
     return response.data;
   }
 
@@ -1414,7 +1215,11 @@ class RegulesAPIClient {
 }
 
 // Export singleton instance
-// For native development, point directly to backend to avoid proxy issues
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
+// Development vs Production strategy:
+// - Development: Direct connection to backend (works for Chrome, Firefox, Edge)
+// - Production: Environment variable or relative URL
+const isDevelopment = import.meta.env.MODE === 'development';
+const baseURL = import.meta.env.VITE_API_BASE_URL || 
+  (isDevelopment ? 'http://localhost:8080/api' : '/api');
 export const apiClient = new RegulesAPIClient(baseURL);
 export default apiClient;

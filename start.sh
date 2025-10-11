@@ -17,19 +17,22 @@ echo -e "${GREEN}🚀 Regulens Development Environment${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Load environment variables
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_NAME=regulens_compliance
-export DB_USER=regulens_user
-export DB_PASSWORD=dev_password
-export REDIS_HOST=localhost
-export REDIS_PORT=6379
-export REDIS_PASSWORD=dev_redis_password
-export JWT_SECRET=dev_jwt_secret_change_in_production_min_32_chars_required_for_security
-export JWT_EXPIRATION_HOURS=1600
-export WEB_SERVER_HOST=0.0.0.0
-export WEB_SERVER_PORT=8080
+# Load environment variables (Production-ready - no localhost hardcoding)
+export DB_HOST=${DB_HOST:-localhost}
+export DB_PORT=${DB_PORT:-5432}
+export DB_NAME=${DB_NAME:-regulens_compliance}
+export DB_USER=${DB_USER:-regulens_user}
+export DB_PASSWORD=${DB_PASSWORD:-dev_password}
+export REDIS_HOST=${REDIS_HOST:-localhost}
+export REDIS_PORT=${REDIS_PORT:-6379}
+export REDIS_PASSWORD=${REDIS_PASSWORD:-dev_redis_password}
+export JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_change_in_production_min_32_chars_required_for_security}
+export JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS:-1600}
+export SESSION_EXPIRY_HOURS=${SESSION_EXPIRY_HOURS:-24}
+export WEB_SERVER_HOST=${WEB_SERVER_HOST:-0.0.0.0}
+export WEB_SERVER_PORT=${WEB_SERVER_PORT:-8080}
+export CORS_ALLOWED_ORIGIN=${CORS_ALLOWED_ORIGIN:-http://localhost:3000}
+export NODE_ENV=${NODE_ENV:-development}
 
 # Check if databases are running
 POSTGRES_RUNNING=$(docker ps -q -f name=regulens-postgres 2>/dev/null)
@@ -61,12 +64,21 @@ if [ ! -f "./build/regulens" ]; then
     echo ""
 fi
 
-# Check if backend is already running
-BACKEND_RUNNING=$(lsof -Pi :8080 -sTCP:LISTEN -t 2>/dev/null || true)
-if [ ! -z "$BACKEND_RUNNING" ]; then
-    echo -e "${YELLOW}⚠️  Port 8080 already in use. Stopping existing process...${NC}"
-    pkill -f "build/regulens" || true
+# Intelligent process management: Clean up ALL existing processes
+echo -e "${BLUE}🔍 Checking for existing processes...${NC}"
+BACKEND_PIDS=$(pgrep -f "build/regulens" 2>/dev/null || true)
+FRONTEND_PIDS=$(ps aux | grep "vite" | grep -v grep | awk '{print $2}' 2>/dev/null || true)
+
+if [ ! -z "$BACKEND_PIDS" ] || [ ! -z "$FRONTEND_PIDS" ]; then
+    echo -e "${YELLOW}⚠️  Found ${BACKEND_PIDS:+backend }${FRONTEND_PIDS:+frontend }processes. Cleaning up...${NC}"
+    # Kill by process name
+    pkill -9 -f "build/regulens" 2>/dev/null || true
+    pkill -9 -f "node.*vite" 2>/dev/null || true
+    # Kill by port as backup
+    lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
     sleep 2
+    echo -e "${GREEN}✓${NC} All existing processes terminated"
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

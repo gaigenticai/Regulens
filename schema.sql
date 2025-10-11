@@ -1894,6 +1894,7 @@ CREATE TABLE IF NOT EXISTS activity_feed_persistence (
     event_severity VARCHAR(20),
     event_description TEXT,
     event_metadata JSONB,
+    user_id VARCHAR(255),  -- User who performed the action
     occurred_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -2178,3 +2179,30 @@ COMMENT ON TABLE compliance_cases IS 'Case-based reasoning storage with vector s
 COMMENT ON TABLE human_responses IS 'Human-AI collaboration response tracking - audit trail for human decisions';
 COMMENT ON TABLE decision_trees IS 'Decision tree visualization data - supports real-time decision analysis';
 COMMENT ON TABLE fuzzy_match_cache IS 'MinHash signatures for near-duplicate detection - enables efficient similarity matching at scale';
+-- Create sessions table for database-backed session management
+-- This provides secure, server-side session handling without client-side storage
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES user_authentication(user_id) ON DELETE CASCADE,
+    session_token VARCHAR(255) UNIQUE NOT NULL,
+    user_agent TEXT,
+    ip_address INET,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    is_active BOOLEAN DEFAULT true
+);
+
+-- Create indexes for fast session lookups
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active);
+
+-- Comment the table
+COMMENT ON TABLE sessions IS 'Server-side session management with database storage';
+COMMENT ON COLUMN sessions.session_token IS 'Secure random token sent as HttpOnly cookie';
+COMMENT ON COLUMN sessions.expires_at IS 'Session expiration time (default 24 hours)';
+
+

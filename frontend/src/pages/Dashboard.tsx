@@ -5,6 +5,7 @@
  */
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   Bot,
@@ -239,10 +240,21 @@ const Dashboard: React.FC = () => {
 
         {/* Activity Summary */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-blue-600" />
-            Activity Summary
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-blue-600" />
+              Activity Summary
+            </h3>
+            <Link
+              to="/activity"
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 transition-colors"
+            >
+              View all
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          </div>
 
           {data.activityStats ? (
             <div className="space-y-3">

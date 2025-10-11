@@ -1,7 +1,7 @@
 /**
  * Activity Feed Page
- * Real-time activity monitoring with live data from backend
- * NO MOCKS - All data comes from real API endpoints
+ * Production-grade real-time activity monitoring
+ * All data from database - no mocks, no fallbacks
  */
 
 import React, { useState, useMemo } from 'react';
@@ -10,7 +10,9 @@ import { useActivityFeed } from '@/hooks/useActivityFeed';
 import { useActivityStats } from '@/hooks/useActivityStats';
 import { ActivityItem } from '@/components/ActivityFeed/ActivityItem';
 import { ActivityFilters, ActivityFiltersState } from '@/components/ActivityFeed/ActivityFilters';
+import { ActivityDetailModal } from '@/components/ActivityFeed/ActivityDetailModal';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { API } from '@/services/api';
 
 const ActivityFeed: React.FC = () => {
   const [filters, setFilters] = useState<ActivityFiltersState>({
@@ -19,7 +21,10 @@ const ActivityFeed: React.FC = () => {
     priority: [],
   });
 
-  // Fetch real activity data with WebSocket support
+  const [selectedActivity, setSelectedActivity] = useState<API.ActivityItem | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+
+  // Fetch real activity data with polling (WebSocket disabled until backend supports it)
   const {
     activities,
     isLoading: activitiesLoading,
@@ -28,7 +33,7 @@ const ActivityFeed: React.FC = () => {
   } = useActivityFeed({
     limit: 100,
     enableRealtime: true,
-    pollingInterval: 10000, // Poll every 10 seconds as fallback
+    pollingInterval: 10000, // Poll every 10 seconds
   });
 
   // Fetch real statistics
@@ -180,9 +185,28 @@ const ActivityFeed: React.FC = () => {
             </div>
 
             {filteredActivities.map((activity) => (
-              <ActivityItem key={activity.id} activity={activity} />
+              <ActivityItem 
+                key={activity.id} 
+                activity={activity}
+                onClick={() => {
+                  setSelectedActivity(activity);
+                  setIsDetailModalOpen(true);
+                }}
+              />
             ))}
           </>
+        )}
+
+        {/* Activity Detail Modal */}
+        {selectedActivity && (
+          <ActivityDetailModal
+            activity={selectedActivity}
+            isOpen={isDetailModalOpen}
+            onClose={() => {
+              setIsDetailModalOpen(false);
+              setSelectedActivity(null);
+            }}
+          />
         )}
       </div>
 

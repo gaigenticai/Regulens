@@ -797,3 +797,430 @@ export interface CollaborationStats {
     sessionCount: number;
   }>;
 }
+
+// ============================================================================
+// FEATURE 1: REAL-TIME COLLABORATION DASHBOARD
+// ============================================================================
+
+export interface CollaborationSession {
+  session_id: string;
+  title: string;
+  description: string;
+  objective: string;
+  status: 'active' | 'paused' | 'completed' | 'archived' | 'cancelled';
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  started_at?: string;
+  completed_at?: string;
+  agent_ids?: string[];
+  context?: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReasoningStep {
+  stream_id: string;
+  session_id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_type: string;
+  reasoning_step: string;
+  step_number: number;
+  step_type: 'thinking' | 'analyzing' | 'deciding' | 'executing' | 'completed' | 'error';
+  confidence_score: number;
+  timestamp: string;
+  duration_ms?: number;
+  metadata?: Record<string, unknown>;
+  parent_step_id?: string;
+}
+
+export interface ConfidenceMetric {
+  metric_id: string;
+  session_id: string;
+  decision_id?: string;
+  stream_id?: string;
+  metric_type: 'data_quality' | 'model_confidence' | 'rule_match' | 'historical_accuracy' | 'consensus';
+  metric_name: string;
+  metric_value: number;
+  weight: number;
+  contributing_factors: string[];
+  calculated_at: string;
+}
+
+export interface HumanOverride {
+  override_id: string;
+  decision_id?: string;
+  session_id?: string;
+  user_id: string;
+  user_name: string;
+  original_decision: string;
+  override_decision: string;
+  reason: string;
+  justification?: string;
+  impact_assessment?: Record<string, unknown>;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CollaborationAgent {
+  participant_id: string;
+  session_id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_type: string;
+  role: 'participant' | 'observer' | 'facilitator' | 'leader';
+  status: 'active' | 'inactive' | 'disconnected' | 'completed';
+  joined_at: string;
+  left_at?: string;
+  contribution_count: number;
+  last_activity_at?: string;
+  performance_metrics?: Record<string, unknown>;
+}
+
+export interface CollaborationDashboardStats {
+  total_sessions: number;
+  active_sessions: number;
+  total_reasoning_steps: number;
+  total_overrides: number;
+}
+
+export interface CreateSessionRequest {
+  title: string;
+  description?: string;
+  objective?: string;
+  created_by: string;
+  agent_ids?: string[];
+  context?: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+}
+
+export interface RecordOverrideRequest {
+  session_id?: string;
+  decision_id?: string;
+  user_id: string;
+  user_name: string;
+  original_decision: string;
+  override_decision: string;
+  reason: string;
+  justification?: string;
+  impact_assessment?: Record<string, unknown>;
+}
+
+// ============================================================================
+// FEATURE 2: REGULATORY CHANGE ALERTS WITH EMAIL
+// ============================================================================
+
+export interface AlertRule {
+  rule_id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  severity_filter: string[];
+  source_filter?: string[];
+  keyword_filters?: string[];
+  notification_channels: string[];
+  recipients: string[];
+  throttle_minutes: number;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  last_triggered_at?: string;
+  trigger_count: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AlertDeliveryLog {
+  delivery_id: string;
+  rule_id: string;
+  regulatory_change_id?: string;
+  recipient: string;
+  channel: string;
+  status: 'pending' | 'sent' | 'failed' | 'throttled' | 'bounced';
+  sent_at: string;
+  delivered_at?: string;
+  error_message?: string;
+  retry_count: number;
+  message_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AlertTemplate {
+  template_id: string;
+  name: string;
+  template_type: 'email' | 'slack' | 'sms';
+  subject_template?: string;
+  body_template: string;
+  variables: string[];
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertStats {
+  total_rules: number;
+  active_rules: number;
+  total_deliveries: number;
+  successful_deliveries: number;
+}
+
+export interface CreateAlertRuleRequest {
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  severity_filter?: string[];
+  source_filter?: string[];
+  keyword_filters?: string[];
+  notification_channels?: string[];
+  recipients: string[];
+  throttle_minutes?: number;
+  created_by?: string;
+}
+
+// ============================================================================
+// FEATURE 3: EXPORT/REPORTING MODULE
+// ============================================================================
+
+export interface ExportRequest {
+  export_id: string;
+  export_type: 'pdf_audit_trail' | 'excel_transactions' | 'pdf_compliance_report' | 'excel_regulatory_changes' | 'pdf_decision_analysis' | 'csv_data_export';
+  requested_by: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  parameters?: Record<string, unknown>;
+  file_path?: string;
+  file_size_bytes?: number;
+  download_url?: string;
+  download_count: number;
+  expires_at?: string;
+  created_at: string;
+  completed_at?: string;
+  error_message?: string;
+  processing_time_ms?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ExportTemplate {
+  template_id: string;
+  name: string;
+  export_type: string;
+  description: string;
+  template_config: Record<string, unknown>;
+  is_default: boolean;
+  is_public: boolean;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  usage_count: number;
+}
+
+export interface CreateExportRequest {
+  export_type: string;
+  requested_by: string;
+  parameters?: Record<string, unknown>;
+}
+
+// ============================================================================
+// FEATURE 4: API KEY MANAGEMENT UI
+// ============================================================================
+
+export interface LLMApiKey {
+  key_id: string;
+  provider: 'openai' | 'anthropic' | 'cohere' | 'huggingface' | 'google' | 'azure_openai' | 'custom';
+  key_name: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at?: string;
+  usage_count: number;
+  rate_limit_per_minute?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LLMKeyUsageStats {
+  provider: string;
+  total_requests: number;
+  total_tokens: number;
+  total_cost: number;
+}
+
+export interface CreateLLMKeyRequest {
+  provider: string;
+  key_name: string;
+  api_key: string;
+  created_by: string;
+  rate_limit_per_minute?: number;
+}
+
+// ============================================================================
+// FEATURE 5: PREDICTIVE COMPLIANCE RISK SCORING
+// ============================================================================
+
+export interface RiskPrediction {
+  prediction_id: string;
+  entity_type: 'transaction' | 'regulatory_change' | 'policy' | 'vendor' | 'process';
+  entity_id: string;
+  risk_score: number;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  confidence_score: number;
+  predicted_at: string;
+}
+
+export interface MLModel {
+  model_id: string;
+  model_name: string;
+  model_type: string;
+  model_version: string;
+  accuracy_score: number;
+  is_active: boolean;
+}
+
+export interface RiskDashboardStats {
+  total_predictions: number;
+  critical_risks: number;
+  high_risks: number;
+  avg_risk_score: number;
+}
+
+// ============================================================================
+// FEATURE 7: REGULATORY CHANGE SIMULATOR
+// ============================================================================
+
+export interface RegulatorySimulation {
+  simulation_id: string;
+  name: string;
+  simulation_type: 'regulatory_change' | 'policy_update' | 'market_shift' | 'risk_event' | 'custom';
+  status: 'draft' | 'running' | 'completed' | 'failed' | 'archived';
+  created_by: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface SimulationTemplate {
+  template_id: string;
+  template_name: string;
+  template_category: string;
+  description: string;
+  usage_count: number;
+}
+
+export interface CreateSimulationRequest {
+  name: string;
+  simulation_type: string;
+  created_by: string;
+}
+
+// ============================================================================
+// FEATURE 8: ADVANCED ANALYTICS & BI DASHBOARD
+// ============================================================================
+
+export interface BIDashboard {
+  dashboard_id: string;
+  dashboard_name: string;
+  dashboard_type: 'executive' | 'operational' | 'compliance' | 'risk' | 'custom';
+  description: string;
+  view_count: number;
+  created_at: string;
+}
+
+export interface AnalyticsMetric {
+  metric_name: string;
+  metric_category: string;
+  metric_value: number;
+  metric_unit: string;
+  aggregation_period: string;
+  calculated_at: string;
+}
+
+export interface DataInsight {
+  insight_id: string;
+  insight_type: 'trend' | 'anomaly' | 'pattern' | 'correlation' | 'recommendation';
+  title: string;
+  description: string;
+  confidence_score: number;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  discovered_at: string;
+}
+
+export interface AnalyticsStats {
+  total_dashboards: number;
+  recent_metrics: number;
+  active_insights: number;
+}
+
+// FEATURE 10: Natural Language Policy Builder
+export interface NLPolicyRule {
+  rule_id: string;
+  rule_name: string;
+  natural_language_input: string;
+  rule_type: string;
+  is_active: boolean;
+  confidence_score: number;
+  validation_status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+}
+
+export interface CreateNLPolicyRequest {
+  natural_language_input: string;
+  rule_name?: string;
+  rule_type?: string;
+  created_by: string;
+}
+
+// FEATURE 12: Regulatory Chatbot
+export interface ChatbotConversation {
+  conversation_id: string;
+  platform: string;
+  user_id: string;
+  message_count: number;
+  started_at: string;
+  is_active: boolean;
+}
+
+export interface ChatbotMessage {
+  message: string;
+  conversation_id?: string;
+}
+
+export interface ChatbotResponse {
+  response: string;
+  confidence: number;
+}
+
+// FEATURE 13: Integration Marketplace
+export interface IntegrationConnector {
+  connector_id: string;
+  connector_name: string;
+  connector_type: string;
+  vendor: string;
+  is_verified: boolean;
+  is_active: boolean;
+  install_count: number;
+  rating: number | null;
+}
+
+export interface IntegrationInstance {
+  instance_id: string;
+  instance_name: string;
+  connector_name: string;
+  is_enabled: boolean;
+  last_sync_at: string;
+  sync_status: string;
+}
+
+// FEATURE 14: Compliance Training Module
+export interface TrainingCourse {
+  course_id: string;
+  course_name: string;
+  course_category: string;
+  difficulty_level: string;
+  estimated_duration_minutes: number | null;
+  is_required: boolean;
+  passing_score: number;
+  points_reward: number;
+}
+
+export interface TrainingLeaderboardEntry {
+  user_id: string;
+  total_points: number;
+  courses_completed: number;
+  rank: number | null;
+}

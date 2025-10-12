@@ -37,6 +37,40 @@ const PatternAnalysis = lazy(() => import('@/pages/PatternAnalysis'));
 const LLMAnalysis = lazy(() => import('@/pages/LLMAnalysis'));
 const AgentCollaboration = lazy(() => import('@/pages/AgentCollaboration'));
 
+// Feature 1: Real-Time Collaboration Dashboard
+const CollaborationDashboard = lazy(() => import('@/pages/CollaborationDashboard'));
+const CollaborationSessionDetail = lazy(() => import('@/pages/CollaborationSessionDetail'));
+
+// Feature 2: Regulatory Change Alerts with Email
+const AlertManagement = lazy(() => import('@/pages/AlertManagement'));
+
+// Feature 3: Export/Reporting Module
+const ExportsReports = lazy(() => import('@/pages/ExportsReports'));
+
+// Feature 4: API Key Management UI
+const LLMKeyManagement = lazy(() => import('@/pages/LLMKeyManagement'));
+
+// Feature 5: Predictive Compliance Risk Scoring
+const RiskScoring = lazy(() => import('@/pages/RiskScoring'));
+
+// Feature 7: Regulatory Change Simulator
+const RegulatorySimulator = lazy(() => import('@/pages/RegulatorySimulator'));
+
+// Feature 8: Advanced Analytics & BI Dashboard
+const AnalyticsDashboard = lazy(() => import('@/pages/AnalyticsDashboard'));
+
+// Feature 10: Natural Language Policy Builder
+const NLPolicyBuilder = lazy(() => import('@/pages/NLPolicyBuilder'));
+
+// Feature 12: Regulatory Chatbot
+const RegulatoryChatbot = lazy(() => import('@/pages/RegulatoryChatbot'));
+
+// Feature 13: Integration Marketplace
+const IntegrationMarketplace = lazy(() => import('@/pages/IntegrationMarketplace'));
+
+// Feature 14: Compliance Training Module
+const ComplianceTraining = lazy(() => import('@/pages/ComplianceTraining'));
+
 // System & Monitoring - Production-grade implementations
 const SystemMetrics = lazy(() => import('@/pages/SystemMetrics'));
 const CircuitBreakers = lazy(() => import('@/pages/CircuitBreakers'));
@@ -171,6 +205,89 @@ export const routes: AppRoute[] = [
     element: AgentCollaboration,
     showInNav: true,
     icon: 'Users',
+  },
+  {
+    path: '/collaboration',
+    name: 'Collaboration Dashboard',
+    element: CollaborationDashboard,
+    showInNav: true,
+    icon: 'Brain',
+  },
+  {
+    path: '/collaboration/:sessionId',
+    name: 'Session Detail',
+    element: CollaborationSessionDetail,
+    showInNav: false,
+  },
+  {
+    path: '/alerts',
+    name: 'Alert Management',
+    element: AlertManagement,
+    showInNav: true,
+    icon: 'Bell',
+  },
+  {
+    path: '/exports',
+    name: 'Exports & Reports',
+    element: ExportsReports,
+    showInNav: true,
+    icon: 'Download',
+  },
+  {
+    path: '/llm-keys',
+    name: 'LLM API Keys',
+    element: LLMKeyManagement,
+    showInNav: true,
+    icon: 'Key',
+  },
+  {
+    path: '/risk-scoring',
+    name: 'Risk Scoring',
+    element: RiskScoring,
+    showInNav: true,
+    icon: 'AlertTriangle',
+  },
+  {
+    path: '/simulator',
+    name: 'Regulatory Simulator',
+    element: RegulatorySimulator,
+    showInNav: true,
+    icon: 'Play',
+  },
+  {
+    path: '/analytics',
+    name: 'Analytics Dashboard',
+    element: AnalyticsDashboard,
+    showInNav: true,
+    icon: 'BarChart3',
+  },
+  {
+    path: '/nl-policies',
+    name: 'NL Policy Builder',
+    element: NLPolicyBuilder,
+    showInNav: true,
+    icon: 'Sparkles',
+  },
+  {
+    path: '/chatbot',
+    name: 'Regulatory Chatbot',
+    element: RegulatoryChatbot,
+    showInNav: true,
+    icon: 'MessageCircle',
+  },
+  {
+    path: '/integrations',
+    name: 'Integrations',
+    element: IntegrationMarketplace,
+    showInNav: true,
+    icon: 'Package',
+  },
+  {
+    path: '/training',
+    name: 'Compliance Training',
+    element: ComplianceTraining,
+    showInNav: true,
+    icon: 'GraduationCap',
   },
   {
     path: '/metrics',

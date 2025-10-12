@@ -282,13 +282,14 @@ private:
         
         while (agent_running_[agent_id]) {
             try {
-                // Query for new transactions to process
-                std::string query = "SELECT transaction_id, customer_id, amount, currency, "
+                // Query for new transactions to process (FIXED: Using parameterized query)
+                const char* query = "SELECT transaction_id, customer_id, amount, currency, "
                                    "transaction_type, merchant_name, country_code, timestamp "
-                                   "FROM transactions WHERE transaction_id > '" + last_processed_id + "' "
+                                   "FROM transactions WHERE transaction_id > $1 "
                                    "ORDER BY timestamp ASC LIMIT 10";
-                
-                PGresult* result = PQexec(db_conn_, query.c_str());
+
+                const char* paramValues[1] = { last_processed_id.c_str() };
+                PGresult* result = PQexecParams(db_conn_, query, 1, NULL, paramValues, NULL, NULL, 0);
                 
                 if (PQresultStatus(result) == PGRES_TUPLES_OK) {
                     int rows = PQntuples(result);
@@ -463,11 +464,12 @@ private:
                                                "' requires review. Impact level: " + impact_level;
                         
                         store_regulatory_assessment(agent_id, change_id, assessment, impact_level);
-                        
-                        // Mark as assessed
-                        std::string update = "UPDATE regulatory_changes SET status = 'assessed' "
-                                           "WHERE change_id = '" + change_id + "'";
-                        PQexec(db_conn_, update.c_str());
+
+                        // Mark as assessed (FIXED: Using parameterized query)
+                        const char* update = "UPDATE regulatory_changes SET status = 'assessed' "
+                                           "WHERE change_id = $1";
+                        const char* updateParams[1] = { change_id.c_str() };
+                        PQexecParams(db_conn_, update, 1, NULL, updateParams, NULL, NULL, 0);
                         
                         tasks_completed_[agent_id]++;
                         tasks_successful_[agent_id]++;
@@ -491,65 +493,105 @@ private:
     
     // Helper methods
     void store_agent_decision(const std::string& agent_id, const std::string& entity_id,
-                             const std::string& decision, double confidence, 
+                             const std::string& decision, double confidence,
                              const std::string& rationale) {
-        std::string query = "INSERT INTO agent_decisions "
+        // FIXED: Using parameterized query to prevent SQL injection
+        const char* query = "INSERT INTO agent_decisions "
                            "(agent_id, entity_id, decision_type, decision_outcome, "
                            "confidence_score, requires_review, decision_rationale, created_at) "
-                           "VALUES ('" + agent_id + "', '" + entity_id + "', 'transaction', '" + 
-                           decision + "', " + std::to_string(confidence) + ", " +
-                           (decision == "review" ? "true" : "false") + ", '" + rationale + "', NOW())";
-        
-        PQexec(db_conn_, query.c_str());
+                           "VALUES ($1, $2, 'transaction', $3, $4, $5, $6, NOW())";
+
+        std::string confidence_str = std::to_string(confidence);
+        std::string requires_review = (decision == "review") ? "true" : "false";
+
+        const char* paramValues[6] = {
+            agent_id.c_str(),
+            entity_id.c_str(),
+            decision.c_str(),
+            confidence_str.c_str(),
+            requires_review.c_str(),
+            rationale.c_str()
+        };
+
+        PQexecParams(db_conn_, query, 6, NULL, paramValues, NULL, NULL, 0);
     }
     
     void store_audit_alert(const std::string& agent_id, const std::string& alert_type,
                           const std::string& message) {
-        std::string query = "INSERT INTO activity_feed_persistence "
+        // FIXED: Using parameterized query and proper JSON construction
+        nlohmann::json activity_data;
+        activity_data["agent_id"] = agent_id;
+        activity_data["type"] = alert_type;
+        activity_data["message"] = message;
+        std::string json_str = activity_data.dump();
+
+        const char* query = "INSERT INTO activity_feed_persistence "
                            "(activity_type, activity_data, created_at) "
-                           "VALUES ('audit_alert', '{\"agent_id\": \"" + agent_id + 
-                           "\", \"type\": \"" + alert_type + "\", \"message\": \"" + message + "\"}', NOW())";
-        
-        PQexec(db_conn_, query.c_str());
+                           "VALUES ('audit_alert', $1, NOW())";
+
+        const char* paramValues[1] = { json_str.c_str() };
+        PQexecParams(db_conn_, query, 1, NULL, paramValues, NULL, NULL, 0);
     }
     
     void store_regulatory_assessment(const std::string& agent_id, const std::string& change_id,
                                      const std::string& assessment, const std::string& impact) {
-        std::string query = "INSERT INTO agent_decisions "
+        // FIXED: Using parameterized query to prevent SQL injection
+        const char* query = "INSERT INTO agent_decisions "
                            "(agent_id, entity_id, decision_type, decision_outcome, "
                            "decision_rationale, created_at) "
-                           "VALUES ('" + agent_id + "', '" + change_id + "', 'regulatory_assessment', '" +
-                           impact + "', '" + assessment + "', NOW())";
-        
-        PQexec(db_conn_, query.c_str());
+                           "VALUES ($1, $2, 'regulatory_assessment', $3, $4, NOW())";
+
+        const char* paramValues[4] = {
+            agent_id.c_str(),
+            change_id.c_str(),
+            impact.c_str(),
+            assessment.c_str()
+        };
+
+        PQexecParams(db_conn_, query, 4, NULL, paramValues, NULL, NULL, 0);
     }
     
     void update_performance_metrics(const std::string& agent_id) {
         int completed = tasks_completed_[agent_id].load();
         int successful = tasks_successful_[agent_id].load();
         long total_time = total_response_time_ms_[agent_id].load();
-        
+
         double success_rate = completed > 0 ? (double)successful / completed * 100.0 : 0.0;
         double avg_response_time = completed > 0 ? (double)total_time / completed : 0.0;
-        
-        std::string query = "UPDATE agent_performance_metrics SET "
-                           "tasks_completed = " + std::to_string(completed) + ", "
-                           "success_rate = " + std::to_string(success_rate) + ", "
-                           "avg_response_time = " + std::to_string(avg_response_time) + ", "
+
+        // FIXED: Using parameterized query to prevent SQL injection
+        const char* query = "UPDATE agent_performance_metrics SET "
+                           "tasks_completed = $1, "
+                           "success_rate = $2, "
+                           "avg_response_time = $3, "
                            "last_active = NOW() "
-                           "WHERE agent_id = '" + agent_id + "'";
-        
-        PQexec(db_conn_, query.c_str());
+                           "WHERE agent_id = $4";
+
+        std::string completed_str = std::to_string(completed);
+        std::string success_rate_str = std::to_string(success_rate);
+        std::string avg_response_time_str = std::to_string(avg_response_time);
+
+        const char* paramValues[4] = {
+            completed_str.c_str(),
+            success_rate_str.c_str(),
+            avg_response_time_str.c_str(),
+            agent_id.c_str()
+        };
+
+        PQexecParams(db_conn_, query, 4, NULL, paramValues, NULL, NULL, 0);
     }
     
     void update_agent_status(const std::string& agent_id, const std::string& status) {
-        std::string query = "UPDATE agent_runtime_status SET status = '" + status + "', "
-                           "last_heartbeat = NOW() WHERE agent_id = '" + agent_id + "'";
-        PQexec(db_conn_, query.c_str());
-        
-        query = "UPDATE agent_configurations SET status = '" + status + "' "
-                "WHERE config_id = '" + agent_id + "'";
-        PQexec(db_conn_, query.c_str());
+        // FIXED: Using parameterized queries to prevent SQL injection
+        const char* query1 = "UPDATE agent_runtime_status SET status = $1, "
+                            "last_heartbeat = NOW() WHERE agent_id = $2";
+        const char* paramValues1[2] = { status.c_str(), agent_id.c_str() };
+        PQexecParams(db_conn_, query1, 2, NULL, paramValues1, NULL, NULL, 0);
+
+        const char* query2 = "UPDATE agent_configurations SET status = $1 "
+                            "WHERE config_id = $2";
+        const char* paramValues2[2] = { status.c_str(), agent_id.c_str() };
+        PQexecParams(db_conn_, query2, 2, NULL, paramValues2, NULL, NULL, 0);
     }
 };
 
@@ -2355,6 +2397,1293 @@ public:
         return ss.str();
     }
 
+    // Feature 12: Regulatory Chatbot API Handler
+    std::string handle_chatbot_request(const std::string& path, const std::string& method,
+                                       const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/chatbot/conversations - List conversations
+        if (path == "/api/v1/chatbot/conversations" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT conversation_id, platform, user_id, message_count, started_at, is_active FROM chatbot_conversations ORDER BY last_message_at DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"conversation_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"platform\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"user_id\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"message_count\":" << PQgetvalue(result, i, 3) << ",";
+                    ss << "\"started_at\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"is_active\":" << (std::string(PQgetvalue(result, i, 5)) == "t" ? "true" : "false");
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/chatbot/messages - Send message
+        else if (path == "/api/v1/chatbot/messages" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string message_text = req.value("message", "");
+                std::string conversation_id = req.value("conversation_id", "new");
+                
+                // Simulate GPT-4 response (in production, call actual GPT-4 API)
+                std::string bot_response = "I understand your query about regulatory compliance. Based on the knowledge base, I can help with specific regulations, recent changes, and compliance requirements. What would you like to know more about?";
+                
+                response = "{\"response\":\"" + bot_response + "\",\"confidence\":0.92}";
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 13: Integration Marketplace API Handler
+    std::string handle_integrations_request(const std::string& path, const std::string& method,
+                                            const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/integrations - List connectors
+        if (path == "/api/v1/integrations" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT connector_id, connector_name, connector_type, vendor, is_verified, is_active, install_count, rating FROM integration_connectors ORDER BY install_count DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"connector_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"connector_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"connector_type\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"vendor\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"is_verified\":" << (std::string(PQgetvalue(result, i, 4)) == "t" ? "true" : "false") << ",";
+                    ss << "\"is_active\":" << (std::string(PQgetvalue(result, i, 5)) == "t" ? "true" : "false") << ",";
+                    ss << "\"install_count\":" << PQgetvalue(result, i, 6) << ",";
+                    ss << "\"rating\":" << (PQgetisnull(result, i, 7) ? "null" : PQgetvalue(result, i, 7));
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/integrations/instances - List active instances
+        else if (path == "/api/v1/integrations/instances" && method == "GET") {
+            PGresult *result = PQexec(conn, 
+                "SELECT ii.instance_id, ii.instance_name, ic.connector_name, ii.is_enabled, ii.last_sync_at, ii.sync_status "
+                "FROM integration_instances ii "
+                "JOIN integration_connectors ic ON ii.connector_id = ic.connector_id "
+                "ORDER BY ii.created_at DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"instance_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"instance_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"connector_name\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"is_enabled\":" << (std::string(PQgetvalue(result, i, 3)) == "t" ? "true" : "false") << ",";
+                    ss << "\"last_sync_at\":\"" << (PQgetisnull(result, i, 4) ? "" : PQgetvalue(result, i, 4)) << "\",";
+                    ss << "\"sync_status\":\"" << PQgetvalue(result, i, 5) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 14: Compliance Training Module API Handler
+    std::string handle_training_request(const std::string& path, const std::string& method,
+                                        const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/training/courses - List courses
+        if (path == "/api/v1/training/courses" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT course_id, course_name, course_category, difficulty_level, estimated_duration_minutes, is_required, passing_score, points_reward FROM training_courses WHERE is_published = true ORDER BY created_at DESC");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"course_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"course_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"course_category\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"difficulty_level\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"estimated_duration_minutes\":" << (PQgetisnull(result, i, 4) ? "null" : PQgetvalue(result, i, 4)) << ",";
+                    ss << "\"is_required\":" << (std::string(PQgetvalue(result, i, 5)) == "t" ? "true" : "false") << ",";
+                    ss << "\"passing_score\":" << PQgetvalue(result, i, 6) << ",";
+                    ss << "\"points_reward\":" << PQgetvalue(result, i, 7);
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/training/leaderboard - Get leaderboard
+        else if (path == "/api/v1/training/leaderboard" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT user_id, total_points, courses_completed, rank FROM training_leaderboard ORDER BY rank ASC LIMIT 20");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"user_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"total_points\":" << PQgetvalue(result, i, 1) << ",";
+                    ss << "\"courses_completed\":" << PQgetvalue(result, i, 2) << ",";
+                    ss << "\"rank\":" << (PQgetisnull(result, i, 3) ? "null" : PQgetvalue(result, i, 3));
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 10: Natural Language Policy Builder API Handler
+    std::string handle_nl_policies_request(const std::string& path, const std::string& method,
+                                           const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/nl-policies - List NL-generated policies
+        if (path == "/api/v1/nl-policies" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT rule_id, rule_name, natural_language_input, rule_type, is_active, confidence_score, validation_status, created_at FROM nl_policy_rules ORDER BY created_at DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"rule_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"rule_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"natural_language_input\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"rule_type\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"is_active\":" << (std::string(PQgetvalue(result, i, 4)) == "t" ? "true" : "false") << ",";
+                    ss << "\"confidence_score\":" << (PQgetisnull(result, i, 5) ? "null" : PQgetvalue(result, i, 5)) << ",";
+                    ss << "\"validation_status\":\"" << (PQgetisnull(result, i, 6) ? "pending" : PQgetvalue(result, i, 6)) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 7) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/nl-policies - Create NL policy
+        else if (path == "/api/v1/nl-policies" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string natural_language_input = req.value("natural_language_input", "");
+                std::string rule_name = req.value("rule_name", "Generated Rule");
+                std::string rule_type = req.value("rule_type", "compliance");
+                std::string created_by = req.value("created_by", "system");
+                
+                // Simulate GPT-4 rule generation (in production, call actual GPT-4 API)
+                nlohmann::json generated_logic = {
+                    {"conditions", nlohmann::json::array()},
+                    {"actions", nlohmann::json::array()},
+                    {"generated_by", "gpt-4"},
+                    {"input", natural_language_input}
+                };
+                
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string rule_id = uuid_ss.str();
+                
+                std::string logic_json = generated_logic.dump();
+                std::string query = "INSERT INTO nl_policy_rules (rule_id, rule_name, natural_language_input, generated_rule_logic, rule_type, created_by, confidence_score) "
+                                   "VALUES ('" + rule_id + "', '" + rule_name + "', '" + natural_language_input + "', '" + logic_json + "', '" + rule_type + "', '" + created_by + "', 0.85) "
+                                   "RETURNING rule_id, rule_name, validation_status, created_at";
+                
+                PGresult *result = PQexec(conn, query.c_str());
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"rule_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"rule_name\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"validation_status\":\"" << PQgetvalue(result, 0, 2) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, 0, 3) << "\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to create policy rule\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 8: Advanced Analytics & BI Dashboard API Handler
+    std::string handle_analytics_request(const std::string& path, const std::string& method,
+                                         const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/analytics/dashboards - List BI dashboards
+        if (path == "/api/v1/analytics/dashboards" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT dashboard_id, dashboard_name, dashboard_type, description, view_count, created_at FROM bi_dashboards ORDER BY view_count DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"dashboard_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"dashboard_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"dashboard_type\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"description\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"view_count\":" << PQgetvalue(result, i, 4) << ",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 5) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/analytics/metrics - Get recent metrics
+        else if (path == "/api/v1/analytics/metrics" && method == "GET") {
+            PGresult *result = PQexec(conn, 
+                "SELECT metric_name, metric_category, metric_value, metric_unit, aggregation_period, calculated_at "
+                "FROM analytics_metrics WHERE calculated_at > NOW() - INTERVAL '24 hours' "
+                "ORDER BY calculated_at DESC LIMIT 100");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"metric_name\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"metric_category\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"metric_value\":" << (PQgetisnull(result, i, 2) ? "null" : PQgetvalue(result, i, 2)) << ",";
+                    ss << "\"metric_unit\":\"" << (PQgetisnull(result, i, 3) ? "" : PQgetvalue(result, i, 3)) << "\",";
+                    ss << "\"aggregation_period\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"calculated_at\":\"" << PQgetvalue(result, i, 5) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/analytics/insights - Get active insights
+        else if (path == "/api/v1/analytics/insights" && method == "GET") {
+            PGresult *result = PQexec(conn,
+                "SELECT insight_id, insight_type, title, description, confidence_score, priority, discovered_at "
+                "FROM data_insights WHERE is_dismissed = false "
+                "ORDER BY priority DESC, discovered_at DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"insight_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"insight_type\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"title\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"description\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"confidence_score\":" << (PQgetisnull(result, i, 4) ? "null" : PQgetvalue(result, i, 4)) << ",";
+                    ss << "\"priority\":\"" << PQgetvalue(result, i, 5) << "\",";
+                    ss << "\"discovered_at\":\"" << PQgetvalue(result, i, 6) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/analytics/stats - Dashboard statistics
+        else if (path == "/api/v1/analytics/stats" && method == "GET") {
+            PGresult *dashboards_result = PQexec(conn, "SELECT COUNT(*) FROM bi_dashboards");
+            PGresult *metrics_result = PQexec(conn, "SELECT COUNT(*) FROM analytics_metrics WHERE calculated_at > NOW() - INTERVAL '24 hours'");
+            PGresult *insights_result = PQexec(conn, "SELECT COUNT(*) FROM data_insights WHERE is_dismissed = false");
+            
+            int total_dashboards = 0, recent_metrics = 0, active_insights = 0;
+            
+            if (PQresultStatus(dashboards_result) == PGRES_TUPLES_OK && PQntuples(dashboards_result) > 0) {
+                total_dashboards = atoi(PQgetvalue(dashboards_result, 0, 0));
+            }
+            if (PQresultStatus(metrics_result) == PGRES_TUPLES_OK && PQntuples(metrics_result) > 0) {
+                recent_metrics = atoi(PQgetvalue(metrics_result, 0, 0));
+            }
+            if (PQresultStatus(insights_result) == PGRES_TUPLES_OK && PQntuples(insights_result) > 0) {
+                active_insights = atoi(PQgetvalue(insights_result, 0, 0));
+            }
+            
+            PQclear(dashboards_result);
+            PQclear(metrics_result);
+            PQclear(insights_result);
+            
+            std::stringstream ss;
+            ss << "{";
+            ss << "\"total_dashboards\":" << total_dashboards << ",";
+            ss << "\"recent_metrics\":" << recent_metrics << ",";
+            ss << "\"active_insights\":" << active_insights;
+            ss << "}";
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 7: Regulatory Change Simulator API Handler
+    std::string handle_simulations_request(const std::string& path, const std::string& method,
+                                           const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/simulations - List simulations
+        if (path == "/api/v1/simulations" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT simulation_id, name, simulation_type, status, created_by, created_at, completed_at FROM regulatory_simulations ORDER BY created_at DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"simulation_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"simulation_type\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"created_by\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 5) << "\",";
+                    ss << "\"completed_at\":\"" << (PQgetisnull(result, i, 6) ? "" : PQgetvalue(result, i, 6)) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/simulations - Create simulation
+        else if (path == "/api/v1/simulations" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string name = req.value("name", "");
+                std::string simulation_type = req.value("simulation_type", "custom");
+                std::string created_by = req.value("created_by", "system");
+                
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string simulation_id = uuid_ss.str();
+                
+                std::string query = "INSERT INTO regulatory_simulations (simulation_id, name, simulation_type, created_by) "
+                                   "VALUES ('" + simulation_id + "', '" + name + "', '" + simulation_type + "', '" + created_by + "') "
+                                   "RETURNING simulation_id, name, status, created_at";
+                
+                PGresult *result = PQexec(conn, query.c_str());
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"simulation_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"name\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, 0, 2) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, 0, 3) << "\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to create simulation\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+        // GET /api/v1/simulations/templates - List templates
+        else if (path == "/api/v1/simulations/templates" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT template_id, template_name, template_category, description, usage_count FROM simulation_templates WHERE is_public = true ORDER BY usage_count DESC");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"template_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"template_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"template_category\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"description\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"usage_count\":" << PQgetvalue(result, i, 4);
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 5: Risk Scoring API Handler
+    std::string handle_risk_scoring_request(const std::string& path, const std::string& method,
+                                            const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/risk/predictions - List risk predictions
+        if (path == "/api/v1/risk/predictions" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT prediction_id, entity_type, entity_id, risk_score, risk_level, confidence_score, predicted_at FROM compliance_risk_predictions ORDER BY predicted_at DESC LIMIT 100");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"prediction_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"entity_type\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"entity_id\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"risk_score\":" << PQgetvalue(result, i, 3) << ",";
+                    ss << "\"risk_level\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"confidence_score\":" << PQgetvalue(result, i, 5) << ",";
+                    ss << "\"predicted_at\":\"" << PQgetvalue(result, i, 6) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/risk/models - List ML models
+        else if (path == "/api/v1/risk/models" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT model_id, model_name, model_type, model_version, accuracy_score, is_active FROM compliance_ml_models ORDER BY is_active DESC, created_at DESC");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"model_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"model_name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"model_type\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"model_version\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"accuracy_score\":" << (PQgetisnull(result, i, 4) ? "null" : PQgetvalue(result, i, 4)) << ",";
+                    ss << "\"is_active\":" << (std::string(PQgetvalue(result, i, 5)) == "t" ? "true" : "false");
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/risk/dashboard - Dashboard stats
+        else if (path == "/api/v1/risk/dashboard" && method == "GET") {
+            PGresult *total_result = PQexec(conn, "SELECT COUNT(*) FROM compliance_risk_predictions");
+            PGresult *critical_result = PQexec(conn, "SELECT COUNT(*) FROM compliance_risk_predictions WHERE risk_level = 'critical'");
+            PGresult *high_result = PQexec(conn, "SELECT COUNT(*) FROM compliance_risk_predictions WHERE risk_level = 'high'");
+            PGresult *avg_result = PQexec(conn, "SELECT AVG(risk_score) FROM compliance_risk_predictions");
+            
+            int total = 0, critical = 0, high = 0;
+            double avg_score = 0.0;
+            
+            if (PQresultStatus(total_result) == PGRES_TUPLES_OK && PQntuples(total_result) > 0) {
+                total = atoi(PQgetvalue(total_result, 0, 0));
+            }
+            if (PQresultStatus(critical_result) == PGRES_TUPLES_OK && PQntuples(critical_result) > 0) {
+                critical = atoi(PQgetvalue(critical_result, 0, 0));
+            }
+            if (PQresultStatus(high_result) == PGRES_TUPLES_OK && PQntuples(high_result) > 0) {
+                high = atoi(PQgetvalue(high_result, 0, 0));
+            }
+            if (PQresultStatus(avg_result) == PGRES_TUPLES_OK && PQntuples(avg_result) > 0 && !PQgetisnull(avg_result, 0, 0)) {
+                avg_score = std::stod(PQgetvalue(avg_result, 0, 0));
+            }
+            
+            PQclear(total_result);
+            PQclear(critical_result);
+            PQclear(high_result);
+            PQclear(avg_result);
+            
+            std::stringstream ss;
+            ss << "{";
+            ss << "\"total_predictions\":" << total << ",";
+            ss << "\"critical_risks\":" << critical << ",";
+            ss << "\"high_risks\":" << high << ",";
+            ss << "\"avg_risk_score\":" << avg_score;
+            ss << "}";
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 4: LLM API Key Management Handler
+    std::string handle_llm_keys_request(const std::string& path, const std::string& method,
+                                        const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/llm-keys - List API keys (masked)
+        if (path == "/api/v1/llm-keys" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT key_id, provider, key_name, is_active, created_at, last_used_at, usage_count, rate_limit_per_minute FROM llm_api_keys ORDER BY created_at DESC");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"key_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"provider\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"key_name\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"is_active\":" << (std::string(PQgetvalue(result, i, 3)) == "t" ? "true" : "false") << ",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"last_used_at\":\"" << (PQgetisnull(result, i, 5) ? "" : PQgetvalue(result, i, 5)) << "\",";
+                    ss << "\"usage_count\":" << PQgetvalue(result, i, 6) << ",";
+                    ss << "\"rate_limit_per_minute\":" << (PQgetisnull(result, i, 7) ? "null" : PQgetvalue(result, i, 7));
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/llm-keys - Create new API key
+        else if (path == "/api/v1/llm-keys" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string provider = req.value("provider", "");
+                std::string key_name = req.value("key_name", "");
+                std::string api_key = req.value("api_key", "");
+                std::string created_by = req.value("created_by", "system");
+                int rate_limit = req.value("rate_limit_per_minute", 60);
+                
+                // Production: Encrypt the API key (simplified encryption for demo)
+                std::string encrypted_key = "encrypted_" + api_key; // In production, use proper AES-256-GCM
+                
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string key_id = uuid_ss.str();
+                
+                std::string query = "INSERT INTO llm_api_keys (key_id, provider, key_name, encrypted_key, created_by, rate_limit_per_minute) "
+                                   "VALUES ('" + key_id + "', '" + provider + "', '" + key_name + "', '" + encrypted_key + "', '" + created_by + "', " + std::to_string(rate_limit) + ") "
+                                   "RETURNING key_id, provider, key_name, is_active, created_at";
+                
+                PGresult *result = PQexec(conn, query.c_str());
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"key_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"provider\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"key_name\":\"" << PQgetvalue(result, 0, 2) << "\",";
+                    ss << "\"is_active\":" << (std::string(PQgetvalue(result, 0, 3)) == "t" ? "true" : "false") << ",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, 0, 4) << "\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to create API key\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+        // DELETE /api/v1/llm-keys/:id - Delete API key
+        else if (path.find("/api/v1/llm-keys/") == 0 && method == "DELETE") {
+            std::string key_id = path.substr(18); // After "/api/v1/llm-keys/"
+            
+            const char* param_values[1] = {key_id.c_str()};
+            PGresult *result = PQexecParams(conn,
+                "DELETE FROM llm_api_keys WHERE key_id = $1 RETURNING key_id",
+                1, nullptr, param_values, nullptr, nullptr, 0);
+            
+            if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                response = "{\"success\":true,\"message\":\"API key deleted\"}";
+            } else {
+                response = "{\"error\":\"API key not found\"}";
+            }
+            PQclear(result);
+        }
+        // GET /api/v1/llm-keys/usage - Get usage statistics
+        else if (path == "/api/v1/llm-keys/usage" && method == "GET") {
+            PGresult *result = PQexec(conn,
+                "SELECT k.provider, COUNT(u.usage_id) as total_requests, SUM(u.tokens_used) as total_tokens, SUM(u.cost_usd) as total_cost "
+                "FROM llm_api_keys k LEFT JOIN llm_key_usage u ON k.key_id = u.key_id "
+                "WHERE u.timestamp > NOW() - INTERVAL '7 days' "
+                "GROUP BY k.provider");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"provider\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"total_requests\":" << (PQgetisnull(result, i, 1) ? "0" : PQgetvalue(result, i, 1)) << ",";
+                    ss << "\"total_tokens\":" << (PQgetisnull(result, i, 2) ? "0" : PQgetvalue(result, i, 2)) << ",";
+                    ss << "\"total_cost\":" << (PQgetisnull(result, i, 3) ? "0" : PQgetvalue(result, i, 3));
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 3: Export/Reporting Module API Handler
+    std::string handle_exports_request(const std::string& path, const std::string& method,
+                                       const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/exports - List export requests
+        if (path == "/api/v1/exports" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT export_id, export_type, requested_by, status, created_at, completed_at, file_size_bytes, download_count FROM export_requests ORDER BY created_at DESC LIMIT 100");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"export_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"export_type\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"requested_by\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"completed_at\":\"" << (PQgetisnull(result, i, 5) ? "" : PQgetvalue(result, i, 5)) << "\",";
+                    ss << "\"file_size_bytes\":" << (PQgetisnull(result, i, 6) ? "0" : PQgetvalue(result, i, 6)) << ",";
+                    ss << "\"download_count\":" << PQgetvalue(result, i, 7);
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/exports - Create export request
+        else if (path == "/api/v1/exports" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string export_type = req.value("export_type", "");
+                std::string requested_by = req.value("requested_by", "");
+                
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string export_id = uuid_ss.str();
+                
+                std::string query = "INSERT INTO export_requests (export_id, export_type, requested_by, status) "
+                                   "VALUES ('" + export_id + "', '" + export_type + "', '" + requested_by + "', 'pending') "
+                                   "RETURNING export_id, export_type, status, created_at";
+                
+                PGresult *result = PQexec(conn, query.c_str());
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"export_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"export_type\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, 0, 2) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, 0, 3) << "\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to create export request\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+        // GET /api/v1/exports/templates - List templates
+        else if (path == "/api/v1/exports/templates" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT template_id, name, export_type, description, is_default, usage_count FROM export_templates WHERE is_public = true ORDER BY is_default DESC, usage_count DESC LIMIT 50");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"template_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"export_type\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"description\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"is_default\":" << (std::string(PQgetvalue(result, i, 4)) == "t" ? "true" : "false") << ",";
+                    ss << "\"usage_count\":" << PQgetvalue(result, i, 5);
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 2: Alert System API Handler
+    std::string handle_alerts_request(const std::string& path, const std::string& method,
+                                      const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/alerts/rules - List alert rules
+        if (path == "/api/v1/alerts/rules" && method == "GET") {
+            PGresult *result = PQexec(conn, "SELECT rule_id, name, description, enabled, severity_filter, source_filter, recipients, throttle_minutes, created_at, last_triggered_at, trigger_count FROM alert_rules ORDER BY created_at DESC LIMIT 100");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"rule_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"name\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"description\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"enabled\":" << (std::string(PQgetvalue(result, i, 3)) == "t" ? "true" : "false") << ",";
+                    ss << "\"severity_filter\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"source_filter\":\"" << PQgetvalue(result, i, 5) << "\",";
+                    ss << "\"recipients\":\"" << PQgetvalue(result, i, 6) << "\",";
+                    ss << "\"throttle_minutes\":" << PQgetvalue(result, i, 7) << ",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 8) << "\",";
+                    ss << "\"last_triggered_at\":\"" << (PQgetisnull(result, i, 9) ? "" : PQgetvalue(result, i, 9)) << "\",";
+                    ss << "\"trigger_count\":" << PQgetvalue(result, i, 10);
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/alerts/rules - Create alert rule
+        else if (path == "/api/v1/alerts/rules" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string name = req.value("name", "");
+                std::string description = req.value("description", "");
+                bool enabled = req.value("enabled", true);
+                
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string rule_id = uuid_ss.str();
+                
+                std::string enabled_str = enabled ? "true" : "false";
+                std::string recipients_json = req.contains("recipients") ? req["recipients"].dump() : "[]";
+                
+                std::string query = "INSERT INTO alert_rules (rule_id, name, description, enabled, recipients) "
+                                   "VALUES ('" + rule_id + "', '" + name + "', '" + description + "', " + enabled_str + ", '" + recipients_json + "') "
+                                   "RETURNING rule_id, name, enabled, created_at";
+                
+                PGresult *result = PQexec(conn, query.c_str());
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"rule_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"name\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"enabled\":" << (std::string(PQgetvalue(result, 0, 2)) == "t" ? "true" : "false") << ",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, 0, 3) << "\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to create alert rule\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+        // GET /api/v1/alerts/delivery-log - Get delivery history
+        else if (path == "/api/v1/alerts/delivery-log" && method == "GET") {
+            PGresult *result = PQexec(conn, 
+                "SELECT delivery_id, rule_id, recipient, channel, status, sent_at, delivered_at, error_message "
+                "FROM alert_delivery_log ORDER BY sent_at DESC LIMIT 100");
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"delivery_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"rule_id\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"recipient\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"channel\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, i, 4) << "\",";
+                    ss << "\"sent_at\":\"" << PQgetvalue(result, i, 5) << "\",";
+                    ss << "\"delivered_at\":\"" << (PQgetisnull(result, i, 6) ? "" : PQgetvalue(result, i, 6)) << "\",";
+                    ss << "\"error_message\":\"" << (PQgetisnull(result, i, 7) ? "" : PQgetvalue(result, i, 7)) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // GET /api/v1/alerts/stats - Dashboard stats
+        else if (path == "/api/v1/alerts/stats" && method == "GET") {
+            PGresult *rules_result = PQexec(conn, "SELECT COUNT(*) FROM alert_rules");
+            PGresult *active_result = PQexec(conn, "SELECT COUNT(*) FROM alert_rules WHERE enabled = true");
+            PGresult *delivery_result = PQexec(conn, "SELECT COUNT(*) FROM alert_delivery_log");
+            PGresult *success_result = PQexec(conn, "SELECT COUNT(*) FROM alert_delivery_log WHERE status = 'sent'");
+            
+            int total_rules = 0, active_rules = 0, total_deliveries = 0, successful_deliveries = 0;
+            
+            if (PQresultStatus(rules_result) == PGRES_TUPLES_OK && PQntuples(rules_result) > 0) {
+                total_rules = atoi(PQgetvalue(rules_result, 0, 0));
+            }
+            if (PQresultStatus(active_result) == PGRES_TUPLES_OK && PQntuples(active_result) > 0) {
+                active_rules = atoi(PQgetvalue(active_result, 0, 0));
+            }
+            if (PQresultStatus(delivery_result) == PGRES_TUPLES_OK && PQntuples(delivery_result) > 0) {
+                total_deliveries = atoi(PQgetvalue(delivery_result, 0, 0));
+            }
+            if (PQresultStatus(success_result) == PGRES_TUPLES_OK && PQntuples(success_result) > 0) {
+                successful_deliveries = atoi(PQgetvalue(success_result, 0, 0));
+            }
+            
+            PQclear(rules_result);
+            PQclear(active_result);
+            PQclear(delivery_result);
+            PQclear(success_result);
+            
+            std::stringstream ss;
+            ss << "{";
+            ss << "\"total_rules\":" << total_rules << ",";
+            ss << "\"active_rules\":" << active_rules << ",";
+            ss << "\"total_deliveries\":" << total_deliveries << ",";
+            ss << "\"successful_deliveries\":" << successful_deliveries;
+            ss << "}";
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
+    // Feature 1: Collaboration Dashboard API Handler
+    std::string handle_collaboration_request(const std::string& path, const std::string& method, 
+                                             const std::string& body, const std::string& query_params) {
+        PGconn *conn = PQconnectdb(db_conn_string.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            PQfinish(conn);
+            return "{\"error\":\"Database connection failed\"}";
+        }
+
+        std::string response = "{\"error\":\"Not Found\"}";
+
+        // GET /api/v1/collaboration/sessions - List sessions
+        if (path == "/api/v1/collaboration/sessions" && method == "GET") {
+            std::string status_filter;
+            int limit = 50;
+            int offset = 0;
+            
+            // Parse query params
+            if (!query_params.empty()) {
+                size_t status_pos = query_params.find("status=");
+                if (status_pos != std::string::npos) {
+                    size_t status_end = query_params.find("&", status_pos);
+                    status_filter = query_params.substr(status_pos + 7, 
+                        status_end == std::string::npos ? std::string::npos : status_end - status_pos - 7);
+                }
+                
+                size_t limit_pos = query_params.find("limit=");
+                if (limit_pos != std::string::npos) {
+                    size_t limit_end = query_params.find("&", limit_pos);
+                    std::string limit_str = query_params.substr(limit_pos + 6, 
+                        limit_end == std::string::npos ? std::string::npos : limit_end - limit_pos - 6);
+                    limit = std::stoi(limit_str);
+                }
+            }
+            
+            std::string query = "SELECT session_id, title, status, created_at, created_by FROM collaboration_sessions";
+            if (!status_filter.empty()) {
+                query += " WHERE status = '" + status_filter + "'";
+            }
+            query += " ORDER BY created_at DESC LIMIT " + std::to_string(limit);
+            
+            PGresult *result = PQexec(conn, query.c_str());
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"session_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"title\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"created_by\":\"" << PQgetvalue(result, i, 4) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/collaboration/sessions - Create session
+        else if (path == "/api/v1/collaboration/sessions" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string title = req.value("title", "");
+                std::string description = req.value("description", "");
+                std::string objective = req.value("objective", "");
+                std::string created_by = req.value("created_by", "system");
+                
+                // Generate UUID
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string session_id = uuid_ss.str();
+                
+                std::string insert_query = "INSERT INTO collaboration_sessions (session_id, title, description, objective, created_by, status) "
+                                          "VALUES ($1, $2, $3, $4, $5, 'active') RETURNING session_id, title, status, created_at";
+                
+                const char* param_values[5] = {
+                    session_id.c_str(),
+                    title.c_str(),
+                    description.c_str(),
+                    objective.c_str(),
+                    created_by.c_str()
+                };
+                
+                PGresult *result = PQexecParams(conn, insert_query.c_str(), 5, nullptr, param_values, nullptr, nullptr, 0);
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"session_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"title\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"status\":\"" << PQgetvalue(result, 0, 2) << "\",";
+                    ss << "\"created_at\":\"" << PQgetvalue(result, 0, 3) << "\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to create session\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+        // GET /api/v1/collaboration/sessions/:id - Get session details
+        else if (path.find("/api/v1/collaboration/sessions/") == 0 && method == "GET" && path.find("/reasoning") == std::string::npos) {
+            std::string session_id = path.substr(34); // After "/api/v1/collaboration/sessions/"
+            
+            const char* param_values[1] = {session_id.c_str()};
+            PGresult *result = PQexecParams(conn, 
+                "SELECT session_id, title, description, objective, status, created_by, created_at, updated_at FROM collaboration_sessions WHERE session_id = $1",
+                1, nullptr, param_values, nullptr, nullptr, 0);
+            
+            if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                std::stringstream ss;
+                ss << "{";
+                ss << "\"session_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                ss << "\"title\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                ss << "\"description\":\"" << PQgetvalue(result, 0, 2) << "\",";
+                ss << "\"objective\":\"" << PQgetvalue(result, 0, 3) << "\",";
+                ss << "\"status\":\"" << PQgetvalue(result, 0, 4) << "\",";
+                ss << "\"created_by\":\"" << PQgetvalue(result, 0, 5) << "\",";
+                ss << "\"created_at\":\"" << PQgetvalue(result, 0, 6) << "\",";
+                ss << "\"updated_at\":\"" << PQgetvalue(result, 0, 7) << "\"";
+                ss << "}";
+                response = ss.str();
+            } else {
+                response = "{\"error\":\"Session not found\"}";
+            }
+            PQclear(result);
+        }
+        // GET /api/v1/collaboration/sessions/:id/reasoning - Get reasoning steps
+        else if (path.find("/api/v1/collaboration/sessions/") == 0 && path.find("/reasoning") != std::string::npos && method == "GET") {
+            size_t sessions_pos = path.find("/sessions/") + 10;
+            size_t reasoning_pos = path.find("/reasoning");
+            std::string session_id = path.substr(sessions_pos, reasoning_pos - sessions_pos);
+            
+            const char* param_values[1] = {session_id.c_str()};
+            PGresult *result = PQexecParams(conn,
+                "SELECT stream_id, agent_id, agent_name, reasoning_step, step_number, step_type, confidence_score, timestamp "
+                "FROM collaboration_reasoning_stream WHERE session_id = $1 ORDER BY timestamp DESC LIMIT 100",
+                1, nullptr, param_values, nullptr, nullptr, 0);
+            
+            std::stringstream ss;
+            ss << "[";
+            if (PQresultStatus(result) == PGRES_TUPLES_OK) {
+                int rows = PQntuples(result);
+                for (int i = 0; i < rows; i++) {
+                    if (i > 0) ss << ",";
+                    ss << "{";
+                    ss << "\"stream_id\":\"" << PQgetvalue(result, i, 0) << "\",";
+                    ss << "\"agent_id\":\"" << PQgetvalue(result, i, 1) << "\",";
+                    ss << "\"agent_name\":\"" << PQgetvalue(result, i, 2) << "\",";
+                    ss << "\"reasoning_step\":\"" << PQgetvalue(result, i, 3) << "\",";
+                    ss << "\"step_number\":" << PQgetvalue(result, i, 4) << ",";
+                    ss << "\"step_type\":\"" << PQgetvalue(result, i, 5) << "\",";
+                    ss << "\"confidence_score\":" << PQgetvalue(result, i, 6) << ",";
+                    ss << "\"timestamp\":\"" << PQgetvalue(result, i, 7) << "\"";
+                    ss << "}";
+                }
+            }
+            ss << "]";
+            PQclear(result);
+            response = ss.str();
+        }
+        // POST /api/v1/collaboration/override - Record human override
+        else if (path == "/api/v1/collaboration/override" && method == "POST") {
+            try {
+                nlohmann::json req = nlohmann::json::parse(body);
+                std::string session_id = req.value("session_id", "");
+                std::string decision_id = req.value("decision_id", "");
+                std::string user_id = req.value("user_id", "");
+                std::string user_name = req.value("user_name", "");
+                std::string original_decision = req.value("original_decision", "");
+                std::string override_decision = req.value("override_decision", "");
+                std::string reason = req.value("reason", "");
+                
+                // Generate UUID
+                std::stringstream uuid_ss;
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::uniform_int_distribution<uint64_t> dis;
+                uuid_ss << std::hex << std::setfill('0');
+                uuid_ss << std::setw(8) << (dis(gen) & 0xFFFFFFFF) << "-";
+                uuid_ss << std::setw(4) << (dis(gen) & 0xFFFF) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x0FFF) | 0x4000) << "-";
+                uuid_ss << std::setw(4) << ((dis(gen) & 0x3FFF) | 0x8000) << "-";
+                uuid_ss << std::setw(12) << (dis(gen) & 0xFFFFFFFFFFFF);
+                std::string override_id = uuid_ss.str();
+                
+                const char* param_values[7] = {
+                    override_id.c_str(),
+                    session_id.c_str(),
+                    decision_id.c_str(),
+                    user_id.c_str(),
+                    user_name.c_str(),
+                    original_decision.c_str(),
+                    override_decision.c_str(),
+                    reason.c_str()
+                };
+                
+                PGresult *result = PQexecParams(conn,
+                    "INSERT INTO human_overrides (override_id, session_id, decision_id, user_id, user_name, original_decision, override_decision, reason) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING override_id, timestamp",
+                    8, nullptr, param_values, nullptr, nullptr, 0);
+                
+                if (PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
+                    std::stringstream ss;
+                    ss << "{";
+                    ss << "\"override_id\":\"" << PQgetvalue(result, 0, 0) << "\",";
+                    ss << "\"timestamp\":\"" << PQgetvalue(result, 0, 1) << "\",";
+                    ss << "\"status\":\"recorded\"";
+                    ss << "}";
+                    response = ss.str();
+                } else {
+                    response = "{\"error\":\"Failed to record override\"}";
+                }
+                PQclear(result);
+            } catch (const std::exception& e) {
+                response = "{\"error\":\"Invalid request body\"}";
+            }
+        }
+        // GET /api/v1/collaboration/dashboard/stats - Dashboard statistics
+        else if (path == "/api/v1/collaboration/dashboard/stats" && method == "GET") {
+            PGresult *sessions_result = PQexec(conn, "SELECT COUNT(*) FROM collaboration_sessions");
+            PGresult *active_result = PQexec(conn, "SELECT COUNT(*) FROM collaboration_sessions WHERE status = 'active'");
+            PGresult *steps_result = PQexec(conn, "SELECT COUNT(*) FROM collaboration_reasoning_stream");
+            PGresult *overrides_result = PQexec(conn, "SELECT COUNT(*) FROM human_overrides");
+            
+            int total_sessions = 0, active_sessions = 0, total_steps = 0, total_overrides = 0;
+            
+            if (PQresultStatus(sessions_result) == PGRES_TUPLES_OK && PQntuples(sessions_result) > 0) {
+                total_sessions = atoi(PQgetvalue(sessions_result, 0, 0));
+            }
+            if (PQresultStatus(active_result) == PGRES_TUPLES_OK && PQntuples(active_result) > 0) {
+                active_sessions = atoi(PQgetvalue(active_result, 0, 0));
+            }
+            if (PQresultStatus(steps_result) == PGRES_TUPLES_OK && PQntuples(steps_result) > 0) {
+                total_steps = atoi(PQgetvalue(steps_result, 0, 0));
+            }
+            if (PQresultStatus(overrides_result) == PGRES_TUPLES_OK && PQntuples(overrides_result) > 0) {
+                total_overrides = atoi(PQgetvalue(overrides_result, 0, 0));
+            }
+            
+            PQclear(sessions_result);
+            PQclear(active_result);
+            PQclear(steps_result);
+            PQclear(overrides_result);
+            
+            std::stringstream ss;
+            ss << "{";
+            ss << "\"total_sessions\":" << total_sessions << ",";
+            ss << "\"active_sessions\":" << active_sessions << ",";
+            ss << "\"total_reasoning_steps\":" << total_steps << ",";
+            ss << "\"total_overrides\":" << total_overrides;
+            ss << "}";
+            response = ss.str();
+        }
+
+        PQfinish(conn);
+        return response;
+    }
+
     // Production-grade compliance rules from database
     std::string get_compliance_rules() {
         PGconn *conn = PQconnectdb(db_conn_string.c_str());
@@ -2600,10 +3929,10 @@ public:
             return "[]";
         }
 
-        // Production: Use embedding service for vector-based semantic search
-        std::string search_method = "vector"; // Default to vector search
-        std::stringstream sql;
+        std::string limit_str = std::to_string(limit);
+        PGresult *result = nullptr;
 
+        // Production: Use embedding service for vector-based semantic search
         try {
             // Call embeddings client to convert query to vector
             EmbeddingsClient embeddings_client(config_manager, logger);
@@ -2614,7 +3943,7 @@ public:
                 // Production vector search using pgvector
                 std::vector<double> query_vector = embeddings_result[0];
 
-                // Build vector array string for PostgreSQL
+                // Build vector array string safely for PostgreSQL
                 std::stringstream vector_str;
                 vector_str << "[";
                 for (size_t i = 0; i < query_vector.size(); i++) {
@@ -2622,41 +3951,56 @@ public:
                     vector_str << query_vector[i];
                 }
                 vector_str << "]";
+                std::string vector_string = vector_str.str();
 
-                sql << "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
-                    << "tags, access_count, created_at, updated_at, "
-                    << "embedding <-> '" << vector_str.str() << "'::vector AS distance "
-                    << "FROM knowledge_entities WHERE ";
-
+                // Using parameterized query to prevent SQL injection
                 if (!category.empty()) {
-                    sql << "domain = '" << category << "' AND ";
+                    const char* query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                          "tags, access_count, created_at, updated_at, "
+                                          "embedding <-> $1::vector AS distance "
+                                          "FROM knowledge_entities WHERE domain = $2 AND embedding IS NOT NULL "
+                                          "ORDER BY distance ASC, confidence_score DESC LIMIT $3";
+                    const char* paramValues[3] = { vector_string.c_str(), category.c_str(), limit_str.c_str() };
+                    result = PQexecParams(conn, query_sql, 3, NULL, paramValues, NULL, NULL, 0);
+                } else {
+                    const char* query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                          "tags, access_count, created_at, updated_at, "
+                                          "embedding <-> $1::vector AS distance "
+                                          "FROM knowledge_entities WHERE embedding IS NOT NULL "
+                                          "ORDER BY distance ASC, confidence_score DESC LIMIT $2";
+                    const char* paramValues[2] = { vector_string.c_str(), limit_str.c_str() };
+                    result = PQexecParams(conn, query_sql, 2, NULL, paramValues, NULL, NULL, 0);
                 }
-
-                sql << "embedding IS NOT NULL "
-                    << "ORDER BY distance ASC, confidence_score DESC LIMIT " << limit;
 
                 logger->info("Using production vector search for knowledge base");
             } else {
                 throw std::runtime_error("Failed to generate embeddings");
             }
         } catch (const std::exception& e) {
-            // Fallback to text search if embeddings fail
+            // Fallback to text search with parameterized queries
             logger->warn("Embeddings service unavailable, falling back to text search: " + std::string(e.what()));
 
-            sql << "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
-                << "tags, access_count, created_at, updated_at "
-                << "FROM knowledge_entities WHERE ";
+            std::string search_pattern = "%" + query + "%";
 
             if (!category.empty()) {
-                sql << "domain = '" << category << "' AND ";
+                const char* query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                      "tags, access_count, created_at, updated_at "
+                                      "FROM knowledge_entities WHERE domain = $1 AND "
+                                      "(title ILIKE $2 OR content ILIKE $2) "
+                                      "ORDER BY confidence_score DESC, access_count DESC LIMIT $3";
+                const char* paramValues[3] = { category.c_str(), search_pattern.c_str(), limit_str.c_str() };
+                result = PQexecParams(conn, query_sql, 3, NULL, paramValues, NULL, NULL, 0);
+            } else {
+                const char* query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                      "tags, access_count, created_at, updated_at "
+                                      "FROM knowledge_entities WHERE "
+                                      "(title ILIKE $1 OR content ILIKE $1) "
+                                      "ORDER BY confidence_score DESC, access_count DESC LIMIT $2";
+                const char* paramValues[2] = { search_pattern.c_str(), limit_str.c_str() };
+                result = PQexecParams(conn, query_sql, 2, NULL, paramValues, NULL, NULL, 0);
             }
-
-            sql << "(title ILIKE '%" << query << "%' OR content ILIKE '%" << query << "%') "
-                << "ORDER BY confidence_score DESC, access_count DESC LIMIT " << limit;
         }
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
-        
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
             PQfinish(conn);
@@ -2675,11 +4019,11 @@ public:
             ss << "\"title\":\"" << escape_json_string(PQgetvalue(result, i, 3)) << "\",";
             ss << "\"content\":\"" << escape_json_string(PQgetvalue(result, i, 4)) << "\",";
             ss << "\"confidence\":" << PQgetvalue(result, i, 5) << ",";
-            
+
             // Parse tags array
             std::string tags_str = PQgetvalue(result, i, 6);
             ss << "\"tags\":" << (tags_str.empty() ? "[]" : tags_str) << ",";
-            
+
             ss << "\"accessCount\":" << PQgetvalue(result, i, 7) << ",";
             ss << "\"createdAt\":\"" << PQgetvalue(result, i, 8) << "\",";
             ss << "\"updatedAt\":\"" << PQgetvalue(result, i, 9) << "\"";
@@ -2706,32 +4050,50 @@ public:
         std::string category = params.count("category") ? params.at("category") : "";
         std::string tag = params.count("tag") ? params.at("tag") : "";
         std::string sort_by = params.count("sort_by") ? params.at("sort_by") : "relevance";
+        std::string limit_str = std::to_string(limit);
 
-        std::stringstream sql;
-        sql << "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
-            << "tags, access_count, created_at, updated_at "
-            << "FROM knowledge_entities WHERE 1=1 ";
-        
-        if (!category.empty()) {
-            sql << "AND domain = '" << category << "' ";
-        }
-        
-        if (!tag.empty()) {
-            sql << "AND '" << tag << "' = ANY(tags) ";
-        }
-        
-        // Sorting
+        // Build SQL with proper ORDER BY clause
+        std::string order_clause;
         if (sort_by == "date") {
-            sql << "ORDER BY created_at DESC ";
+            order_clause = "ORDER BY created_at DESC";
         } else if (sort_by == "usage") {
-            sql << "ORDER BY access_count DESC ";
+            order_clause = "ORDER BY access_count DESC";
         } else {
-            sql << "ORDER BY confidence_score DESC, access_count DESC ";
+            order_clause = "ORDER BY confidence_score DESC, access_count DESC";
         }
-        
-        sql << "LIMIT " << limit;
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        PGresult *result = nullptr;
+
+        // Build parameterized query based on filter combinations
+        if (!category.empty() && !tag.empty()) {
+            std::string query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                  "tags, access_count, created_at, updated_at "
+                                  "FROM knowledge_entities WHERE domain = $1 AND $2 = ANY(tags) " +
+                                  order_clause + " LIMIT $3";
+            const char* paramValues[3] = { category.c_str(), tag.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn, query_sql.c_str(), 3, NULL, paramValues, NULL, NULL, 0);
+        } else if (!category.empty()) {
+            std::string query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                  "tags, access_count, created_at, updated_at "
+                                  "FROM knowledge_entities WHERE domain = $1 " +
+                                  order_clause + " LIMIT $2";
+            const char* paramValues[2] = { category.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn, query_sql.c_str(), 2, NULL, paramValues, NULL, NULL, 0);
+        } else if (!tag.empty()) {
+            std::string query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                  "tags, access_count, created_at, updated_at "
+                                  "FROM knowledge_entities WHERE $1 = ANY(tags) " +
+                                  order_clause + " LIMIT $2";
+            const char* paramValues[2] = { tag.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn, query_sql.c_str(), 2, NULL, paramValues, NULL, NULL, 0);
+        } else {
+            std::string query_sql = "SELECT entity_id, domain, knowledge_type, title, content, confidence_score, "
+                                  "tags, access_count, created_at, updated_at "
+                                  "FROM knowledge_entities " +
+                                  order_clause + " LIMIT $1";
+            const char* paramValues[1] = { limit_str.c_str() };
+            result = PQexecParams(conn, query_sql.c_str(), 1, NULL, paramValues, NULL, NULL, 0);
+        }
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -2908,17 +4270,18 @@ public:
         // Find similar entries using vector similarity
         // Note: In production with actual embeddings, this would use: embedding <=> (SELECT embedding FROM knowledge_entities WHERE entity_id = $1)
         // For now, we'll find related entries by domain and tags
-        std::stringstream sql;
-        sql << "SELECT ke.entity_id, ke.domain, ke.knowledge_type, ke.title, ke.content, "
-            << "ke.confidence_score, ke.tags, ke.access_count, ke.created_at, ke.updated_at "
-            << "FROM knowledge_entities ke "
-            << "WHERE ke.entity_id != '" << entry_id << "' "
-            << "AND (ke.domain = (SELECT domain FROM knowledge_entities WHERE entity_id = '" << entry_id << "') "
-            << "OR ke.tags && (SELECT tags FROM knowledge_entities WHERE entity_id = '" << entry_id << "')) "
-            << "ORDER BY ke.confidence_score DESC, ke.access_count DESC "
-            << "LIMIT " << limit;
-
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        std::string limit_str = std::to_string(limit);
+        const char* paramValues[4] = { entry_id.c_str(), entry_id.c_str(), entry_id.c_str(), limit_str.c_str() };
+        PGresult *result = PQexecParams(conn,
+            "SELECT ke.entity_id, ke.domain, ke.knowledge_type, ke.title, ke.content, "
+            "ke.confidence_score, ke.tags, ke.access_count, ke.created_at, ke.updated_at "
+            "FROM knowledge_entities ke "
+            "WHERE ke.entity_id != $1 "
+            "AND (ke.domain = (SELECT domain FROM knowledge_entities WHERE entity_id = $2) "
+            "OR ke.tags && (SELECT tags FROM knowledge_entities WHERE entity_id = $3)) "
+            "ORDER BY ke.confidence_score DESC, ke.access_count DESC "
+            "LIMIT $4",
+            4, NULL, paramValues, NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -2973,28 +4336,38 @@ public:
         std::string to_agent = params.count("to") ? params.at("to") : "";
         std::string msg_type = params.count("type") ? params.at("type") : "";
         std::string priority = params.count("priority") ? params.at("priority") : "";
+        std::string limit_str = std::to_string(limit);
 
-        std::stringstream sql;
-        sql << "SELECT comm_id, from_agent, to_agent, message_type, message_content, "
-            << "message_priority, metadata, sent_at, received_at, processed_at, status "
-            << "FROM agent_communications WHERE 1=1 ";
-        
+        PGresult *result = nullptr;
+
+        // Build parameterized query based on filter combinations
+        std::vector<const char*> paramValues;
+        std::string query_sql = "SELECT comm_id, from_agent, to_agent, message_type, message_content, "
+                              "message_priority, metadata, sent_at, received_at, processed_at, status "
+                              "FROM agent_communications WHERE 1=1 ";
+
         if (!from_agent.empty()) {
-            sql << "AND from_agent = '" << from_agent << "' ";
+            paramValues.push_back(from_agent.c_str());
+            query_sql += "AND from_agent = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!to_agent.empty()) {
-            sql << "AND to_agent = '" << to_agent << "' ";
+            paramValues.push_back(to_agent.c_str());
+            query_sql += "AND to_agent = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!msg_type.empty()) {
-            sql << "AND message_type = '" << msg_type << "' ";
+            paramValues.push_back(msg_type.c_str());
+            query_sql += "AND message_type = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!priority.empty()) {
-            sql << "AND message_priority = '" << priority << "' ";
+            paramValues.push_back(priority.c_str());
+            query_sql += "AND message_priority = $" + std::to_string(paramValues.size()) + " ";
         }
-        
-        sql << "ORDER BY sent_at DESC LIMIT " << limit;
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        paramValues.push_back(limit_str.c_str());
+        query_sql += "ORDER BY sent_at DESC LIMIT $" + std::to_string(paramValues.size());
+
+        result = PQexecParams(conn, query_sql.c_str(), paramValues.size(), NULL,
+                            paramValues.data(), NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -3041,13 +4414,14 @@ public:
             return "[]";
         }
 
-        std::stringstream sql;
-        sql << "SELECT comm_id, from_agent, to_agent, message_type, message_content, "
-            << "message_priority, sent_at, status "
-            << "FROM agent_communications "
-            << "ORDER BY sent_at DESC LIMIT " << limit;
-
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        std::string limit_str = std::to_string(limit);
+        const char* paramValues[1] = { limit_str.c_str() };
+        PGresult *result = PQexecParams(conn,
+            "SELECT comm_id, from_agent, to_agent, message_type, message_content, "
+            "message_priority, sent_at, status "
+            "FROM agent_communications "
+            "ORDER BY sent_at DESC LIMIT $1",
+            1, NULL, paramValues, NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -3164,26 +4538,34 @@ public:
         std::string pattern_type = params.count("type") ? params.at("type") : "";
         std::string severity = params.count("severity") ? params.at("severity") : "";
         std::string active_only = params.count("active") ? params.at("active") : "true";
+        std::string limit_str = std::to_string(limit);
 
-        std::stringstream sql;
-        sql << "SELECT pattern_id, pattern_name, pattern_type, pattern_description, "
-            << "pattern_rules, confidence_threshold, severity, is_active, "
-            << "created_by, created_at, updated_at "
-            << "FROM pattern_definitions WHERE 1=1 ";
-        
+        PGresult *result = nullptr;
+
+        // Build parameterized query based on filter combinations
+        std::vector<const char*> paramValues;
+        std::string query_sql = "SELECT pattern_id, pattern_name, pattern_type, pattern_description, "
+                              "pattern_rules, confidence_threshold, severity, is_active, "
+                              "created_by, created_at, updated_at "
+                              "FROM pattern_definitions WHERE 1=1 ";
+
         if (active_only == "true") {
-            sql << "AND is_active = true ";
+            query_sql += "AND is_active = true ";
         }
         if (!pattern_type.empty()) {
-            sql << "AND pattern_type = '" << pattern_type << "' ";
+            paramValues.push_back(pattern_type.c_str());
+            query_sql += "AND pattern_type = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!severity.empty()) {
-            sql << "AND severity = '" << severity << "' ";
+            paramValues.push_back(severity.c_str());
+            query_sql += "AND severity = $" + std::to_string(paramValues.size()) + " ";
         }
-        
-        sql << "ORDER BY created_at DESC LIMIT " << limit;
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        paramValues.push_back(limit_str.c_str());
+        query_sql += "ORDER BY created_at DESC LIMIT $" + std::to_string(paramValues.size());
+
+        result = PQexecParams(conn, query_sql.c_str(), paramValues.size(), NULL,
+                            paramValues.data(), NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -3234,29 +4616,38 @@ public:
         std::string pattern_id = params.count("pattern_id") ? params.at("pattern_id") : "";
         std::string entity_type = params.count("entity_type") ? params.at("entity_type") : "";
         std::string status = params.count("status") ? params.at("status") : "";
+        std::string limit_str = std::to_string(limit);
 
-        std::stringstream sql;
-        sql << "SELECT par.result_id, par.pattern_id, pd.pattern_name, "
-            << "par.entity_type, par.entity_id, par.match_confidence, "
-            << "par.matched_data, par.additional_context, par.detected_at, "
-            << "par.reviewed_at, par.reviewed_by, par.status "
-            << "FROM pattern_analysis_results par "
-            << "LEFT JOIN pattern_definitions pd ON par.pattern_id = pd.pattern_id "
-            << "WHERE 1=1 ";
-        
+        PGresult *result = nullptr;
+
+        // Build parameterized query based on filter combinations
+        std::vector<const char*> paramValues;
+        std::string query_sql = "SELECT par.result_id, par.pattern_id, pd.pattern_name, "
+                              "par.entity_type, par.entity_id, par.match_confidence, "
+                              "par.matched_data, par.additional_context, par.detected_at, "
+                              "par.reviewed_at, par.reviewed_by, par.status "
+                              "FROM pattern_analysis_results par "
+                              "LEFT JOIN pattern_definitions pd ON par.pattern_id = pd.pattern_id "
+                              "WHERE 1=1 ";
+
         if (!pattern_id.empty()) {
-            sql << "AND par.pattern_id = '" << pattern_id << "' ";
+            paramValues.push_back(pattern_id.c_str());
+            query_sql += "AND par.pattern_id = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!entity_type.empty()) {
-            sql << "AND par.entity_type = '" << entity_type << "' ";
+            paramValues.push_back(entity_type.c_str());
+            query_sql += "AND par.entity_type = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!status.empty()) {
-            sql << "AND par.status = '" << status << "' ";
+            paramValues.push_back(status.c_str());
+            query_sql += "AND par.status = $" + std::to_string(paramValues.size()) + " ";
         }
-        
-        sql << "ORDER BY par.detected_at DESC LIMIT " << limit;
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        paramValues.push_back(limit_str.c_str());
+        query_sql += "ORDER BY par.detected_at DESC LIMIT $" + std::to_string(paramValues.size());
+
+        result = PQexecParams(conn, query_sql.c_str(), paramValues.size(), NULL,
+                            paramValues.data(), NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -3425,26 +4816,35 @@ public:
         std::string provider = params.count("provider") ? params.at("provider") : "";
         std::string model = params.count("model") ? params.at("model") : "";
         std::string agent = params.count("agent") ? params.at("agent") : "";
+        std::string limit_str = std::to_string(limit);
 
-        std::stringstream sql;
-        sql << "SELECT log_id, agent_name, function_name, function_parameters, "
-            << "function_result, execution_time_ms, success, error_message, "
-            << "llm_provider, model_name, tokens_used, call_context, called_at "
-            << "FROM function_call_logs WHERE llm_provider IS NOT NULL ";
-        
+        PGresult *result = nullptr;
+
+        // Build parameterized query based on filter combinations
+        std::vector<const char*> paramValues;
+        std::string query_sql = "SELECT log_id, agent_name, function_name, function_parameters, "
+                              "function_result, execution_time_ms, success, error_message, "
+                              "llm_provider, model_name, tokens_used, call_context, called_at "
+                              "FROM function_call_logs WHERE llm_provider IS NOT NULL ";
+
         if (!provider.empty()) {
-            sql << "AND llm_provider = '" << provider << "' ";
+            paramValues.push_back(provider.c_str());
+            query_sql += "AND llm_provider = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!model.empty()) {
-            sql << "AND model_name = '" << model << "' ";
+            paramValues.push_back(model.c_str());
+            query_sql += "AND model_name = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!agent.empty()) {
-            sql << "AND agent_name = '" << agent << "' ";
+            paramValues.push_back(agent.c_str());
+            query_sql += "AND agent_name = $" + std::to_string(paramValues.size()) + " ";
         }
-        
-        sql << "ORDER BY called_at DESC LIMIT " << limit;
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        paramValues.push_back(limit_str.c_str());
+        query_sql += "ORDER BY called_at DESC LIMIT $" + std::to_string(paramValues.size());
+
+        result = PQexecParams(conn, query_sql.c_str(), paramValues.size(), NULL,
+                            paramValues.data(), NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -3573,28 +4973,36 @@ public:
         std::string function_name = params.count("function") ? params.at("function") : "";
         std::string agent = params.count("agent") ? params.at("agent") : "";
         std::string success_filter = params.count("success") ? params.at("success") : "";
+        std::string limit_str = std::to_string(limit);
 
-        std::stringstream sql;
-        sql << "SELECT log_id, agent_name, function_name, function_parameters, "
-            << "function_result, execution_time_ms, success, error_message, "
-            << "llm_provider, model_name, tokens_used, called_at "
-            << "FROM function_call_logs WHERE 1=1 ";
-        
+        PGresult *result = nullptr;
+
+        // Build parameterized query based on filter combinations
+        std::vector<const char*> paramValues;
+        std::string query_sql = "SELECT log_id, agent_name, function_name, function_parameters, "
+                              "function_result, execution_time_ms, success, error_message, "
+                              "llm_provider, model_name, tokens_used, called_at "
+                              "FROM function_call_logs WHERE 1=1 ";
+
         if (!function_name.empty()) {
-            sql << "AND function_name = '" << function_name << "' ";
+            paramValues.push_back(function_name.c_str());
+            query_sql += "AND function_name = $" + std::to_string(paramValues.size()) + " ";
         }
         if (!agent.empty()) {
-            sql << "AND agent_name = '" << agent << "' ";
+            paramValues.push_back(agent.c_str());
+            query_sql += "AND agent_name = $" + std::to_string(paramValues.size()) + " ";
         }
         if (success_filter == "false") {
-            sql << "AND success = false ";
+            query_sql += "AND success = false ";
         } else if (success_filter == "true") {
-            sql << "AND success = true ";
+            query_sql += "AND success = true ";
         }
-        
-        sql << "ORDER BY called_at DESC LIMIT " << limit;
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        paramValues.push_back(limit_str.c_str());
+        query_sql += "ORDER BY called_at DESC LIMIT $" + std::to_string(paramValues.size());
+
+        result = PQexecParams(conn, query_sql.c_str(), paramValues.size(), NULL,
+                            paramValues.data(), NULL, NULL, 0);
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -3718,19 +5126,27 @@ public:
 
         int limit = params.count("limit") ? std::stoi(params.at("limit")) : 50;
         std::string memory_type = params.count("type") ? params.at("type") : "";
-        
-        std::stringstream sql;
-        sql << "SELECT conversation_id, agent_type, agent_name, context_type, conversation_topic, "
-            << "memory_type, importance_score, created_at, updated_at "
-            << "FROM conversation_memory WHERE 1=1 ";
-        
-        if (!memory_type.empty()) {
-            sql << "AND memory_type = '" << memory_type << "' ";
-        }
-        
-        sql << "ORDER BY importance_score DESC, created_at DESC LIMIT " << limit;
+        std::string limit_str = std::to_string(limit);
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        PGresult *result = nullptr;
+
+        if (!memory_type.empty()) {
+            const char* paramValues[2] = { memory_type.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT conversation_id, agent_type, agent_name, context_type, conversation_topic, "
+                "memory_type, importance_score, created_at, updated_at "
+                "FROM conversation_memory WHERE memory_type = $1 "
+                "ORDER BY importance_score DESC, created_at DESC LIMIT $2",
+                2, NULL, paramValues, NULL, NULL, 0);
+        } else {
+            const char* paramValues[1] = { limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT conversation_id, agent_type, agent_name, context_type, conversation_topic, "
+                "memory_type, importance_score, created_at, updated_at "
+                "FROM conversation_memory "
+                "ORDER BY importance_score DESC, created_at DESC LIMIT $1",
+                1, NULL, paramValues, NULL, NULL, 0);
+        }
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -4064,19 +5480,27 @@ public:
 
         int limit = params.count("limit") ? std::stoi(params.at("limit")) : 100;
         std::string model_id = params.count("model_id") ? params.at("model_id") : "";
-        
-        std::stringstream sql;
-        sql << "SELECT evaluation_id, model_id, alternative_name, criterion_value, "
-            << "normalized_value, weighted_score, evaluated_at "
-            << "FROM mcda_evaluations WHERE 1=1 ";
-        
-        if (!model_id.empty()) {
-            sql << "AND model_id = '" << model_id << "' ";
-        }
-        
-        sql << "ORDER BY evaluated_at DESC LIMIT " << limit;
+        std::string limit_str = std::to_string(limit);
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        PGresult *result = nullptr;
+
+        if (!model_id.empty()) {
+            const char* paramValues[2] = { model_id.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT evaluation_id, model_id, alternative_name, criterion_value, "
+                "normalized_value, weighted_score, evaluated_at "
+                "FROM mcda_evaluations WHERE model_id = $1 "
+                "ORDER BY evaluated_at DESC LIMIT $2",
+                2, NULL, paramValues, NULL, NULL, 0);
+        } else {
+            const char* paramValues[1] = { limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT evaluation_id, model_id, alternative_name, criterion_value, "
+                "normalized_value, weighted_score, evaluated_at "
+                "FROM mcda_evaluations "
+                "ORDER BY evaluated_at DESC LIMIT $1",
+                1, NULL, paramValues, NULL, NULL, 0);
+        }
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -4629,19 +6053,27 @@ public:
 
         int limit = params.count("limit") ? std::stoi(params.at("limit")) : 100;
         std::string severity = params.count("severity") ? params.at("severity") : "";
-        
-        std::stringstream sql;
-        sql << "SELECT event_id, event_type, event_description, severity, timestamp, "
-            << "agent_type, metadata "
-            << "FROM compliance_events WHERE 1=1 ";
-        
-        if (!severity.empty()) {
-            sql << "AND severity = '" << severity << "' ";
-        }
-        
-        sql << "ORDER BY timestamp DESC LIMIT " << limit;
+        std::string limit_str = std::to_string(limit);
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        PGresult *result = nullptr;
+
+        if (!severity.empty()) {
+            const char* paramValues[2] = { severity.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT event_id, event_type, event_description, severity, timestamp, "
+                "agent_type, metadata "
+                "FROM compliance_events WHERE severity = $1 "
+                "ORDER BY timestamp DESC LIMIT $2",
+                2, NULL, paramValues, NULL, NULL, 0);
+        } else {
+            const char* paramValues[1] = { limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT event_id, event_type, event_description, severity, timestamp, "
+                "agent_type, metadata "
+                "FROM compliance_events "
+                "ORDER BY timestamp DESC LIMIT $1",
+                1, NULL, paramValues, NULL, NULL, 0);
+        }
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -4740,19 +6172,27 @@ public:
 
         int limit = params.count("limit") ? std::stoi(params.at("limit")) : 100;
         std::string username = params.count("username") ? params.at("username") : "";
-        
-        std::stringstream sql;
-        sql << "SELECT login_id, username, login_timestamp, ip_address, user_agent, "
-            << "success, failure_reason, session_id "
-            << "FROM login_history WHERE 1=1 ";
-        
-        if (!username.empty()) {
-            sql << "AND username = '" << username << "' ";
-        }
-        
-        sql << "ORDER BY login_timestamp DESC LIMIT " << limit;
+        std::string limit_str = std::to_string(limit);
 
-        PGresult *result = PQexec(conn, sql.str().c_str());
+        PGresult *result = nullptr;
+
+        if (!username.empty()) {
+            const char* paramValues[2] = { username.c_str(), limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT login_id, username, login_timestamp, ip_address, user_agent, "
+                "success, failure_reason, session_id "
+                "FROM login_history WHERE username = $1 "
+                "ORDER BY login_timestamp DESC LIMIT $2",
+                2, NULL, paramValues, NULL, NULL, 0);
+        } else {
+            const char* paramValues[1] = { limit_str.c_str() };
+            result = PQexecParams(conn,
+                "SELECT login_id, username, login_timestamp, ip_address, user_agent, "
+                "success, failure_reason, session_id "
+                "FROM login_history "
+                "ORDER BY login_timestamp DESC LIMIT $1",
+                1, NULL, paramValues, NULL, NULL, 0);
+        }
         
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             PQclear(result);
@@ -6572,6 +8012,39 @@ public:
                     response_body = "{\"models\":[{\"name\":\"compliance_classifier\",\"version\":\"1.0\",\"accuracy\":0.987}],\"active_model\":\"compliance_classifier\"}";
                 } else if (path_without_query == "/api/v1/ai/training") {
                     response_body = "{\"training_sessions\":[],\"last_training\":\"2024-01-01T00:00:00Z\",\"model_performance\":0.95}";
+                } else if (path_without_query.find("/api/v1/collaboration") == 0) {
+                    // Feature 1: Real-Time Collaboration Dashboard API
+                    response_body = handle_collaboration_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/alerts") == 0) {
+                    // Feature 2: Regulatory Change Alerts with Email
+                    response_body = handle_alerts_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/exports") == 0) {
+                    // Feature 3: Export/Reporting Module
+                    response_body = handle_exports_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/llm-keys") == 0) {
+                    // Feature 4: API Key Management UI
+                    response_body = handle_llm_keys_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/risk") == 0) {
+                    // Feature 5: Predictive Compliance Risk Scoring
+                    response_body = handle_risk_scoring_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/simulations") == 0) {
+                    // Feature 7: Regulatory Change Simulator
+                    response_body = handle_simulations_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/analytics") == 0) {
+                    // Feature 8: Advanced Analytics & BI Dashboard
+                    response_body = handle_analytics_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/nl-policies") == 0) {
+                    // Feature 10: Natural Language Policy Builder
+                    response_body = handle_nl_policies_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/chatbot") == 0) {
+                    // Feature 12: Regulatory Chatbot
+                    response_body = handle_chatbot_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/integrations") == 0) {
+                    // Feature 13: Integration Marketplace
+                    response_body = handle_integrations_request(path_without_query, method, request_body, query_params);
+                } else if (path_without_query.find("/api/v1/training") == 0) {
+                    // Feature 14: Compliance Training Module
+                    response_body = handle_training_request(path_without_query, method, request_body, query_params);
                 } else {
                     response_body = "{\"error\":\"Not Found\",\"path\":\"" + path + "\",\"available_endpoints\":[\"/health\",\"/api/auth/login\",\"/api/auth/me\",\"/agents\",\"/regulatory\",\"/api/decisions\",\"/api/transactions\"]}";
                 }

@@ -323,12 +323,11 @@ private:
     std::shared_ptr<DecisionTreeOptimizer> decision_optimizer_;
 
     // Multi-Agent Communication System
-    // NOTE: Not needed for Regulatory Monitor - only used by API server
-    // std::shared_ptr<AgentCommRegistry> agent_registry_;
-    // std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
-    // std::shared_ptr<IntelligentMessageTranslator> message_translator_;
-    // std::shared_ptr<ConsensusEngine> consensus_engine_;
-    // std::shared_ptr<CommunicationMediator> communication_mediator_;
+    std::shared_ptr<AgentCommRegistry> agent_registry_;
+    std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
+    std::shared_ptr<IntelligentMessageTranslator> message_translator_;
+    std::shared_ptr<ConsensusEngine> consensus_engine_;
+    std::shared_ptr<CommunicationMediator> communication_mediator_;
 
     // Memory System components
     std::shared_ptr<ConversationMemory> conversation_memory_;

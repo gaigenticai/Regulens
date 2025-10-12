@@ -112,6 +112,7 @@ private:
     std::string generate_change_id(const std::string& source, const std::string& title);
     bool is_duplicate_change(const RegulatoryChange& change);
     std::string extract_text_content(const std::string& html, const std::string& selector);
+    std::chrono::system_clock::time_point parse_rfc822_date(const std::string& date_str);
 
     // Member variables
     std::shared_ptr<ConnectionPool> db_pool_;

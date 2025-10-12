@@ -54,52 +54,39 @@ const TransactionDetail: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // Load transaction details from Transaction Guardian Agent
-      const [transactionRes, riskRes, customerRes, patternsRes, relatedRes] = await Promise.allSettled([
-        apiClient.getTransactionById(transactionId),
-        apiClient.getFraudAnalysis(transactionId),
-        apiClient.getTransactionPatterns(),
-        apiClient.getTransactionPatterns(),
-        apiClient.getTransactions({ limit: 10 })
-      ]);
+      // Load transaction details
+      const transaction = await apiClient.getTransactionById(transactionId);
+      setTransaction(transaction);
 
-      if (transactionRes.status === 'fulfilled') {
-        setTransaction(transactionRes.value);
+      // Try to load fraud analysis
+      try {
+        const riskAnalysis = await apiClient.getFraudAnalysis(transactionId);
+        setRiskAssessment(riskAnalysis);
+      } catch (err) {
+        console.log('No fraud analysis available for this transaction');
       }
 
-      if (riskRes.status === 'fulfilled') {
-        setRiskAssessment(riskRes.value);
-      }
-
-      if (customerRes.status === 'fulfilled') {
-        // Use pattern data as customer info since we don't have a direct customer endpoint
-        const patterns = customerRes.value;
-        if (patterns.length > 0) {
-          setCustomerProfile({
-            customer_id: transaction?.customer_id || 'unknown',
-            full_name: 'Customer Profile',
-            risk_rating: 'MEDIUM',
-            kyc_status: 'VERIFIED',
-            pep_status: false,
-            watchlist_flags: [],
-            nationality: 'USA',
-            residency_country: 'USA'
-          });
+      // Load related transactions for the same customer
+      if (transaction.from) {
+        try {
+          const related = await apiClient.getTransactions({ limit: 10 });
+          setRelatedTransactions(related.filter(t => t.id !== transactionId).slice(0, 5));
+        } catch (err) {
+          console.error('Failed to load related transactions:', err);
         }
       }
 
-      if (patternsRes.status === 'fulfilled') {
-        setBehaviorPatterns(patternsRes.value.map(p => ({
-          pattern_type: p.type,
-          confidence_score: p.confidence,
-          pattern_data: p.metadata || {},
-          last_observed: p.detectedAt
-        })));
-      }
-
-      if (relatedRes.status === 'fulfilled') {
-        setRelatedTransactions(relatedRes.value.slice(0, 5)); // Show first 5 as related
-      }
+      // Set mock customer profile (since we don't have customer endpoint yet)
+      setCustomerProfile({
+        customer_id: transaction.from || 'unknown',
+        full_name: transaction.from || 'Unknown Customer',
+        risk_rating: 'MEDIUM',
+        kyc_status: 'VERIFIED',
+        pep_status: false,
+        watchlist_flags: [],
+        nationality: 'USA',
+        residency_country: 'USA'
+      });
 
     } catch (err) {
       setError('Failed to load transaction details');
@@ -179,26 +166,26 @@ const TransactionDetail: React.FC = () => {
         </Link>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">Transaction Details</h1>
-          <p className="text-gray-600">ID: {transaction.transaction_id}</p>
+          <p className="text-gray-600">ID: {transaction.id}</p>
         </div>
         <div className="flex items-center gap-2">
-          {getStatusIcon(transaction.status, transaction.flagged)}
+          {getStatusIcon(transaction.status, transaction.status === 'flagged')}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-            transaction.flagged ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+            transaction.status === 'flagged' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
           }`}>
-            {transaction.flagged ? 'Flagged' : 'Normal'}
+            {transaction.status === 'flagged' ? 'Flagged' : transaction.status}
           </span>
         </div>
       </div>
 
       {/* Risk Alert */}
-      {transaction.flagged && (
+      {transaction.status === 'flagged' && (
         <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-r-lg">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-6 h-6 text-red-600" />
             <div>
               <h3 className="font-semibold text-red-800">High-Risk Transaction Flagged</h3>
-              <p className="text-red-700">{transaction.flag_reason}</p>
+              <p className="text-red-700">Risk score: {(transaction.riskScore * 100).toFixed(1)}%</p>
             </div>
           </div>
         </div>
@@ -249,15 +236,15 @@ const TransactionDetail: React.FC = () => {
               </div>
               <div className="flex justify-between items-center py-2 border-b">
                 <span className="text-gray-600">Type</span>
-                <span className="font-medium">{transaction.transaction_type}</span>
+                <span className="font-medium">{transaction.type}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b">
                 <span className="text-gray-600">Date</span>
-                <span className="font-medium">{new Date(transaction.transaction_date).toLocaleString()}</span>
+                <span className="font-medium">{new Date(transaction.timestamp).toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b">
-                <span className="text-gray-600">Channel</span>
-                <span className="font-medium">{transaction.channel}</span>
+                <span className="text-gray-600">Status</span>
+                <span className="font-medium capitalize">{transaction.status}</span>
               </div>
               <div className="flex justify-between items-center py-2">
                 <span className="text-gray-600">Description</span>
@@ -273,16 +260,15 @@ const TransactionDetail: React.FC = () => {
               <h2 className="text-lg font-semibold">Risk Assessment</h2>
             </div>
             <div className="text-center">
-              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${getRiskColor(transaction.risk_score)}`}>
-                <span className="text-2xl font-bold">{(transaction.risk_score * 100).toFixed(1)}%</span>
-                <span className="font-medium">{getRiskLabel(transaction.risk_score)}</span>
+              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${getRiskColor(transaction.riskScore / 100)}`}>
+                <span className="text-2xl font-bold">{transaction.riskScore.toFixed(1)}%</span>
+                <span className="font-medium">{getRiskLabel(transaction.riskScore / 100)}</span>
               </div>
               {riskAssessment && (
                 <div className="mt-4 text-left">
-                  <p className="text-sm text-gray-600 mb-2">AI Assessment by: {riskAssessment.agent_name}</p>
-                  <p className="text-sm text-gray-700">{riskAssessment.assessment_reasoning}</p>
+                  <p className="text-sm text-gray-700">{riskAssessment.recommendation}</p>
                   <p className="text-xs text-gray-500 mt-2">
-                    Confidence: {(riskAssessment.confidence_level * 100).toFixed(1)}%
+                    Confidence: {(riskAssessment.confidence * 100).toFixed(1)}%
                   </p>
                 </div>
               )}
@@ -296,15 +282,15 @@ const TransactionDetail: React.FC = () => {
               <div>
                 <h3 className="font-medium text-gray-900 mb-2">Sender</h3>
                 <div className="space-y-2">
-                  <p><span className="text-gray-600">Name:</span> {transaction.sender_name}</p>
-                  <p><span className="text-gray-600">Account:</span> {transaction.sender_account}</p>
+                  <p><span className="text-gray-600">Name:</span> {transaction.from}</p>
+                  <p><span className="text-gray-600">Account:</span> {transaction.fromAccount}</p>
                 </div>
               </div>
               <div>
                 <h3 className="font-medium text-gray-900 mb-2">Receiver</h3>
                 <div className="space-y-2">
-                  <p><span className="text-gray-600">Name:</span> {transaction.receiver_name}</p>
-                  <p><span className="text-gray-600">Account:</span> {transaction.receiver_account}</p>
+                  <p><span className="text-gray-600">Name:</span> {transaction.to}</p>
+                  <p><span className="text-gray-600">Account:</span> {transaction.toAccount}</p>
                 </div>
               </div>
             </div>
@@ -318,32 +304,32 @@ const TransactionDetail: React.FC = () => {
             <h2 className="text-lg font-semibold mb-4">Detailed Risk Analysis</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <h3 className="font-medium mb-3">Risk Factors</h3>
+                <h3 className="font-medium mb-3">Risk Indicators</h3>
                 <div className="space-y-2">
-                  {Object.entries(riskAssessment.risk_factors).map(([key, value]) => (
-                    <div key={key} className="flex justify-between items-center py-1">
-                      <span className="text-gray-600 capitalize">{key.replace('_', ' ')}</span>
-                      <span className="font-medium">{String(value)}</span>
-                    </div>
-                  ))}
+                  {riskAssessment.indicators && riskAssessment.indicators.length > 0 ? (
+                    riskAssessment.indicators.map((indicator, index) => (
+                      <div key={index} className="flex items-start gap-2 py-1">
+                        <AlertTriangle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                        <span className="text-sm text-gray-700">{indicator}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-gray-500 text-sm">No risk indicators detected</p>
+                  )}
                 </div>
               </div>
               <div>
-                <h3 className="font-medium mb-3">Recommended Actions</h3>
-                <ul className="space-y-1">
-                  {riskAssessment.recommended_actions.map((action, index) => (
-                    <li key={index} className="flex items-start gap-2">
-                      <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-                      <span className="text-sm text-gray-700">{action}</span>
-                    </li>
-                  ))}
-                </ul>
+                <h3 className="font-medium mb-3">Recommendation</h3>
+                <div className="flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                  <span className="text-sm text-gray-700">{riskAssessment.recommendation}</span>
+                </div>
               </div>
             </div>
             <div className="mt-6 pt-4 border-t">
               <p className="text-sm text-gray-600">
-                Processing time: {riskAssessment.processing_time_ms}ms • 
-                Assessed: {new Date(riskAssessment.assessed_at).toLocaleString()}
+                Assessment ID: {riskAssessment.assessmentId} • 
+                Analyzed: {new Date(riskAssessment.timestamp * 1000).toLocaleString()}
               </p>
             </div>
           </div>
@@ -448,21 +434,21 @@ const TransactionDetail: React.FC = () => {
               <div className="space-y-3">
                 {relatedTransactions.map((relatedTx) => (
                   <Link
-                    key={relatedTx.transaction_id}
-                    to={`/transactions/${relatedTx.transaction_id}`}
+                    key={relatedTx.id}
+                    to={`/transactions/${relatedTx.id}`}
                     className="block border rounded-lg p-4 hover:bg-gray-50 transition-colors"
                   >
                     <div className="flex justify-between items-start">
                       <div>
-                        <p className="font-medium">{relatedTx.description}</p>
+                        <p className="font-medium">{relatedTx.description || 'Transaction'}</p>
                         <p className="text-sm text-gray-600">
-                          {relatedTx.sender_name} → {relatedTx.receiver_name}
+                          {relatedTx.from} → {relatedTx.to}
                         </p>
                       </div>
                       <div className="text-right">
                         <p className="font-semibold">{relatedTx.amount.toLocaleString()} {relatedTx.currency}</p>
                         <p className="text-sm text-gray-500">
-                          {new Date(relatedTx.transaction_date).toLocaleDateString()}
+                          {new Date(relatedTx.timestamp).toLocaleDateString()}
                         </p>
                       </div>
                     </div>

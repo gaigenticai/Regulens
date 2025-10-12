@@ -364,6 +364,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     value_date TIMESTAMP WITH TIME ZONE,
     description TEXT,
     channel VARCHAR(20) NOT NULL DEFAULT 'ONLINE' CHECK (channel IN ('ONLINE', 'ATM', 'BRANCH', 'WIRE', 'MOBILE')),
+    status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('pending', 'processing', 'completed', 'rejected', 'flagged', 'approved')),
     merchant_category_code VARCHAR(10),
     ip_address INET,
     device_fingerprint VARCHAR(255),
@@ -1090,6 +1091,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_transaction_date ON transactions(tra
 CREATE INDEX IF NOT EXISTS idx_transactions_amount ON transactions(amount);
 CREATE INDEX IF NOT EXISTS idx_transactions_risk_score ON transactions(risk_score);
 CREATE INDEX IF NOT EXISTS idx_transactions_flagged ON transactions(flagged);
+CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
 CREATE INDEX IF NOT EXISTS idx_transactions_sender_country ON transactions(sender_country);
 CREATE INDEX IF NOT EXISTS idx_transactions_receiver_country ON transactions(receiver_country);
 
@@ -2490,5 +2492,31 @@ CREATE INDEX IF NOT EXISTS idx_tool_usage_tool_name ON tool_usage_logs(tool_name
 CREATE INDEX IF NOT EXISTS idx_tool_usage_success ON tool_usage_logs(success, executed_at DESC);
 
 COMMENT ON TABLE tool_usage_logs IS 'Audit log of all tool calls made by agents (HTTP, DB, LLM)';
+
+-- =============================================================================
+-- MIGRATIONS - Transaction Status Column
+-- =============================================================================
+-- Migration to add status column to existing transactions table
+-- This handles existing tables that don't have the status column yet
+DO $$ 
+BEGIN
+    -- Check if status column exists
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'transactions' AND column_name = 'status'
+    ) THEN
+        -- Add status column with default 'completed'
+        ALTER TABLE transactions ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'completed' 
+            CHECK (status IN ('pending', 'processing', 'completed', 'rejected', 'flagged', 'approved'));
+        
+        -- Update status based on flagged column for existing records
+        UPDATE transactions SET status = 'flagged' WHERE flagged = TRUE;
+        UPDATE transactions SET status = 'completed' WHERE flagged = FALSE OR flagged IS NULL;
+        
+        RAISE NOTICE 'Added status column to transactions table and migrated existing data';
+    ELSE
+        RAISE NOTICE 'Status column already exists in transactions table';
+    END IF;
+END $$;
 
 

@@ -54,9 +54,12 @@ bool SecEdgarSource::initialize() {
         // Load configuration from environment
         api_key_ = config_->get_string("SEC_EDGAR_API_KEY").value_or("");
         base_url_ = config_->get_string("SEC_EDGAR_BASE_URL").value_or("https://www.sec.gov/edgar");
-        last_processed_filing_ = config_->get_string("SEC_EDGAR_LAST_PROCESSED").value_or("");
+
+        // Load last processed filing from database (production-grade persistence)
+        last_processed_filing_ = load_state_from_database("last_processed_filing", "");
 
         logger_->info("Initializing SEC EDGAR source with base URL: {}", base_url_);
+        logger_->info("Loaded last processed filing from database: {}", last_processed_filing_);
         return test_connectivity();
     } catch (const std::exception& e) {
         logger_->error("Failed to initialize SEC EDGAR source: {}", e.what());
@@ -266,7 +269,9 @@ std::string SecEdgarSource::generate_filing_summary(const nlohmann::json& filing
 
 void SecEdgarSource::update_last_processed_filing(const std::string& accession) {
     last_processed_filing_ = accession;
-    // In production, persist this to database/config
+
+    // Production: Persist state to database for durability across restarts
+    persist_state_to_database("last_processed_filing", accession);
 }
 
 // Production HTTP request implementation using HttpClient
@@ -302,9 +307,12 @@ bool FcaRegulatorySource::initialize() {
         // Load configuration from environment
         api_key_ = config_->get_string("FCA_API_KEY").value_or("");
         base_url_ = config_->get_string("FCA_BASE_URL").value_or("https://api.fca.org.uk");
-        last_update_timestamp_ = config_->get_string("FCA_LAST_UPDATE").value_or("");
+
+        // Load last update timestamp from database (production-grade persistence)
+        last_update_timestamp_ = load_state_from_database("last_update_timestamp", "");
 
         logger_->info("Initializing FCA Regulatory source with base URL: {}", base_url_);
+        logger_->info("Loaded last update timestamp from database: {}", last_update_timestamp_);
         return test_connectivity();
     } catch (const std::exception& e) {
         logger_->error("Failed to initialize FCA Regulatory source: {}", e.what());
@@ -511,7 +519,9 @@ std::string FcaRegulatorySource::generate_fca_summary(const nlohmann::json& upda
 
 void FcaRegulatorySource::update_last_timestamp(const std::string& timestamp) {
     last_update_timestamp_ = timestamp;
-    // In production, persist this to database/config
+
+    // Production: Persist state to database for durability across restarts
+    persist_state_to_database("last_update_timestamp", timestamp);
 }
 
 // HTTP request implementation using HttpClient
@@ -1160,6 +1170,72 @@ WebScrapingSource::HttpResponse WebScrapingSource::make_http_request(const std::
     } catch (const std::exception& e) {
         logger_->error("HTTP request failed: {}", e.what());
         return {500, "{}"};
+    }
+}
+
+// Production-grade state persistence implementation for RegulatorySource base class
+void RegulatorySource::persist_state_to_database(const std::string& key, const std::string& value) {
+    if (!db_pool_) {
+        logger_->warn("Database pool not available for state persistence");
+        return;
+    }
+
+    try {
+        auto conn = db_pool_->get_connection();
+        if (!conn) {
+            logger_->error("Failed to get database connection for state persistence");
+            return;
+        }
+
+        // Use UPSERT to persist state (INSERT ON CONFLICT UPDATE)
+        std::string upsert_query = R"(
+            INSERT INTO regulatory_source_state (source_id, state_key, state_value, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (source_id, state_key)
+            DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = NOW()
+        )";
+
+        conn->execute_query_multi(upsert_query, {source_id_, key, value});
+
+        logger_->debug("Persisted state to database: {}/{} = {}", source_id_, key, value);
+        db_pool_->return_connection(conn);
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to persist state to database: {}", e.what());
+    }
+}
+
+std::string RegulatorySource::load_state_from_database(const std::string& key, const std::string& default_value) {
+    if (!db_pool_) {
+        logger_->warn("Database pool not available for loading state, using default");
+        return default_value;
+    }
+
+    try {
+        auto conn = db_pool_->get_connection();
+        if (!conn) {
+            logger_->error("Failed to get database connection for loading state");
+            return default_value;
+        }
+
+        std::string select_query = R"(
+            SELECT state_value FROM regulatory_source_state
+            WHERE source_id = $1 AND state_key = $2
+        )";
+
+        auto result_json = conn->execute_query_json(select_query, {source_id_, key});
+
+        db_pool_->return_connection(conn);
+
+        if (result_json.is_array() && !result_json.empty()) {
+            return result_json[0].value("state_value", default_value);
+        }
+
+        return default_value;
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to load state from database: {}", e.what());
+        return default_value;
     }
 }
 

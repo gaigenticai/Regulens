@@ -26,6 +26,7 @@ const AgentDetail = lazy(() => import('@/pages/AgentDetail'));
 
 // Transaction & Fraud
 const Transactions = lazy(() => import('@/pages/Transactions'));
+const TransactionDetail = lazy(() => import('@/pages/TransactionDetail'));
 const FraudRules = lazy(() => import('@/pages/FraudRules'));
 
 // Data & Analytics
@@ -130,6 +131,12 @@ export const routes: AppRoute[] = [
     element: Transactions,
     showInNav: true,
     icon: 'CreditCard',
+  },
+  {
+    path: '/transactions/:id',
+    name: 'Transaction Detail',
+    element: TransactionDetail,
+    showInNav: false,
   },
   {
     path: '/fraud-rules',

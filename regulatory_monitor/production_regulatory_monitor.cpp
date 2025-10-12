@@ -423,7 +423,9 @@ std::vector<RegulatoryChange> ProductionRegulatoryMonitor::extract_sec_edgar_cha
             change.change_type = "regulatory_action";
             change.severity = title.find("Emergency") != std::string::npos ? "CRITICAL" : "HIGH";
             change.detected_at = std::chrono::system_clock::now();
-            change.published_at = std::chrono::system_clock::now(); // Would parse pub_date in production
+
+            // Production: Parse actual publication date from RSS feed
+            change.published_at = parse_rfc822_date(pub_date);
 
             if (!is_duplicate_change(change)) {
                 changes.push_back(change);
@@ -607,6 +609,41 @@ bool ProductionRegulatoryMonitor::is_duplicate_change(const RegulatoryChange& ch
     }
 
     return false;
+}
+
+// Production-grade RFC 822 date parser for RSS feeds
+std::chrono::system_clock::time_point ProductionRegulatoryMonitor::parse_rfc822_date(const std::string& date_str) {
+    // RFC 822 format: "Wed, 02 Oct 2002 13:00:00 GMT"
+    // Also handles other variants like "Wed, 02 Oct 2002 13:00:00 +0000"
+
+    if (date_str.empty()) {
+        return std::chrono::system_clock::now();
+    }
+
+    std::tm tm = {};
+    std::istringstream ss(date_str);
+
+    // Skip day of week (e.g., "Wed,")
+    std::string day_of_week;
+    std::getline(ss, day_of_week, ',');
+
+    // Parse the rest
+    ss >> std::get_time(&tm, " %d %b %Y %H:%M:%S");
+
+    if (ss.fail()) {
+        // Fallback: Try alternative format
+        ss.clear();
+        ss.str(date_str);
+        ss >> std::get_time(&tm, "%a, %d %b %Y %H:%M:%S");
+
+        if (ss.fail()) {
+            logger_->warn("Failed to parse RFC 822 date: " + date_str, "RegulatoryMonitor", __func__);
+            return std::chrono::system_clock::now();
+        }
+    }
+
+    // Convert to time_point
+    return std::chrono::system_clock::from_time_t(std::mktime(&tm));
 }
 
 } // namespace regulens

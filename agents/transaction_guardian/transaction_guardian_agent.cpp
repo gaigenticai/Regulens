@@ -854,9 +854,10 @@ void TransactionGuardianAgent::escalate_suspicious_transaction(const nlohmann::j
             metadata
         );
 
-        // In production, would queue this event for human review
-        // Production: execute guardian action via action executor
-        logger_->log(LogLevel::WARN, "Suspicious transaction escalated for review: " +
+        // Production: Queue event for human review in database
+        queue_for_human_review(event, transaction_data, risk_score);
+
+        logger_->log(LogLevel::WARN, "Suspicious transaction queued for human review: " +
                    transaction_data.value("transaction_id", "unknown"));
 
     } catch (const std::exception& e) {
@@ -1465,6 +1466,83 @@ void TransactionGuardianAgent::record_operation_success(std::atomic<size_t>& fai
     if (failure_counter > 0) {
         failure_counter = 0;
         logger_->log(LogLevel::INFO, "Operation success recorded. Reset failure counter.");
+    }
+}
+
+void TransactionGuardianAgent::queue_for_human_review(
+    const ComplianceEvent& event,
+    const nlohmann::json& transaction_data,
+    double risk_score) {
+
+    try {
+        auto conn = db_pool_->get_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to get database connection for queuing human review");
+            return;
+        }
+
+        // Production: Insert into human review queue table
+        std::string insert_query = R"(
+            INSERT INTO human_review_queue (
+                review_id,
+                event_id,
+                event_type,
+                event_severity,
+                transaction_id,
+                customer_id,
+                risk_score,
+                transaction_data,
+                event_metadata,
+                status,
+                priority,
+                assigned_to,
+                created_at,
+                review_deadline
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW() + INTERVAL '24 hours'
+            )
+        )";
+
+        std::string review_id = "review_" + std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count()
+        );
+
+        std::string event_type_str = (event.get_type() == EventType::SUSPICIOUS_ACTIVITY_DETECTED) ?
+            "SUSPICIOUS_ACTIVITY" : "COMPLIANCE_VIOLATION";
+
+        std::string severity_str = (event.get_severity() == EventSeverity::CRITICAL) ? "CRITICAL" :
+                                   (event.get_severity() == EventSeverity::HIGH) ? "HIGH" : "MEDIUM";
+
+        std::string priority = (risk_score > fraud_threshold_) ? "URGENT" :
+                              (risk_score > high_risk_threshold_) ? "HIGH" : "NORMAL";
+
+        std::vector<std::string> params = {
+            review_id,
+            event.get_id(),
+            event_type_str,
+            severity_str,
+            transaction_data.value("transaction_id", "unknown"),
+            transaction_data.value("customer_id", "unknown"),
+            std::to_string(risk_score),
+            transaction_data.dump(),
+            event.get_metadata().dump(),
+            "PENDING",
+            priority,
+            "" // Unassigned initially, will be assigned by review system
+        };
+
+        conn->execute_query_multi(insert_query, params);
+        db_pool_->return_connection(conn);
+
+        logger_->log(LogLevel::INFO, "Transaction queued for human review", {
+            {"review_id", review_id},
+            {"transaction_id", transaction_data.value("transaction_id", "unknown")},
+            {"risk_score", risk_score},
+            {"priority", priority}
+        });
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to queue transaction for human review: " + std::string(e.what()));
     }
 }
 

@@ -6,7 +6,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Search, DollarSign, AlertTriangle, CheckCircle, XCircle, Clock, Wifi, WifiOff } from 'lucide-react';
+import { Shield, Search, DollarSign, AlertTriangle, CheckCircle, XCircle, Clock, Wifi, WifiOff, CheckCircle2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useTransactions, useTransactionStats, useAnalyzeTransaction } from '@/hooks/useTransactions';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
@@ -18,6 +18,8 @@ const Transactions: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<Transaction['status'] | 'all'>('all');
   const [filterRiskLevel, setFilterRiskLevel] = useState<Transaction['riskLevel'] | 'all'>('all');
   const [timeRange, setTimeRange] = useState<'1h' | '24h' | '7d' | '30d'>('24h');
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
 
   const { transactions, isLoading, isConnected } = useTransactions({
     limit: 100,
@@ -27,6 +29,23 @@ const Transactions: React.FC = () => {
 
   const { data: stats } = useTransactionStats(timeRange);
   const { mutate: analyzeTransaction, isPending: isAnalyzing } = useAnalyzeTransaction();
+
+  const handleAnalyze = async (transactionId: string) => {
+    setAnalyzingId(transactionId);
+    analyzeTransaction(transactionId, {
+      onSuccess: () => {
+        setAnalyzingId(null);
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 3000);
+        console.log('Transaction analyzed successfully:', transactionId);
+      },
+      onError: (error) => {
+        setAnalyzingId(null);
+        console.error('Analysis failed:', error);
+        alert('Analysis failed. Please try again.');
+      }
+    });
+  };
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
@@ -70,6 +89,16 @@ const Transactions: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Success Toast */}
+      {showSuccessToast && (
+        <div className="fixed top-4 right-4 z-50 animate-slide-in">
+          <div className="bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5" />
+            <span className="font-medium">Transaction analyzed successfully!</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -154,9 +183,6 @@ const Transactions: React.FC = () => {
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
             <option value="flagged">Flagged</option>
             <option value="completed">Completed</option>
           </select>
@@ -314,11 +340,19 @@ const Transactions: React.FC = () => {
                   </Link>
 
                   <button
-                    onClick={() => analyzeTransaction(tx.id)}
-                    disabled={isAnalyzing}
-                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-50"
+                    onClick={() => handleAnalyze(tx.id)}
+                    disabled={analyzingId === tx.id}
+                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isAnalyzing ? 'Analyzing...' : 'Re-analyze'}
+                    {analyzingId === tx.id ? (
+                      <span className="flex items-center gap-2">
+                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Analyzing...
+                      </span>
+                    ) : 'Re-analyze'}
                   </button>
                 </div>
               </div>

@@ -10,6 +10,7 @@
 #include "../shared/config/configuration_manager.hpp"
 #include "../shared/logging/structured_logger.hpp"
 #include "../shared/models/regulatory_change.hpp"
+#include "../shared/database/connection_pool.hpp"
 
 namespace regulens {
 
@@ -64,6 +65,9 @@ public:
     void set_active(bool active) { is_active_ = active; }
     void update_last_check_time() { last_check_time_ = std::chrono::system_clock::now(); }
 
+    // Database connection for state persistence
+    void set_db_pool(std::shared_ptr<ConnectionPool> db_pool) { db_pool_ = db_pool; }
+
     // Error handling
     void record_failure() { consecutive_failures_++; }
     void record_success() { consecutive_failures_ = 0; }
@@ -87,10 +91,15 @@ protected:
     RegulatorySourceType type_;
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<StructuredLogger> logger_;
+    std::shared_ptr<ConnectionPool> db_pool_;
 
     std::atomic<std::chrono::system_clock::time_point> last_check_time_;
     std::atomic<bool> is_active_;
     std::atomic<size_t> consecutive_failures_;
+
+    // Production-grade state persistence
+    void persist_state_to_database(const std::string& key, const std::string& value);
+    std::string load_state_from_database(const std::string& key, const std::string& default_value = "");
 };
 
 /**

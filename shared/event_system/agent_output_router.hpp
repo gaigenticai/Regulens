@@ -28,6 +28,7 @@
 #include "../logging/structured_logger.hpp"
 #include "../config/configuration_manager.hpp"
 #include "../database/connection_pool.hpp"
+#include "../network/http_client.hpp"
 
 namespace regulens {
 
@@ -414,14 +415,57 @@ private:
                 )";
         }
         
-        // Execute insert (simplified - actual implementation would map all fields properly)
+        // Execute insert with complete field mapping (production-grade)
         try {
-            conn->execute_query_multi(insert_query, {
-                output.output_id,
-                output.agent_type,
-                output.agent_name,
-                output.data.dump()
-            });
+            // Map all fields properly based on output type
+            std::vector<std::string> params;
+
+            switch (output.output_type) {
+                case OutputType::DECISION:
+                    params = {
+                        output.output_id,
+                        output.agent_type,
+                        output.agent_name,
+                        output.data.value("decision_action", ""),
+                        std::to_string(output.confidence_score),
+                        output.data.value("reasoning", "")
+                    };
+                    break;
+
+                case OutputType::RISK_ASSESSMENT:
+                    params = {
+                        output.output_id,
+                        output.agent_name,
+                        std::to_string(output.data.value("risk_score", 0.0)),
+                        output.severity,
+                        output.data.value("risk_factors", nlohmann::json::array()).dump()
+                    };
+                    break;
+
+                case OutputType::COMPLIANCE_CHECK:
+                case OutputType::ALERT:
+                    params = {
+                        output.output_id,
+                        output_type_to_string(output.output_type),
+                        output.data.value("description", ""),
+                        output.severity,
+                        output.agent_type,
+                        output.data.dump()
+                    };
+                    break;
+
+                default:
+                    params = {
+                        output.output_id,
+                        output.agent_id,
+                        output.agent_name,
+                        output_type_to_string(output.output_type),
+                        output.data.dump(),
+                        std::to_string(output.confidence_score)
+                    };
+            }
+
+            conn->execute_query_multi(insert_query, params);
             
             logger_->log(LogLevel::DEBUG, "Output persisted to database", {
                 {"table", table_name},
@@ -452,25 +496,105 @@ private:
     }
     
     /**
-     * @brief Push output via WebSocket (placeholder for WebSocket implementation)
+     * @brief Push output via WebSocket - Production implementation
      */
     void push_via_websocket(const AgentOutput& output) {
-        // Production: Would send to WebSocket server
-        // For now, just log
-        logger_->log(LogLevel::DEBUG, "WebSocket push (not yet implemented)", {
-            {"output_id", output.output_id}
-        });
+        try {
+            // Production: Send to WebSocket server using HTTP client
+            std::string ws_server_url = config_->get_string("WEBSOCKET_SERVER_URL")
+                .value_or("http://localhost:8080/ws/push");
+
+            // Prepare payload
+            nlohmann::json payload = {
+                {"type", "agent_output"},
+                {"output_id", output.output_id},
+                {"agent_id", output.agent_id},
+                {"agent_name", output.agent_name},
+                {"agent_type", output.agent_type},
+                {"output_type", output_type_to_string(output.output_type)},
+                {"data", output.data},
+                {"confidence_score", output.confidence_score},
+                {"severity", output.severity},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    output.timestamp.time_since_epoch()).count()},
+                {"requires_human_review", output.requires_human_review}
+            };
+
+            // Use HTTP POST to WebSocket push endpoint
+            HttpClient http_client;
+            auto response = http_client.post(ws_server_url, payload.dump(), {
+                {"Content-Type", "application/json"}
+            });
+
+            if (response.status_code >= 200 && response.status_code < 300) {
+                logger_->log(LogLevel::DEBUG, "WebSocket push successful", {
+                    {"output_id", output.output_id},
+                    {"ws_server", ws_server_url}
+                });
+            } else {
+                logger_->log(LogLevel::WARN, "WebSocket push failed", {
+                    {"output_id", output.output_id},
+                    {"status_code", response.status_code}
+                });
+            }
+
+        } catch (const std::exception& e) {
+            logger_->log(LogLevel::ERROR, "WebSocket push exception", {
+                {"output_id", output.output_id},
+                {"error", e.what()}
+            });
+        }
     }
     
     /**
-     * @brief Send webhook notification
+     * @brief Send webhook notification - Production implementation
      */
     void send_webhook(const AgentOutput& output, const std::string& webhook_url) {
-        // Production: Would use HTTP client to POST to webhook URL
-        logger_->log(LogLevel::DEBUG, "Webhook notification (not yet implemented)", {
-            {"webhook_url", webhook_url},
-            {"output_id", output.output_id}
-        });
+        try {
+            // Production: Use HTTP client to POST to webhook URL
+            nlohmann::json webhook_payload = {
+                {"event_type", "agent_output"},
+                {"output_id", output.output_id},
+                {"agent_id", output.agent_id},
+                {"agent_name", output.agent_name},
+                {"agent_type", output.agent_type},
+                {"output_type", output_type_to_string(output.output_type)},
+                {"severity", output.severity},
+                {"confidence_score", output.confidence_score},
+                {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                    output.timestamp.time_since_epoch()).count()},
+                {"data", output.data},
+                {"requires_human_review", output.requires_human_review}
+            };
+
+            HttpClient http_client;
+            auto response = http_client.post(webhook_url, webhook_payload.dump(), {
+                {"Content-Type", "application/json"},
+                {"User-Agent", "Regulens-AgentOutputRouter/1.0"}
+            });
+
+            if (response.status_code >= 200 && response.status_code < 300) {
+                logger_->log(LogLevel::INFO, "Webhook notification sent successfully", {
+                    {"webhook_url", webhook_url},
+                    {"output_id", output.output_id},
+                    {"status_code", response.status_code}
+                });
+            } else {
+                logger_->log(LogLevel::WARN, "Webhook notification failed", {
+                    {"webhook_url", webhook_url},
+                    {"output_id", output.output_id},
+                    {"status_code", response.status_code},
+                    {"response_body", response.body}
+                });
+            }
+
+        } catch (const std::exception& e) {
+            logger_->log(LogLevel::ERROR, "Webhook notification exception", {
+                {"webhook_url", webhook_url},
+                {"output_id", output.output_id},
+                {"error", e.what()}
+            });
+        }
     }
     
     /**

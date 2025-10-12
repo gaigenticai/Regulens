@@ -247,6 +247,20 @@ public:
     HTTPResponse handle_memory_access_patterns(const HTTPRequest& request);
     HTTPResponse handle_memory_statistics(const HTTPRequest& request);
 
+    // =============================================================================
+    // MICROSERVICE API HANDLERS (Phase 1.2)
+    // Production-grade handlers for inter-service communication with API server
+    // =============================================================================
+
+    // Regulatory Monitor Status - Return current monitoring status and statistics
+    HTTPResponse handle_regulatory_monitor_status(const HTTPRequest& request);
+    
+    // Regulatory Monitor Metrics - Return performance metrics
+    HTTPResponse handle_regulatory_monitor_metrics(const HTTPRequest& request);
+    
+    // Trigger Monitoring - Manually trigger regulatory change detection
+    HTTPResponse handle_trigger_monitoring(const HTTPRequest& request);
+
 private:
     std::shared_ptr<ConfigurationManager> config_manager_;
     std::shared_ptr<StructuredLogger> logger_;
@@ -309,11 +323,12 @@ private:
     std::shared_ptr<DecisionTreeOptimizer> decision_optimizer_;
 
     // Multi-Agent Communication System
-    std::shared_ptr<AgentCommRegistry> agent_registry_;
-    std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
-    std::shared_ptr<IntelligentMessageTranslator> message_translator_;
-    std::shared_ptr<ConsensusEngine> consensus_engine_;
-    std::shared_ptr<CommunicationMediator> communication_mediator_;
+    // NOTE: Not needed for Regulatory Monitor - only used by API server
+    // std::shared_ptr<AgentCommRegistry> agent_registry_;
+    // std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
+    // std::shared_ptr<IntelligentMessageTranslator> message_translator_;
+    // std::shared_ptr<ConsensusEngine> consensus_engine_;
+    // std::shared_ptr<CommunicationMediator> communication_mediator_;
 
     // Memory System components
     std::shared_ptr<ConversationMemory> conversation_memory_;

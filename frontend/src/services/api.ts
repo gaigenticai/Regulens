@@ -501,6 +501,25 @@ class RegulesAPIClient {
     return response.data;
   }
 
+  // =========================================================================
+  // Phase 5: Audit Trail Enhanced Endpoints - Production-grade
+  // =========================================================================
+
+  async getSystemLogs(params: Record<string, string>): Promise<any[]> {
+    const response = await this.client.get('/audit/system-logs', { params });
+    return response.data;
+  }
+
+  async getSecurityEvents(params: Record<string, string>): Promise<any[]> {
+    const response = await this.client.get('/audit/security-events', { params });
+    return response.data;
+  }
+
+  async getLoginHistory(params: Record<string, string>): Promise<any[]> {
+    const response = await this.client.get('/audit/login-history', { params });
+    return response.data;
+  }
+
   // ============================================================================
   // REGULATORY CHANGES (Phase 4 Missing Methods)
   // ============================================================================

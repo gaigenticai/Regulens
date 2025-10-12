@@ -207,9 +207,11 @@ CREATE TABLE IF NOT EXISTS agent_configurations (
     config_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     agent_type VARCHAR(100) NOT NULL,
     agent_name VARCHAR(255) NOT NULL,
+    region VARCHAR(50),  -- e.g., 'US', 'EU', 'UK', 'APAC'
     configuration JSONB NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    status VARCHAR(50) NOT NULL DEFAULT 'created',  -- 'created', 'running', 'stopped', 'failed'
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
@@ -2205,5 +2207,288 @@ CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active);
 COMMENT ON TABLE sessions IS 'Server-side session management with database storage';
 COMMENT ON COLUMN sessions.session_token IS 'Secure random token sent as HttpOnly cookie';
 COMMENT ON COLUMN sessions.expires_at IS 'Session expiration time (default 24 hours)';
+
+-- =============================================================================
+-- REGULATORY MONITORING TABLES (Phase 2)
+-- Production-grade tables for regulatory source management and monitoring
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS regulatory_sources (
+    source_id VARCHAR(50) PRIMARY KEY,
+    source_name VARCHAR(255) NOT NULL,
+    source_type VARCHAR(50) NOT NULL CHECK (source_type IN ('government', 'self-regulatory', 'international')),
+    base_url TEXT,
+    api_endpoint TEXT,
+    authentication_type VARCHAR(50),
+    api_key_encrypted TEXT,
+    is_active BOOLEAN DEFAULT true,
+    monitoring_frequency_hours INTEGER DEFAULT 24,
+    last_check_at TIMESTAMP WITH TIME ZONE,
+    last_change_detected TIMESTAMP WITH TIME ZONE,
+    total_changes_detected INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Insert default regulatory sources
+INSERT INTO regulatory_sources (source_id, source_name, source_type, base_url, is_active) VALUES
+('SEC', 'Securities and Exchange Commission', 'government', 'https://www.sec.gov', true),
+('FINRA', 'Financial Industry Regulatory Authority', 'self-regulatory', 'https://www.finra.org', true),
+('CFTC', 'Commodity Futures Trading Commission', 'government', 'https://www.cftc.gov', true),
+('FDIC', 'Federal Deposit Insurance Corporation', 'government', 'https://www.fdic.gov', true),
+('FCA', 'Financial Conduct Authority', 'government', 'https://www.fca.org.uk', true),
+('ECB', 'European Central Bank', 'international', 'https://www.ecb.europa.eu', true),
+('BIS', 'Bank for International Settlements', 'international', 'https://www.bis.org', true)
+ON CONFLICT (source_id) DO NOTHING;
+
+CREATE INDEX IF NOT EXISTS idx_regulatory_sources_active ON regulatory_sources(is_active, last_check_at);
+CREATE INDEX IF NOT EXISTS idx_regulatory_sources_type ON regulatory_sources(source_type);
+
+COMMENT ON TABLE regulatory_sources IS 'Registry of regulatory sources monitored by the system';
+
+-- =============================================================================
+-- SYSTEM METRICS TABLES (Phase 2 - HIGH PRIORITY)
+-- Real-time system performance monitoring
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS system_metrics_realtime (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    metric_name VARCHAR(100) NOT NULL,
+    metric_value DECIMAL(15,6) NOT NULL,
+    metric_unit VARCHAR(20),
+    metric_tags JSONB DEFAULT '{}'::jsonb,
+    collected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_metrics_name_time ON system_metrics_realtime(metric_name, collected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_system_metrics_collected ON system_metrics_realtime(collected_at DESC);
+
+COMMENT ON TABLE system_metrics_realtime IS 'Real-time system performance metrics (CPU, memory, disk, network)';
+
+-- =============================================================================
+-- PATTERN ANALYSIS TABLES (Phase 3.2)
+-- Production-grade pattern recognition and analysis
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS pattern_definitions (
+    pattern_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pattern_name VARCHAR(255) NOT NULL UNIQUE,
+    pattern_type VARCHAR(50) NOT NULL,
+    pattern_description TEXT,
+    pattern_rules JSONB NOT NULL,
+    confidence_threshold DECIMAL(3,2) DEFAULT 0.75,
+    severity VARCHAR(20) CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    is_active BOOLEAN DEFAULT true,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pattern_analysis_results (
+    result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pattern_id UUID REFERENCES pattern_definitions(pattern_id) ON DELETE CASCADE,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id VARCHAR(255) NOT NULL,
+    match_confidence DECIMAL(5,4) NOT NULL,
+    matched_data JSONB,
+    additional_context JSONB,
+    detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    reviewed_at TIMESTAMP WITH TIME ZONE,
+    reviewed_by VARCHAR(255),
+    status VARCHAR(20) DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'CONFIRMED', 'FALSE_POSITIVE', 'INVESTIGATING'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_results_pattern ON pattern_analysis_results(pattern_id, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_results_entity ON pattern_analysis_results(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_results_status ON pattern_analysis_results(status, detected_at DESC);
+
+COMMENT ON TABLE pattern_definitions IS 'Defines patterns for automated detection and analysis';
+COMMENT ON TABLE pattern_analysis_results IS 'Results of pattern matching against real data';
+
+-- =============================================================================
+-- AGENT COMMUNICATION TABLES (Phase 3.8)
+-- Inter-agent communication tracking
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS agent_communications (
+    comm_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    from_agent VARCHAR(100) NOT NULL,
+    to_agent VARCHAR(100) NOT NULL,
+    message_type VARCHAR(50) NOT NULL,
+    message_content TEXT NOT NULL,
+    message_priority VARCHAR(20) DEFAULT 'NORMAL' CHECK (message_priority IN ('LOW', 'NORMAL', 'HIGH', 'URGENT')),
+    metadata JSONB DEFAULT '{}'::jsonb,
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    received_at TIMESTAMP WITH TIME ZONE,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) DEFAULT 'SENT' CHECK (status IN ('SENT', 'RECEIVED', 'PROCESSED', 'FAILED'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_comm_from ON agent_communications(from_agent, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_comm_to ON agent_communications(to_agent, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_comm_type ON agent_communications(message_type, sent_at DESC);
+
+COMMENT ON TABLE agent_communications IS 'Inter-agent communication logs for collaboration and coordination';
+
+-- =============================================================================
+-- MCDA (Multi-Criteria Decision Analysis) TABLES (Phase 3.11)
+-- Advanced decision-making framework
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS mcda_models (
+    model_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_name VARCHAR(255) NOT NULL UNIQUE,
+    model_description TEXT,
+    decision_method VARCHAR(50) NOT NULL CHECK (decision_method IN ('TOPSIS', 'ELECTRE', 'AHP', 'PROMETHEE', 'WEIGHTED_SUM')),
+    model_configuration JSONB NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mcda_criteria (
+    criterion_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id UUID REFERENCES mcda_models(model_id) ON DELETE CASCADE,
+    criterion_name VARCHAR(255) NOT NULL,
+    criterion_type VARCHAR(50) NOT NULL CHECK (criterion_type IN ('BENEFIT', 'COST')),
+    weight DECIMAL(5,4) NOT NULL CHECK (weight >= 0 AND weight <= 1),
+    normalization_method VARCHAR(50),
+    unit_of_measure VARCHAR(50),
+    min_value DECIMAL(15,6),
+    max_value DECIMAL(15,6),
+    sort_order INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mcda_evaluations (
+    evaluation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id UUID REFERENCES mcda_models(model_id),
+    alternative_name VARCHAR(255) NOT NULL,
+    criterion_id UUID REFERENCES mcda_criteria(criterion_id),
+    criterion_value DECIMAL(15,6) NOT NULL,
+    normalized_value DECIMAL(15,6),
+    weighted_score DECIMAL(15,6),
+    evaluation_metadata JSONB,
+    evaluated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcda_criteria_model ON mcda_criteria(model_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_mcda_eval_model ON mcda_evaluations(model_id, evaluation_id);
+
+COMMENT ON TABLE mcda_models IS 'Multi-criteria decision analysis model definitions';
+COMMENT ON TABLE mcda_criteria IS 'Criteria used in MCDA models with weights and constraints';
+COMMENT ON TABLE mcda_evaluations IS 'Evaluation results for alternatives against criteria';
+
+-- =============================================================================
+-- FUNCTION CALLING DEBUG TABLES (Phase 3.12)
+-- LLM function calling debugging and monitoring
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS function_call_logs (
+    log_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_name VARCHAR(100),
+    function_name VARCHAR(255) NOT NULL,
+    function_parameters JSONB,
+    function_result JSONB,
+    execution_time_ms INTEGER,
+    success BOOLEAN NOT NULL,
+    error_message TEXT,
+    llm_provider VARCHAR(50),
+    model_name VARCHAR(100),
+    tokens_used INTEGER,
+    call_context TEXT,
+    called_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_function_calls_agent ON function_call_logs(agent_name, called_at DESC);
+CREATE INDEX IF NOT EXISTS idx_function_calls_name ON function_call_logs(function_name, called_at DESC);
+CREATE INDEX IF NOT EXISTS idx_function_calls_success ON function_call_logs(success, called_at DESC);
+
+COMMENT ON TABLE function_call_logs IS 'Detailed logs of LLM function calls for debugging and optimization';
+
+-- =============================================================================
+-- AGENT SYSTEM TABLES - Event Subscription & Output Routing
+-- Production-grade tables for agent lifecycle management
+-- =============================================================================
+
+-- Regulatory event subscriptions
+CREATE TABLE IF NOT EXISTS regulatory_subscriptions (
+    subscription_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES agent_configurations(config_id) ON DELETE CASCADE,
+    filter_criteria JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_regulatory_subscriptions_agent ON regulatory_subscriptions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_regulatory_subscriptions_active ON regulatory_subscriptions(is_active);
+
+COMMENT ON TABLE regulatory_subscriptions IS 'Agent subscriptions to regulatory change events';
+COMMENT ON COLUMN regulatory_subscriptions.filter_criteria IS 'JSON filter: sources, change_types, severities, jurisdictions';
+
+-- Agent outputs (generic storage for all agent outputs)
+CREATE TABLE IF NOT EXISTS agent_outputs (
+    output_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES agent_configurations(config_id) ON DELETE CASCADE,
+    agent_name VARCHAR(255) NOT NULL,
+    agent_type VARCHAR(100) NOT NULL,
+    output_type VARCHAR(50) NOT NULL CHECK (output_type IN (
+        'DECISION', 'RISK_ASSESSMENT', 'COMPLIANCE_CHECK', 
+        'PATTERN_DETECTION', 'ALERT', 'RECOMMENDATION', 'ANALYSIS_RESULT'
+    )),
+    output_data JSONB NOT NULL,
+    confidence_score DECIMAL(3,2) CHECK (confidence_score >= 0 AND confidence_score <= 1),
+    severity VARCHAR(20) CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    requires_human_review BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_outputs_agent ON agent_outputs(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_outputs_type ON agent_outputs(output_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_outputs_severity ON agent_outputs(severity, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_outputs_human_review ON agent_outputs(requires_human_review) WHERE requires_human_review = true;
+
+COMMENT ON TABLE agent_outputs IS 'Generic storage for all agent outputs with routing metadata';
+
+-- Agent runtime status (for lifecycle management)
+CREATE TABLE IF NOT EXISTS agent_runtime_status (
+    agent_id UUID PRIMARY KEY REFERENCES agent_configurations(config_id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('STOPPED', 'STARTING', 'RUNNING', 'STOPPING', 'ERROR', 'RESTARTING')),
+    started_at TIMESTAMP WITH TIME ZONE,
+    last_health_check TIMESTAMP WITH TIME ZONE,
+    tasks_processed BIGINT DEFAULT 0,
+    tasks_failed BIGINT DEFAULT 0,
+    health_score DECIMAL(3,2) DEFAULT 1.00 CHECK (health_score >= 0 AND health_score <= 1),
+    last_error TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runtime_status ON agent_runtime_status(status);
+CREATE INDEX IF NOT EXISTS idx_agent_runtime_health ON agent_runtime_status(health_score);
+
+COMMENT ON TABLE agent_runtime_status IS 'Real-time status tracking for running agents';
+
+-- Tool usage logs (for tool system tracking)
+CREATE TABLE IF NOT EXISTS tool_usage_logs (
+    log_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID REFERENCES agent_configurations(config_id) ON DELETE CASCADE,
+    tool_name VARCHAR(100) NOT NULL,
+    parameters JSONB,
+    result JSONB,
+    success BOOLEAN NOT NULL,
+    execution_time_ms INTEGER,
+    tokens_used INTEGER DEFAULT 0,
+    error_message TEXT,
+    executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_usage_agent ON tool_usage_logs(agent_id, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_tool_name ON tool_usage_logs(tool_name, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_success ON tool_usage_logs(success, executed_at DESC);
+
+COMMENT ON TABLE tool_usage_logs IS 'Audit log of all tool calls made by agents (HTTP, DB, LLM)';
 
 

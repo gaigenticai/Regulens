@@ -6,7 +6,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "config/configuration_manager.hpp"
+#include "shared/config/configuration_manager.hpp"
 #include "regulatory_monitor/regulatory_monitor.hpp"
 #include "shared/regulatory_knowledge_base.hpp"
 #include "shared/logging/structured_logger.hpp"
@@ -210,6 +210,44 @@ private:
                 })}
             };
             return HTTPResponse(200, "OK", response.dump(), "application/json");
+        });
+
+        // =============================================================================
+        // MICROSERVICE API ENDPOINTS - For inter-service communication (Phase 1.2)
+        // Production-grade endpoints for API server to call regulatory monitor
+        // =============================================================================
+
+        // API: Regulatory Monitor Status - Get current monitoring status and statistics
+        web_ui_server_->add_route("GET", "/api/regulatory/monitor/status", [this](const HTTPRequest& req) {
+            return web_ui_handlers_->handle_regulatory_monitor_status(req);
+        });
+
+        // API: Regulatory Sources - Get list of monitored regulatory sources
+        web_ui_server_->add_route("GET", "/api/regulatory/monitor/sources", [this](const HTTPRequest& req) {
+            return web_ui_handlers_->handle_regulatory_sources(req);
+        });
+
+        // API: Trigger Monitoring - Manually trigger regulatory change monitoring
+        web_ui_server_->add_route("POST", "/api/regulatory/monitor/trigger", [this](const HTTPRequest& req) {
+            return web_ui_handlers_->handle_trigger_monitoring(req);
+        });
+
+        // API: Regulatory Monitor Metrics - Get performance metrics
+        web_ui_server_->add_route("GET", "/api/regulatory/monitor/metrics", [this](const HTTPRequest& req) {
+            return web_ui_handlers_->handle_regulatory_monitor_metrics(req);
+        });
+
+        // Health check endpoint for Docker health checks and monitoring
+        web_ui_server_->add_route("GET", "/health", [this](const HTTPRequest& req) {
+            nlohmann::json health_status = {
+                {"status", "healthy"},
+                {"service", "regulatory-monitor"},
+                {"version", REGULENS_VERSION},
+                {"timestamp", std::time(nullptr)},
+                {"uptime_seconds", static_cast<int>(health_check_timer_.elapsed_seconds())},
+                {"monitoring_active", regulatory_monitor_ != nullptr}
+            };
+            return HTTPResponse(200, "OK", health_status.dump(), "application/json");
         });
     }
 

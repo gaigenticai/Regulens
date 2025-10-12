@@ -1,0 +1,76 @@
+# Dockerfile for Regulatory Monitor Service (main.cpp)
+# Production-grade multi-stage build for C++ microservice
+
+# Stage 1: Build environment
+FROM ubuntu:22.04 AS builder
+
+# Install build dependencies
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    build-essential \
+    cmake \
+    g++ \
+    libpq-dev \
+    libpqxx-dev \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    nlohmann-json3-dev \
+    curl \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /build
+
+# Copy source files
+COPY main.cpp .
+COPY CMakeLists.txt .
+COPY core/ core/
+COPY agents/ agents/
+COPY shared/ shared/
+COPY regulatory_monitor/ regulatory_monitor/
+COPY infrastructure/ infrastructure/
+COPY data_ingestion/ data_ingestion/
+
+# Build the application
+RUN cmake -DCMAKE_BUILD_TYPE=Release . && \
+    make -j$(nproc)
+
+# Stage 2: Runtime environment
+FROM ubuntu:22.04
+
+# Install runtime dependencies only
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    libpq5 \
+    libpqxx-6.4 \
+    libssl3 \
+    libcurl4 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user for security
+RUN useradd -m -u 1000 regulens && \
+    mkdir -p /app/logs && \
+    chown -R regulens:regulens /app
+
+WORKDIR /app
+
+# Copy built executable from builder
+COPY --from=builder /build/build/regulens /app/regulens-monitor
+
+# Set permissions
+RUN chmod +x /app/regulens-monitor && \
+    chown regulens:regulens /app/regulens-monitor
+
+# Switch to non-root user
+USER regulens
+
+# Expose port
+EXPOSE 8081
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8081/health || exit 1
+
+# Run the application
+CMD ["/app/regulens-monitor"]
+

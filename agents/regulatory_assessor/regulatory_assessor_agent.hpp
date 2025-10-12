@@ -43,6 +43,13 @@ public:
     bool initialize();
 
     /**
+     * @brief Load agent-specific configuration from database
+     * @param agent_id UUID of the agent configuration in database
+     * @return true if configuration loaded successfully
+     */
+    bool load_configuration_from_database(const std::string& agent_id);
+
+    /**
      * @brief Start the regulatory assessment processing
      */
     void start();
@@ -169,6 +176,13 @@ private:
     // Assessment parameters
     double high_impact_threshold_;
     std::chrono::hours assessment_interval_;
+
+    // Database configuration (loaded from agent_configurations table)
+    std::string agent_id_;
+    std::string region_;
+    std::vector<std::string> regulatory_sources_;
+    std::string alert_email_;
+    bool config_loaded_from_db_;
 
     mutable std::mutex assessment_mutex_;
 };

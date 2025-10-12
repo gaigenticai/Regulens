@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { AddAgentModal } from '@/components/AddAgentModal';
 import type { Agent } from '@/types/api';
 
 const Agents: React.FC = () => {
@@ -34,6 +35,7 @@ const Agents: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
 
   useEffect(() => {
     fetchAgents();
@@ -133,7 +135,10 @@ const Agents: React.FC = () => {
                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
-              <button className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <button 
+                onClick={() => setIsAddAgentModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Agent
               </button>
@@ -256,16 +261,11 @@ const Agents: React.FC = () => {
                 <div className="mb-4">
                   <p className="text-xs font-medium text-gray-700 mb-2">Capabilities</p>
                   <div className="flex flex-wrap gap-1">
-                    {agent.capabilities.slice(0, 3).map((capability, index) => (
+                    {agent.capabilities.map((capability, index) => (
                       <span key={index} className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
                         {capability}
                       </span>
                     ))}
-                    {agent.capabilities.length > 3 && (
-                      <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
-                        +{agent.capabilities.length - 3}
-                      </span>
-                    )}
                   </div>
                 </div>
 
@@ -321,7 +321,10 @@ const Agents: React.FC = () => {
                 : 'Get started by adding your first agent.'}
             </p>
             {!searchTerm && statusFilter === 'all' && typeFilter === 'all' && (
-              <button className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <button 
+                onClick={() => setIsAddAgentModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Agent
               </button>
@@ -329,6 +332,15 @@ const Agents: React.FC = () => {
           </div>
         )}
       </div>
+      
+      {/* Add Agent Modal */}
+      <AddAgentModal
+        isOpen={isAddAgentModalOpen}
+        onClose={() => setIsAddAgentModalOpen(false)}
+        onAgentCreated={() => {
+          fetchAgents(); // Refresh the agent list
+        }}
+      />
     </div>
   );
 };

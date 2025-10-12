@@ -43,6 +43,13 @@ public:
     bool initialize();
 
     /**
+     * @brief Load agent-specific configuration from database
+     * @param agent_id UUID of the agent configuration in database
+     * @return true if configuration loaded successfully
+     */
+    bool load_configuration_from_database(const std::string& agent_id);
+
+    /**
      * @brief Start real-time transaction monitoring
      */
     void start();
@@ -204,6 +211,13 @@ private:
     double high_risk_threshold_;
     std::chrono::minutes analysis_window_;
     std::vector<std::string> sanctioned_countries_;
+    
+    // Database configuration (loaded from agent_configurations table)
+    std::string agent_id_;
+    std::string region_;
+    std::string alert_email_;
+    bool high_priority_only_;
+    bool config_loaded_from_db_;
 
     // Risk calculation parameters
     double risk_amount_100k_;

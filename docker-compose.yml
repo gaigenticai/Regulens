@@ -1,5 +1,9 @@
-# Regulens Development Environment
-# Run ONLY databases in Docker - Backend/Frontend run natively for hot reload
+# Regulens Production Environment
+# Multi-container microservices architecture
+# - PostgreSQL & Redis databases
+# - Regulatory Monitor Service (main.cpp)
+# - API Server (server_with_auth.cpp)
+# - Frontend (React/Vite)
 
 services:
   # PostgreSQL Database
@@ -45,6 +49,83 @@ services:
     restart: unless-stopped
     networks:
       - regulens-network
+
+  # Regulatory Monitor Service (main.cpp)
+  regulatory-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.regulatory
+    container_name: regulens-regulatory-monitor
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-regulens_compliance}
+      - DB_USER=${DB_USER:-regulens_user}
+      - DB_PASSWORD=${DB_PASSWORD:-dev_password}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-dev_redis_password}
+      - WEB_UI_PORT=8081
+      - WEB_UI_HOST=0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - regulens-network
+    volumes:
+      - ./logs:/app/logs
+
+  # API Server (server_with_auth.cpp)
+  api-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: regulens-api-server
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-regulens_compliance}
+      - DB_USER=${DB_USER:-regulens_user}
+      - DB_PASSWORD=${DB_PASSWORD:-dev_password}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-dev_redis_password}
+      - REGULATORY_MONITOR_URL=http://regulatory-monitor:8081
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-CHANGE_THIS_TO_A_STRONG_64_CHARACTER_SECRET_KEY_FOR_PRODUCTION_USE}
+      - JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS:-24}
+      - SESSION_EXPIRY_HOURS=${SESSION_EXPIRY_HOURS:-24}
+      - CORS_ALLOWED_ORIGIN=${CORS_ALLOWED_ORIGIN:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      regulatory-monitor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - regulens-network
+    volumes:
+      - ./logs:/app/logs
 
 volumes:
   postgres_data:

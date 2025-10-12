@@ -204,3 +204,68 @@ export function useUserActivity(userId: string | undefined, timeRange: '24h' | '
     enabled: !!userId,
   });
 }
+
+/**
+ * Get system audit logs
+ * Production-grade: Connects to /audit/system-logs endpoint
+ */
+export function useSystemLogs(options: { limit?: number; severity?: string } = {}) {
+  const { limit = 100, severity } = options;
+  
+  return useQuery({
+    queryKey: ['system-logs', limit, severity],
+    queryFn: async () => {
+      const params: Record<string, string> = {
+        limit: limit.toString(),
+      };
+      if (severity) params.severity = severity;
+      
+      const data = await apiClient.getSystemLogs(params);
+      return data;
+    },
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+}
+
+/**
+ * Get security events
+ * Production-grade: Connects to /audit/security-events endpoint
+ */
+export function useSecurityEvents(options: { limit?: number } = {}) {
+  const { limit = 100 } = options;
+  
+  return useQuery({
+    queryKey: ['security-events', limit],
+    queryFn: async () => {
+      const params: Record<string, string> = {
+        limit: limit.toString(),
+      };
+      
+      const data = await apiClient.getSecurityEvents(params);
+      return data;
+    },
+    refetchInterval: 15000, // Refresh every 15 seconds (security is critical)
+  });
+}
+
+/**
+ * Get login history
+ * Production-grade: Connects to /audit/login-history endpoint
+ */
+export function useLoginHistory(options: { limit?: number; username?: string } = {}) {
+  const { limit = 100, username } = options;
+  
+  return useQuery({
+    queryKey: ['login-history', limit, username],
+    queryFn: async () => {
+      const params: Record<string, string> = {
+        limit: limit.toString(),
+      };
+      if (username) params.username = username;
+      
+      const data = await apiClient.getLoginHistory(params);
+      return data;
+    },
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+}

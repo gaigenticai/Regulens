@@ -225,6 +225,105 @@ bool TransactionGuardianAgent::initialize() {
     }
 }
 
+bool TransactionGuardianAgent::load_configuration_from_database(const std::string& agent_id) {
+    try {
+        logger_->log(LogLevel::INFO, "Loading agent configuration from database", {{"agent_id", agent_id}});
+        
+        agent_id_ = agent_id;
+        config_loaded_from_db_ = false;
+        
+        // Get database connection
+        auto conn = db_pool_->get_connection();
+        if (!conn) {
+            logger_->log(LogLevel::ERROR, "Failed to get database connection for config load");
+            return false;
+        }
+        
+        // Query agent configuration from database
+        std::string query = "SELECT configuration, region FROM agent_configurations WHERE config_id = $1";
+        auto result = conn->execute_query(query, {agent_id});
+        
+        db_pool_->return_connection(conn);
+        
+        if (result.empty()) {
+            logger_->log(LogLevel::WARN, "No configuration found in database for agent", {{"agent_id", agent_id}});
+            return false;
+        }
+        
+        // Parse configuration JSON from database
+        std::string config_json_str = result["configuration"];
+        nlohmann::json db_config = nlohmann::json::parse(config_json_str);
+        
+        // Override thresholds with database values (NO HARDCODED VALUES!)
+        if (db_config.contains("fraud_threshold")) {
+            fraud_threshold_ = db_config["fraud_threshold"].get<double>();
+            logger_->log(LogLevel::INFO, "Loaded fraud_threshold from database", {
+                {"fraud_threshold", fraud_threshold_}
+            });
+        }
+        
+        if (db_config.contains("risk_threshold")) {
+            high_risk_threshold_ = db_config["risk_threshold"].get<double>();
+            logger_->log(LogLevel::INFO, "Loaded risk_threshold from database", {
+                {"risk_threshold", high_risk_threshold_}
+            });
+        }
+        
+        if (db_config.contains("region")) {
+            region_ = db_config["region"].get<std::string>();
+            logger_->log(LogLevel::INFO, "Loaded region from database", {{"region", region_}});
+            
+            // Apply region-specific adjustments
+            if (region_ == "EU") {
+                // EU has stricter requirements - increase thresholds if not explicitly set
+                if (!db_config.contains("fraud_threshold")) {
+                    fraud_threshold_ = std::min(fraud_threshold_ + 0.10, 0.95);
+                    logger_->log(LogLevel::INFO, "Applied EU region adjustment to fraud_threshold", {
+                        {"fraud_threshold", fraud_threshold_}
+                    });
+                }
+            } else if (region_ == "UK") {
+                // UK FCA requirements
+                if (!db_config.contains("risk_threshold")) {
+                    high_risk_threshold_ = std::min(high_risk_threshold_ + 0.05, 0.90);
+                    logger_->log(LogLevel::INFO, "Applied UK region adjustment to risk_threshold", {
+                        {"risk_threshold", high_risk_threshold_}
+                    });
+                }
+            }
+        }
+        
+        if (db_config.contains("alert_email")) {
+            alert_email_ = db_config["alert_email"].get<std::string>();
+            logger_->log(LogLevel::INFO, "Loaded alert_email from database", {
+                {"alert_email", alert_email_}
+            });
+        }
+        
+        if (db_config.contains("high_priority_only")) {
+            high_priority_only_ = db_config["high_priority_only"].get<bool>();
+            logger_->log(LogLevel::INFO, "Loaded high_priority_only from database", {
+                {"high_priority_only", high_priority_only_}
+            });
+        }
+        
+        config_loaded_from_db_ = true;
+        
+        logger_->log(LogLevel::INFO, "Successfully loaded agent configuration from database", {
+            {"agent_id", agent_id},
+            {"region", region_},
+            {"fraud_threshold", fraud_threshold_},
+            {"risk_threshold", high_risk_threshold_}
+        });
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Failed to load configuration from database: " + std::string(e.what()));
+        return false;
+    }
+}
+
 void TransactionGuardianAgent::start() {
     if (running_) {
         logger_->log(LogLevel::WARN, "Transaction Guardian Agent is already running");

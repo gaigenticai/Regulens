@@ -1,0 +1,67 @@
+# Dockerfile for API Server (server_with_auth.cpp)
+# Production-grade multi-stage build for C++ REST API
+
+# Stage 1: Build environment
+FROM ubuntu:22.04 AS builder
+
+# Install build dependencies
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    build-essential \
+    cmake \
+    g++ \
+    libpq-dev \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    nlohmann-json3-dev \
+    curl \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /build
+
+# Copy source file
+COPY server_with_auth.cpp .
+COPY Makefile .
+
+# Build the application
+RUN make clean && make
+
+# Stage 2: Runtime environment
+FROM ubuntu:22.04
+
+# Install runtime dependencies only
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    libpq5 \
+    libssl3 \
+    libcurl4 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user for security
+RUN useradd -m -u 1000 regulens && \
+    mkdir -p /app/logs && \
+    chown -R regulens:regulens /app
+
+WORKDIR /app
+
+# Copy built executable from builder
+COPY --from=builder /build/build/regulens /app/regulens-api
+
+# Set permissions
+RUN chmod +x /app/regulens-api && \
+    chown regulens:regulens /app/regulens-api
+
+# Switch to non-root user
+USER regulens
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Run the application
+CMD ["/app/regulens-api"]
+

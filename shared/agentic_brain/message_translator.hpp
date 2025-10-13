@@ -155,6 +155,18 @@ public:
     void enable_protocol_validation(bool enable);
     void set_default_protocol(MessageProtocol protocol);
 
+    // Log translation to database for audit trail
+    bool log_translation(const std::string& message_id,
+                        const std::string& source_protocol,
+                        const std::string& target_protocol,
+                        const nlohmann::json& source_content,
+                        const nlohmann::json& translated_content,
+                        const std::string& rule_id = "",
+                        double quality_score = 1.0,
+                        int translation_time_ms = 0,
+                        const std::string& translator_agent = "",
+                        const std::string& error_message = "");
+
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<StructuredLogger> logger_;

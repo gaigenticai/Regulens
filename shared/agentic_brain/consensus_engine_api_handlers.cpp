@@ -6,6 +6,7 @@
 #include "consensus_engine_api_handlers.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <pqxx/pqxx>
 
 namespace regulens {
 
@@ -26,6 +27,108 @@ ConsensusEngineAPIHandlers::ConsensusEngineAPIHandlers(
 
 ConsensusEngineAPIHandlers::~ConsensusEngineAPIHandlers() {
     spdlog::info("ConsensusEngineAPIHandlers shutting down");
+}
+
+// Authorization helper functions
+
+bool ConsensusEngineAPIHandlers::check_user_permission(const std::string& user_id, const std::string& permission) {
+    try {
+        if (!db_conn_ || !db_conn_->is_connected()) {
+            spdlog::error("Database connection not available for permission check");
+            return false;
+        }
+
+        auto result = db_conn_->execute_query_multi(
+            "SELECT COUNT(*) FROM user_permissions "
+            "WHERE user_id = $1 AND permission = $2 AND is_active = true "
+            "AND (expires_at IS NULL OR expires_at > NOW())",
+            {user_id, permission}
+        );
+
+        if (result.empty() || result[0].find("count") == result[0].end()) {
+            return false;
+        }
+
+        int count = std::stoi(result[0]["count"]);
+        return count > 0;
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in check_user_permission: {}", e.what());
+        return false;
+    }
+}
+
+bool ConsensusEngineAPIHandlers::check_user_role(const std::string& user_id, const std::string& role) {
+    try {
+        if (!db_conn_ || !db_conn_->is_connected()) {
+            spdlog::error("Database connection not available for role check");
+            return false;
+        }
+
+        auto result = db_conn_->execute_query_multi(
+            "SELECT role FROM user_authentication WHERE user_id = $1",
+            {user_id}
+        );
+
+        if (result.empty()) {
+            return false;
+        }
+
+        std::string user_role = result[0]["role"];
+        return user_role == role;
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in check_user_role: {}", e.what());
+        return false;
+    }
+}
+
+std::string ConsensusEngineAPIHandlers::get_user_role(const std::string& user_id) {
+    try {
+        if (!db_conn_ || !db_conn_->is_connected()) {
+            spdlog::error("Database connection not available for role retrieval");
+            return "unknown";
+        }
+
+        auto result = db_conn_->execute_query_multi(
+            "SELECT role FROM user_authentication WHERE user_id = $1",
+            {user_id}
+        );
+
+        if (result.empty()) {
+            return "unknown";
+        }
+
+        return result[0]["role"];
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in get_user_role: {}", e.what());
+        return "unknown";
+    }
+}
+
+bool ConsensusEngineAPIHandlers::check_consensus_participant(const std::string& user_id, const std::string& consensus_id) {
+    try {
+        if (!db_conn_ || !db_conn_->is_connected()) {
+            spdlog::error("Database connection not available for participant check");
+            return false;
+        }
+
+        auto result = db_conn_->execute_query_multi(
+            "SELECT COUNT(*) FROM consensus_agents "
+            "WHERE consensus_id = $1 AND agent_id IN ("
+            "    SELECT agent_id FROM agents WHERE created_by = $2 OR assigned_to = $2"
+            ")",
+            {consensus_id, user_id}
+        );
+
+        if (result.empty() || result[0].find("count") == result[0].end()) {
+            return false;
+        }
+
+        int count = std::stoi(result[0]["count"]);
+        return count > 0;
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in check_consensus_participant: {}", e.what());
+        return false;
+    }
 }
 
 std::string ConsensusEngineAPIHandlers::handle_initiate_consensus(const std::string& request_body, const std::string& user_id) {
@@ -472,13 +575,29 @@ bool ConsensusEngineAPIHandlers::validate_opinion_request(const nlohmann::json& 
 }
 
 bool ConsensusEngineAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation, const std::string& resource_id) {
-    // TODO: Implement proper access control based on user roles and permissions
-    return !user_id.empty();
+    if (user_id.empty()) {
+        return false;
+    }
+
+    // Check specific permissions based on operation
+    if (operation == "initiate_consensus") {
+        return check_user_permission(user_id, "consensus:create") || check_user_role(user_id, "admin");
+    } else if (operation == "get_consensus") {
+        return check_user_permission(user_id, "consensus:read") || check_consensus_participant(user_id, resource_id);
+    } else if (operation == "list_agents") {
+        return check_user_permission(user_id, "agents:read") || check_user_role(user_id, "admin");
+    } else if (operation == "get_agent") {
+        return check_user_permission(user_id, "agents:read") || check_user_role(user_id, "admin");
+    } else if (operation == "get_consensus_stats") {
+        return check_user_permission(user_id, "consensus:read") || check_user_role(user_id, "admin");
+    }
+
+    // Default: require basic authenticated user
+    return true;
 }
 
 bool ConsensusEngineAPIHandlers::is_admin_user(const std::string& user_id) {
-    // TODO: Implement proper admin user checking
-    return user_id == "admin" || user_id == "system";
+    return check_user_role(user_id, "admin");
 }
 
 bool ConsensusEngineAPIHandlers::can_modify_consensus(const std::string& user_id, const std::string& consensus_id) {
@@ -491,8 +610,7 @@ bool ConsensusEngineAPIHandlers::can_submit_opinion(const std::string& user_id, 
 }
 
 bool ConsensusEngineAPIHandlers::is_participant(const std::string& user_id, const std::string& consensus_id) {
-    // TODO: Check if user is a registered participant in the consensus
-    return !user_id.empty();
+    return check_consensus_participant(user_id, consensus_id);
 }
 
 nlohmann::json ConsensusEngineAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {

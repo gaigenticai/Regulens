@@ -35,15 +35,6 @@ const Settings: React.FC = () => {
   const [userId] = useState('web_ui_user'); // TODO: Get from auth context
   const [reason, setReason] = useState('Web UI configuration update');
 
-  // Sample configuration items for testing
-  const defaultConfigs: ConfigItem[] = [
-    { key: 'logging.level', value: 'info', type: 'string', description: 'System logging level' },
-    { key: 'api.rate_limit', value: '100', type: 'integer', description: 'API rate limit per minute' },
-    { key: 'cache.enabled', value: 'true', type: 'boolean', description: 'Enable caching system' },
-    { key: 'notifications.email_enabled', value: 'false', type: 'boolean', description: 'Enable email notifications' },
-    { key: 'security.session_timeout', value: '3600', type: 'integer', description: 'Session timeout in seconds' },
-    { key: 'monitoring.metrics_interval', value: '60', type: 'integer', description: 'Metrics collection interval' },
-  ];
 
   useEffect(() => {
     loadConfigurations();
@@ -52,11 +43,30 @@ const Settings: React.FC = () => {
   const loadConfigurations = async () => {
     setLoading(true);
     try {
-      // For now, use default configurations
-      // TODO: Implement API call to get current configurations from backend
-      setConfigItems(defaultConfigs);
+      const response = await fetch('/api/config', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token') || 'demo-token'}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setConfigItems(data.configurations || []);
+      } else {
+        throw new Error(`Failed to load configurations: ${response.status} ${response.statusText}`);
+      }
     } catch (error) {
       console.error('Failed to load configurations:', error);
+      // Set error state for UI display
+      setUpdateResult({
+        status: 'error',
+        message: 'Failed to load configurations from server',
+        updated_fields: [],
+        errors: [{ field: 'network', error: error instanceof Error ? error.message : 'Network error occurred' }]
+      });
+      // Keep empty config items on error
+      setConfigItems([]);
     } finally {
       setLoading(false);
     }

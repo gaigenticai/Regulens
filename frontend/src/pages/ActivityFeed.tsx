@@ -40,6 +40,7 @@ const ActivityFeed: React.FC = () => {
   const {
     stats,
     isError: statsError,
+    error: statsErrorDetails,
   } = useActivityStats();
 
   // Filter activities based on search and filters
@@ -153,6 +154,20 @@ const ActivityFeed: React.FC = () => {
               {(stats.byType.compliance_alert || 0).toLocaleString()}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Statistics Error */}
+      {statsError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="text-red-800 font-semibold">Failed to Load Activity Stats</h3>
+          <p className="text-red-600 text-sm">{statsErrorDetails?.message || 'Unknown error'}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-2 text-red-600 underline hover:text-red-800"
+          >
+            Refresh Page
+          </button>
         </div>
       )}
 

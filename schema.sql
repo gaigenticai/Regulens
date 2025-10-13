@@ -1998,6 +1998,22 @@ CREATE TABLE IF NOT EXISTS processed_records (
     source_id VARCHAR(255)
 );
 
+-- User permissions table for role-based access control
+CREATE TABLE IF NOT EXISTS user_permissions (
+    permission_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES user_authentication(user_id),
+    permission VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(50),
+    resource_id UUID,
+    is_active BOOLEAN DEFAULT true,
+    granted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    granted_by UUID REFERENCES user_authentication(user_id),
+    expires_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_user_permissions_user ON user_permissions(user_id, is_active);
+CREATE INDEX idx_user_permissions_permission ON user_permissions(permission);
+
 CREATE INDEX IF NOT EXISTS idx_processed_records_source ON processed_records(source_id);
 CREATE INDEX IF NOT EXISTS idx_processed_records_pipeline ON processed_records(pipeline_id);
 
@@ -4323,6 +4339,59 @@ COMMENT ON COLUMN data_quality_checks.failure_examples IS 'Sample records that f
 COMMENT ON COLUMN data_quality_summary.overall_quality_score IS 'Weighted average of all quality dimension scores';
 
 -- ============================================================================
+-- DATA PIPELINES TABLE
+-- ============================================================================
+-- Pipeline definitions and execution tracking for data ingestion
+
+CREATE TABLE IF NOT EXISTS data_pipelines (
+    pipeline_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pipeline_name VARCHAR(255) NOT NULL UNIQUE,
+    pipeline_type VARCHAR(50) NOT NULL CHECK (pipeline_type IN ('BATCH', 'STREAMING', 'REAL_TIME', 'SCHEDULED')),
+    source_id UUID REFERENCES ingestion_sources(source_id),
+    source_config JSONB NOT NULL,
+    destination_config JSONB NOT NULL,
+    transformation_rules JSONB DEFAULT '[]'::jsonb,
+    schedule_cron VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'disabled', 'error')),
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    last_run_status VARCHAR(20) CHECK (last_run_status IN ('success', 'failed', 'partial', 'running')),
+    next_run_at TIMESTAMP WITH TIME ZONE,
+    records_processed_total BIGINT DEFAULT 0,
+    records_failed_total BIGINT DEFAULT 0,
+    retry_policy JSONB DEFAULT '{"max_retries": 3, "backoff_seconds": 60}'::jsonb,
+    error_handling JSONB DEFAULT '{"on_error": "skip", "dead_letter_queue": true}'::jsonb,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES user_authentication(user_id)
+);
+
+-- Pipeline execution history
+CREATE TABLE IF NOT EXISTS data_pipeline_executions (
+    execution_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pipeline_id UUID NOT NULL REFERENCES data_pipelines(pipeline_id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('running', 'success', 'failed', 'partial')),
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    records_processed INTEGER DEFAULT 0,
+    records_failed INTEGER DEFAULT 0,
+    error_message TEXT,
+    execution_time_ms INTEGER,
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_data_pipelines_status ON data_pipelines(status);
+CREATE INDEX IF NOT EXISTS idx_data_pipelines_next_run ON data_pipelines(next_run_at) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_data_pipelines_type ON data_pipelines(pipeline_type);
+CREATE INDEX IF NOT EXISTS idx_data_pipeline_executions_pipeline ON data_pipeline_executions(pipeline_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_data_pipeline_executions_status ON data_pipeline_executions(status);
+
+-- Comments
+COMMENT ON TABLE data_pipelines IS 'Data ingestion pipeline definitions and orchestration';
+COMMENT ON TABLE data_pipeline_executions IS 'Historical record of pipeline execution runs';
+
+-- ============================================================================
 -- END OF SPEC.md FEATURE IMPLEMENTATIONS
 -- ============================================================================
 
@@ -5536,7 +5605,7 @@ CREATE TABLE IF NOT EXISTS consensus_performance_metrics (
 
 -- Translation rules table
 CREATE TABLE IF NOT EXISTS translation_rules (
-    rule_id VARCHAR(64) PRIMARY KEY,
+    rule_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     from_protocol INTEGER NOT NULL,
     to_protocol INTEGER NOT NULL,
@@ -5544,11 +5613,47 @@ CREATE TABLE IF NOT EXISTS translation_rules (
     bidirectional BOOLEAN NOT NULL DEFAULT false,
     priority INTEGER NOT NULL DEFAULT 1,
     active BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    INDEX idx_translation_rules_protocols (from_protocol, to_protocol),
-    INDEX idx_translation_rules_active (active, priority DESC),
-    INDEX idx_translation_rules_created (created_at DESC)
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+-- Indexes for translation_rules
+CREATE INDEX idx_translation_rules_protocols ON translation_rules(from_protocol, to_protocol);
+CREATE INDEX idx_translation_rules_active ON translation_rules(active, priority DESC);
+CREATE INDEX idx_translation_rules_created ON translation_rules(created_at DESC);
+
+-- ============================================================================
+-- MESSAGE TRANSLATIONS TABLE
+-- ============================================================================
+-- Records of actual message translations between protocols
+-- For audit trail and debugging inter-agent communication
+
+CREATE TABLE IF NOT EXISTS message_translations (
+    translation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id UUID REFERENCES agent_messages(message_id) ON DELETE CASCADE,
+    source_protocol VARCHAR(100) NOT NULL,
+    target_protocol VARCHAR(100) NOT NULL,
+    source_content JSONB NOT NULL,
+    translated_content JSONB NOT NULL,
+    translation_rule_id UUID REFERENCES translation_rules(rule_id),
+    translation_quality DECIMAL(3,2) CHECK (translation_quality >= 0 AND translation_quality <= 1),
+    translation_time_ms INTEGER,
+    translator_agent VARCHAR(255),
+    error_message TEXT,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX idx_message_translations_message ON message_translations(message_id);
+CREATE INDEX idx_message_translations_protocols ON message_translations(source_protocol, target_protocol);
+CREATE INDEX idx_message_translations_created ON message_translations(created_at DESC);
+CREATE INDEX idx_message_translations_rule ON message_translations(translation_rule_id);
+CREATE INDEX idx_message_translations_quality ON message_translations(translation_quality) WHERE translation_quality < 0.8;
+
+-- Comments
+COMMENT ON TABLE message_translations IS 'Audit trail of message protocol translations between agents';
+COMMENT ON COLUMN message_translations.translation_quality IS 'Confidence score of translation accuracy (0.0-1.0)';
+COMMENT ON COLUMN message_translations.translation_time_ms IS 'Time taken to translate message in milliseconds';
 
 -- Protocol schemas table
 CREATE TABLE IF NOT EXISTS protocol_schemas (
@@ -5684,6 +5789,45 @@ CREATE TABLE IF NOT EXISTS conversation_performance_metrics (
 -- ============================================================================
 -- CONSENSUS ENGINE SYSTEM
 -- ============================================================================
+
+-- ============================================================================
+-- AGENTS BASE TABLE
+-- ============================================================================
+-- Core agent registry for multi-agent system
+-- Referenced by: consensus_sessions, consensus_votes, agent_messages, etc.
+
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_name VARCHAR(255) NOT NULL UNIQUE,
+    agent_type VARCHAR(50) NOT NULL,
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'disabled', 'maintenance')),
+    capabilities JSONB DEFAULT '[]'::jsonb,
+    configuration JSONB DEFAULT '{}'::jsonb,
+    description TEXT,
+    version VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_active TIMESTAMP WITH TIME ZONE,
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+-- Indexes for agents table
+CREATE INDEX idx_agents_type ON agents(agent_type);
+CREATE INDEX idx_agents_status ON agents(status);
+CREATE INDEX idx_agents_active ON agents(last_active DESC) WHERE status = 'active';
+CREATE INDEX idx_agents_name ON agents(agent_name);
+
+-- Trigger for updated_at timestamp
+CREATE TRIGGER update_agents_updated_at
+    BEFORE UPDATE ON agents
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Comments
+COMMENT ON TABLE agents IS 'Base agent registry for multi-agent AI system';
+COMMENT ON COLUMN agents.agent_type IS 'Type of agent: TRANSACTION_GUARDIAN, REGULATORY_ASSESSOR, AUDIT_INTELLIGENCE, etc.';
+COMMENT ON COLUMN agents.capabilities IS 'JSON array of agent capabilities and permissions';
+COMMENT ON COLUMN agents.configuration IS 'Agent-specific configuration parameters';
 
 -- Consensus type enumeration
 CREATE TYPE consensus_type AS ENUM (
@@ -6040,3 +6184,56 @@ CREATE TRIGGER trigger_update_config_updated_at
 -- ============================================================================
 -- END OF SYSTEM CONFIGURATION MANAGEMENT
 -- ============================================================================
+
+-- ============================================================================
+-- DATA PIPELINES TABLE
+-- ============================================================================
+-- Pipeline definitions and execution tracking for data ingestion
+
+CREATE TABLE IF NOT EXISTS data_pipelines (
+    pipeline_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pipeline_name VARCHAR(255) NOT NULL UNIQUE,
+    pipeline_type VARCHAR(50) NOT NULL CHECK (pipeline_type IN ('BATCH', 'STREAMING', 'REAL_TIME', 'SCHEDULED')),
+    source_id UUID REFERENCES ingestion_sources(source_id),
+    source_config JSONB NOT NULL,
+    destination_config JSONB NOT NULL,
+    transformation_rules JSONB DEFAULT '[]'::jsonb,
+    schedule_cron VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'disabled', 'error')),
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    last_run_status VARCHAR(20) CHECK (last_run_status IN ('success', 'failed', 'partial', 'running')),
+    next_run_at TIMESTAMP WITH TIME ZONE,
+    records_processed_total BIGINT DEFAULT 0,
+    records_failed_total BIGINT DEFAULT 0,
+    retry_policy JSONB DEFAULT '{"max_retries": 3, "backoff_seconds": 60}'::jsonb,
+    error_handling JSONB DEFAULT '{"on_error": "skip", "dead_letter_queue": true}'::jsonb,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES user_authentication(user_id)
+);
+
+-- Pipeline execution history
+CREATE TABLE IF NOT EXISTS data_pipeline_executions (
+    execution_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pipeline_id UUID NOT NULL REFERENCES data_pipelines(pipeline_id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('running', 'success', 'failed', 'partial')),
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    records_processed INTEGER DEFAULT 0,
+    records_failed INTEGER DEFAULT 0,
+    error_message TEXT,
+    execution_time_ms INTEGER,
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+-- Indexes
+CREATE INDEX idx_data_pipelines_status ON data_pipelines(status);
+CREATE INDEX idx_data_pipelines_next_run ON data_pipelines(next_run_at) WHERE status = 'active';
+CREATE INDEX idx_data_pipelines_type ON data_pipelines(pipeline_type);
+CREATE INDEX idx_data_pipeline_executions_pipeline ON data_pipeline_executions(pipeline_id, started_at DESC);
+CREATE INDEX idx_data_pipeline_executions_status ON data_pipeline_executions(status);
+
+-- Comments
+COMMENT ON TABLE data_pipelines IS 'Data ingestion pipeline definitions and orchestration';
+COMMENT ON TABLE data_pipeline_executions IS 'Historical record of pipeline execution runs';

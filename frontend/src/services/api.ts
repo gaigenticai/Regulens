@@ -1247,183 +1247,6 @@ class APIClient {
   }
 
   // ============================================================================
-  // COLLABORATION (Phase 5)
-  // ============================================================================
-
-  async getCollaborationSessions(params: Record<string, string>): Promise<API.CollaborationSession[]> {
-    const response = await this.client.get<API.CollaborationSession[]>('/collaboration/sessions', { params });
-    return response.data;
-  }
-
-  async getCollaborationSession(sessionId: string): Promise<API.CollaborationSession> {
-    const response = await this.client.get<API.CollaborationSession>(`/collaboration/sessions/${sessionId}`);
-    return response.data;
-  }
-
-  async createCollaborationSession(params: {
-    title: string;
-    description?: string;
-    agentIds: string[];
-    objective?: string;
-    context?: Record<string, unknown>;
-    settings?: {
-      maxDuration?: number;
-      autoArchive?: boolean;
-      allowExternal?: boolean;
-    };
-  }): Promise<API.CollaborationSession> {
-    const response = await this.client.post<API.CollaborationSession>('/collaboration/sessions', params);
-    return response.data;
-  }
-
-  async updateCollaborationSession(sessionId: string, updates: Partial<{
-    title: string;
-    description: string;
-    status: 'active' | 'completed' | 'archived';
-    objective: string;
-    context: Record<string, unknown>;
-  }>): Promise<API.CollaborationSession> {
-    const response = await this.client.put<API.CollaborationSession>(`/collaboration/sessions/${sessionId}`, updates);
-    return response.data;
-  }
-
-  async joinCollaborationSession(params: {
-    sessionId: string;
-    agentId: string;
-    role?: 'participant' | 'observer' | 'facilitator';
-  }): Promise<{ success: boolean; message: string }> {
-    const response = await this.client.post(`/collaboration/sessions/${params.sessionId}/join`, params);
-    return response.data;
-  }
-
-  async leaveCollaborationSession(params: {
-    sessionId: string;
-    agentId: string;
-  }): Promise<{ success: boolean; message: string }> {
-    const response = await this.client.post(`/collaboration/sessions/${params.sessionId}/leave`, params);
-    return response.data;
-  }
-
-  async getCollaborationAgents(sessionId: string): Promise<API.CollaborationAgent[]> {
-    const response = await this.client.get<API.CollaborationAgent[]>(`/collaboration/sessions/${sessionId}/agents`);
-    return response.data;
-  }
-
-  async getCollaborationMessages(sessionId: string, params: Record<string, string>): Promise<API.CollaborationMessage[]> {
-    const response = await this.client.get<API.CollaborationMessage[]>(`/collaboration/sessions/${sessionId}/messages`, { params });
-    return response.data;
-  }
-
-  async sendCollaborationMessage(params: {
-    sessionId: string;
-    agentId: string;
-    content: string;
-    type?: 'text' | 'code' | 'file' | 'system';
-    metadata?: Record<string, unknown>;
-    replyToId?: string;
-  }): Promise<API.CollaborationMessage> {
-    const response = await this.client.post<API.CollaborationMessage>(`/collaboration/sessions/${params.sessionId}/messages`, params);
-    return response.data;
-  }
-
-  async getCollaborationTasks(sessionId: string, params: Record<string, string>): Promise<API.CollaborationTask[]> {
-    const response = await this.client.get<API.CollaborationTask[]>(`/collaboration/sessions/${sessionId}/tasks`, { params });
-    return response.data;
-  }
-
-  async createCollaborationTask(params: {
-    sessionId: string;
-    title: string;
-    description?: string;
-    assignedTo?: string;
-    priority?: 'low' | 'medium' | 'high' | 'critical';
-    dueDate?: string;
-    dependencies?: string[];
-    metadata?: Record<string, unknown>;
-  }): Promise<API.CollaborationTask> {
-    const response = await this.client.post<API.CollaborationTask>(`/collaboration/sessions/${params.sessionId}/tasks`, params);
-    return response.data;
-  }
-
-  async updateCollaborationTask(sessionId: string, taskId: string, updates: Partial<{
-    title: string;
-    description: string;
-    status: 'pending' | 'in_progress' | 'completed' | 'blocked';
-    assignedTo: string;
-    priority: 'low' | 'medium' | 'high' | 'critical';
-    dueDate: string;
-    progress: number;
-  }>): Promise<API.CollaborationTask> {
-    const response = await this.client.put<API.CollaborationTask>(`/collaboration/sessions/${sessionId}/tasks/${taskId}`, updates);
-    return response.data;
-  }
-
-  async getCollaborationAnalytics(sessionId: string): Promise<API.CollaborationAnalytics> {
-    const response = await this.client.get<API.CollaborationAnalytics>(`/collaboration/sessions/${sessionId}/analytics`);
-    return response.data;
-  }
-
-  async getCollaborationStats(params: Record<string, string>): Promise<API.CollaborationStats> {
-    const response = await this.client.get<API.CollaborationStats>('/collaboration/stats', { params });
-    return response.data;
-  }
-
-  async shareCollaborationResource(params: {
-    sessionId: string;
-    type: 'file' | 'code' | 'link' | 'data';
-    content: string | object;
-    title?: string;
-    description?: string;
-    metadata?: Record<string, unknown>;
-  }): Promise<API.CollaborationResource> {
-    const response = await this.client.post<API.CollaborationResource>(`/collaboration/sessions/${params.sessionId}/resources`, params);
-    return response.data;
-  }
-
-  async getCollaborationResources(sessionId: string, params: Record<string, string>): Promise<API.CollaborationResource[]> {
-    const response = await this.client.get<API.CollaborationResource[]>(`/collaboration/sessions/${sessionId}/resources`, { params });
-    return response.data;
-  }
-
-  async submitCollaborationVote(params: {
-    sessionId: string;
-    proposalId: string;
-    agentId: string;
-    vote: 'approve' | 'reject' | 'abstain';
-    comment?: string;
-  }): Promise<API.CollaborationDecision> {
-    const response = await this.client.post<API.CollaborationDecision>(`/collaboration/sessions/${params.sessionId}/votes`, params);
-    return response.data;
-  }
-
-  async getCollaborationDecisions(sessionId: string): Promise<API.CollaborationDecision[]> {
-    const response = await this.client.get<API.CollaborationDecision[]>(`/collaboration/sessions/${sessionId}/decisions`);
-    return response.data;
-  }
-
-  async exportCollaborationReport(params: {
-    sessionId: string;
-    format: 'pdf' | 'md' | 'json' | 'html';
-    includeMessages?: boolean;
-    includeTasks?: boolean;
-    includeAnalytics?: boolean;
-    includeResources?: boolean;
-  }): Promise<{ url: string; expiresAt: string }> {
-    const response = await this.client.post('/collaboration/export', params);
-    return response.data;
-  }
-
-  async searchCollaboration(params: Record<string, string>): Promise<Array<{
-    type: 'message' | 'task' | 'resource';
-    sessionId: string;
-    item: API.CollaborationMessage | API.CollaborationTask | API.CollaborationResource;
-    relevance: number;
-  }>> {
-    const response = await this.client.get('/collaboration/search', { params });
-    return response.data;
-  }
-
-  // ============================================================================
   // FEATURE 1: REAL-TIME COLLABORATION DASHBOARD
   // ============================================================================
 
@@ -1481,6 +1304,9 @@ class APIClient {
   }
 
   async getAlertStats(): Promise<API.AlertStats> {
+    const response = await this.client.get<API.AlertStats>('/v1/alerts/stats');
+    return response.data;
+  }
 
   // ============================================================================
   // FEATURE 3: EXPORT/REPORTING MODULE
@@ -1497,6 +1323,9 @@ class APIClient {
   }
 
   async getExportTemplates(): Promise<API.ExportTemplate[]> {
+    const response = await this.client.get<API.ExportTemplate[]>('/v1/exports/templates');
+    return response.data;
+  }
 
   // ============================================================================
   // FEATURE 4: API KEY MANAGEMENT UI
@@ -1521,146 +1350,11 @@ class APIClient {
     const response = await this.client.get<API.LLMKeyUsageStats[]>('/v1/llm-keys/usage');
     return response.data;
   }
-    const response = await this.client.get<API.ExportTemplate[]>('/v1/exports/templates');
-    return response.data;
-  }
-    const response = await this.client.get<API.AlertStats>('/v1/alerts/stats');
-    return response.data;
-  }
 }
 
 // Export singleton instance
 // Development vs Production strategy:
 // - Development: Direct connection to backend (works for Chrome, Firefox, Edge)
-// - Production: Environment variable or relative URL
-const isDevelopment = import.meta.env.MODE === 'development';
-const baseURL = import.meta.env.VITE_API_BASE_URL || 
-  (isDevelopment ? 'http://localhost:8080/api' : '/api');
-export const apiClient = new RegulesAPIClient(baseURL);
-export default apiClient;
-
-  // FEATURE 5: Predictive Compliance Risk Scoring
-  async getRiskPredictions(): Promise<API.RiskPrediction[]> {
-    const response = await this.client.get<API.RiskPrediction[]>('/v1/risk/predictions');
-    return response.data;
-  }
-
-  async getMLModels(): Promise<API.MLModel[]> {
-    const response = await this.client.get<API.MLModel[]>('/v1/risk/models');
-    return response.data;
-  }
-
-  async getRiskDashboardStats(): Promise<API.RiskDashboardStats> {
-    const response = await this.client.get<API.RiskDashboardStats>('/v1/risk/dashboard');
-    return response.data;
-  }
-
-  // FEATURE 7: Regulatory Change Simulator
-  async getSimulations(): Promise<API.RegulatorySimulation[]> {
-    const response = await this.client.get<API.RegulatorySimulation[]>('/v1/simulations');
-    return response.data;
-  }
-
-  async createSimulation(request: API.CreateSimulationRequest): Promise<API.RegulatorySimulation> {
-    const response = await this.client.post<API.RegulatorySimulation>('/v1/simulations', request);
-    return response.data;
-  }
-
-  async getSimulationTemplates(): Promise<API.SimulationTemplate[]> {
-    const response = await this.client.get<API.SimulationTemplate[]>('/v1/simulations/templates');
-    return response.data;
-  }
-
-  // FEATURE 8: Advanced Analytics & BI Dashboard
-  async getBIDashboards(): Promise<API.BIDashboard[]> {
-    const response = await this.client.get<API.BIDashboard[]>('/v1/analytics/dashboards');
-    return response.data;
-  }
-
-  async getAnalyticsMetrics(): Promise<API.AnalyticsMetric[]> {
-    const response = await this.client.get<API.AnalyticsMetric[]>('/v1/analytics/metrics');
-    return response.data;
-  }
-
-  async getDataInsights(): Promise<API.DataInsight[]> {
-    const response = await this.client.get<API.DataInsight[]>('/v1/analytics/insights');
-    return response.data;
-  }
-
-  async getAnalyticsStats(): Promise<API.AnalyticsStats> {
-    const response = await this.client.get<API.AnalyticsStats>('/v1/analytics/stats');
-    return response.data;
-  }
-
-  // FEATURE 10: Natural Language Policy Builder
-  async getNLPolicies(): Promise<API.NLPolicyRule[]> {
-    const response = await this.client.get<API.NLPolicyRule[]>('/v1/nl-policies');
-    return response.data;
-  }
-
-  async createNLPolicy(request: API.CreateNLPolicyRequest): Promise<API.NLPolicyRule> {
-    const response = await this.client.post<API.NLPolicyRule>('/v1/nl-policies', request);
-    return response.data;
-  }
-
-  // FEATURE 12: Regulatory Chatbot
-  async getChatbotConversations(): Promise<API.ChatbotConversation[]> {
-    const response = await this.client.get<API.ChatbotConversation[]>('/v1/chatbot/conversations');
-    return response.data;
-  }
-
-  async sendChatbotMessage(message: API.ChatbotMessage): Promise<API.ChatbotResponse> {
-    const response = await this.client.post<API.ChatbotResponse>('/v1/chatbot/messages', message);
-    return response.data;
-  }
-
-  // FEATURE 13: Integration Marketplace
-  async getIntegrationConnectors(): Promise<API.IntegrationConnector[]> {
-    const response = await this.client.get<API.IntegrationConnector[]>('/v1/integrations');
-    return response.data;
-  }
-
-  async getIntegrationInstances(): Promise<API.IntegrationInstance[]> {
-    const response = await this.client.get<API.IntegrationInstance[]>('/v1/integrations/instances');
-    return response.data;
-  }
-
-  // FEATURE 14: Compliance Training Module
-  async getTrainingCourses(): Promise<API.TrainingCourse[]> {
-    const response = await this.client.get<API.TrainingCourse[]>('/v1/training/courses');
-    return response.data;
-  }
-
-  async getTrainingLeaderboard(): Promise<API.TrainingLeaderboardEntry[]> {
-    const response = await this.client.get<API.TrainingLeaderboardEntry[]>('/v1/training/leaderboard');
-    return response.data;
-  }
-
-  // Customer Profile Management
-  async getCustomerProfile(customerId: string): Promise<API.CustomerProfile> {
-    const response = await this.client.get<API.CustomerProfile>(`/customers/${customerId}`);
-    return response.data.customer;
-  }
-
-  async getCustomerRiskProfile(customerId: string): Promise<API.CustomerRiskEvent[]> {
-    const response = await this.client.get<{ riskEvents: API.CustomerRiskEvent[] }>(`/customers/${customerId}/risk-profile`);
-    return response.data.riskEvents;
-  }
-
-  async getCustomerTransactions(customerId: string, limit: number = 50): Promise<API.Transaction[]> {
-    const response = await this.client.get<{ transactions: API.Transaction[], count: number }>(`/customers/${customerId}/transactions?limit=${limit}`);
-    return response.data.transactions;
-  }
-
-  async updateCustomerKYC(customerId: string, kycStatus: string, notes?: string): Promise<{ success: boolean, customerId: string, kycStatus: string }> {
-    const response = await this.client.post<{ success: boolean, customerId: string, kycStatus: string }>(`/customers/${customerId}/kyc-update`, {
-      kyc_status: kycStatus,
-      notes: notes || ''
-    });
-    return response.data;
-  }
-}
-
 // Export singleton instance
 // Development vs Production strategy:
 // - Development: Direct connection to backend (works for Chrome, Firefox, Edge)
@@ -1668,5 +1362,5 @@ export default apiClient;
 const isDevelopment = import.meta.env.MODE === 'development';
 const baseURL = import.meta.env.VITE_API_BASE_URL ||
   (isDevelopment ? 'http://localhost:8080/api' : '/api');
-export const apiClient = new APIClient(baseURL);
+export const apiClient = new RegulesAPIClient(baseURL);
 export default apiClient;

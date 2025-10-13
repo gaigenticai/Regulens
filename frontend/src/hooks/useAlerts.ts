@@ -3,8 +3,8 @@
  * Production-grade React Query hooks for alert management
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tantml:invoke>
-<parameter name="apiClient" from '@/services/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/services/api';
 import type * as API from '@/types/api';
 
 export function useAlertRules() {

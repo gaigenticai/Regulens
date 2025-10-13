@@ -26,6 +26,7 @@ export default function RiskDashboard() {
   const [metrics, setMetrics] = useState<RiskMetrics | null>(null);
   const [factors, setFactors] = useState<RiskFactor[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadRiskMetrics();
@@ -34,22 +35,19 @@ export default function RiskDashboard() {
 
   const loadRiskMetrics = async () => {
     setLoading(true);
+    setError(null);
     try {
       const response = await fetch('/api/risk/analytics');
       if (response.ok) {
         const data = await response.json();
         setMetrics(data.metrics);
+      } else {
+        throw new Error(`Failed to load risk metrics: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
       console.error('Failed to load risk metrics:', error);
-      setMetrics({
-        total_assessments: 5432,
-        high_risk_count: 342,
-        medium_risk_count: 1543,
-        low_risk_count: 3547,
-        avg_risk_score: 0.45,
-        trend: 'decreasing'
-      });
+      setError(error instanceof Error ? error.message : 'Failed to load risk metrics');
+      setMetrics(null);
     } finally {
       setLoading(false);
     }
@@ -61,16 +59,13 @@ export default function RiskDashboard() {
       if (response.ok) {
         const data = await response.json();
         setFactors(data.factors || []);
+      } else {
+        throw new Error(`Failed to load risk factors: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
       console.error('Failed to load risk factors:', error);
-      setFactors([
-        { factor: 'Transaction Amount', weight: 0.30, current_value: 0.65, risk_contribution: 0.195 },
-        { factor: 'Compliance History', weight: 0.25, current_value: 0.82, risk_contribution: 0.205 },
-        { factor: 'Geographic Risk', weight: 0.20, current_value: 0.45, risk_contribution: 0.090 },
-        { factor: 'Velocity Patterns', weight: 0.15, current_value: 0.58, risk_contribution: 0.087 },
-        { factor: 'Entity Reputation', weight: 0.10, current_value: 0.92, risk_contribution: 0.092 }
-      ]);
+      // Don't set mock data - let factors remain empty on error
+      setFactors([]);
     }
   };
 
@@ -95,7 +90,34 @@ export default function RiskDashboard() {
         </p>
       </div>
 
-      {loading ? (
+      {error ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">Error Loading Risk Data</h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>{error}</p>
+              </div>
+              <div className="mt-4">
+                <button
+                  onClick={() => {
+                    loadRiskMetrics();
+                    loadRiskFactors();
+                  }}
+                  className="bg-red-100 hover:bg-red-200 text-red-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : loading ? (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
         </div>

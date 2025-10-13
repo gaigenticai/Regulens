@@ -126,6 +126,12 @@ private:
     bool can_modify_consensus(const std::string& user_id, const std::string& consensus_id);
     bool can_submit_opinion(const std::string& user_id, const std::string& consensus_id);
     bool owns_agent(const std::string& user_id, const std::string& agent_id);
+
+    // Authorization helper functions
+    bool check_user_permission(const std::string& user_id, const std::string& permission);
+    bool check_user_role(const std::string& user_id, const std::string& role);
+    std::string get_user_role(const std::string& user_id);
+    bool check_consensus_participant(const std::string& user_id, const std::string& consensus_id);
 };
 
 } // namespace regulens

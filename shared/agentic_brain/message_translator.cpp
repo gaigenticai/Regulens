@@ -108,12 +108,32 @@ TranslationResultData MessageTranslator::translate_message(
             auto end_time = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-            MessageHeader translated_header = translate_header(header, target_protocol);
-            update_translation_metrics(protocol_to_string(source_protocol),
-                                     protocol_to_string(target_protocol),
-                                     TranslationResult::SUCCESS, duration);
+        MessageHeader translated_header = translate_header(header, target_protocol);
+        update_translation_metrics(protocol_to_string(source_protocol),
+                                 protocol_to_string(target_protocol),
+                                 TranslationResult::SUCCESS, duration);
 
-            return create_success_result(translated_str, translated_header);
+        // Log successful translation to database
+        try {
+            nlohmann::json source_json = nlohmann::json::parse(message);
+            nlohmann::json translated_json = nlohmann::json::parse(translated_str);
+            log_translation(header.message_id,
+                           protocol_to_string(source_protocol),
+                           protocol_to_string(target_protocol),
+                           source_json,
+                           translated_json,
+                           "", // no rule used for built-in translations
+                           1.0, // quality_score
+                           static_cast<int>(duration.count()),
+                           "MessageTranslator",
+                           "");
+        } catch (const std::exception& e) {
+            if (logger_) {
+                logger_->warn("Failed to log translation: {}", e.what());
+            }
+        }
+
+        return create_success_result(translated_str, translated_header);
         }
 
         // Build the target message
@@ -129,6 +149,27 @@ TranslationResultData MessageTranslator::translate_message(
         update_translation_metrics(protocol_to_string(source_protocol),
                                  protocol_to_string(target_protocol),
                                  TranslationResult::SUCCESS, duration);
+
+        // Log successful translation to database
+        try {
+            nlohmann::json source_json = nlohmann::json::parse(message);
+            nlohmann::json translated_json = nlohmann::json::parse(target_message);
+            std::string rule_id = rule ? rule->rule_id : "";
+            log_translation(header.message_id,
+                           protocol_to_string(source_protocol),
+                           protocol_to_string(target_protocol),
+                           source_json,
+                           translated_json,
+                           rule_id,
+                           1.0, // quality_score
+                           static_cast<int>(duration.count()),
+                           "MessageTranslator",
+                           "");
+        } catch (const std::exception& e) {
+            if (logger_) {
+                logger_->warn("Failed to log translation: {}", e.what());
+            }
+        }
 
         return create_success_result(target_message, translated_header);
 
@@ -624,6 +665,55 @@ std::unordered_map<std::string, double> MessageTranslator::get_translation_stats
     }
 
     return stats;
+}
+
+// Log translation to database for audit trail
+bool MessageTranslator::log_translation(const std::string& message_id,
+                                       const std::string& source_protocol,
+                                       const std::string& target_protocol,
+                                       const nlohmann::json& source_content,
+                                       const nlohmann::json& translated_content,
+                                       const std::string& rule_id,
+                                       double quality_score,
+                                       int translation_time_ms,
+                                       const std::string& translator_agent,
+                                       const std::string& error_message) {
+    try {
+        if (!db_conn_) {
+            if (logger_) {
+                logger_->warn("Database connection not available for logging translation");
+            }
+            return false;
+        }
+
+        std::string query = R"(
+            INSERT INTO message_translations (
+                message_id, source_protocol, target_protocol, source_content, translated_content,
+                translation_rule_id, translation_quality, translation_time_ms, translator_agent, error_message
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        )";
+
+        std::vector<std::string> params = {
+            message_id,
+            source_protocol,
+            target_protocol,
+            source_content.dump(),
+            translated_content.dump(),
+            rule_id.empty() ? nullptr : rule_id,
+            std::to_string(quality_score),
+            std::to_string(translation_time_ms),
+            translator_agent,
+            error_message
+        };
+
+        return db_conn_->execute_command(query, params);
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->error("Exception in log_translation: {}", e.what());
+        }
+        return false;
+    }
 }
 
 // Database operations (simplified implementations)

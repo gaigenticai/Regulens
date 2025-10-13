@@ -294,7 +294,7 @@ void register_ui_api_routes(std::shared_ptr<WebUIServer> server,
     // DATABASE & CONFIGURATION ENDPOINTS
     // ============================================================================
 
-    // GET /api/config - Get configuration
+    // GET /api/config - Retrieve current configuration
     server->add_route("GET", "/api/config", [handlers](const HTTPRequest& req) {
         return handlers->handle_config_get(req);
     });

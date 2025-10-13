@@ -739,12 +739,44 @@ SELECT
 FROM generate_series(1, 50000);
 
 -- =============================================================================
+-- SEED DATA: AGENTS
+-- =============================================================================
+
+INSERT INTO agents (agent_name, agent_type, status, capabilities, description) VALUES
+    ('TransactionGuardian', 'TRANSACTION_GUARDIAN', 'active',
+     '["fraud_detection", "risk_assessment", "transaction_monitoring"]'::jsonb,
+     'Real-time transaction monitoring and fraud detection agent'),
+
+    ('RegulatoryAssessor', 'REGULATORY_ASSESSOR', 'active',
+     '["compliance_checking", "regulatory_monitoring", "policy_analysis"]'::jsonb,
+     'Regulatory compliance assessment and monitoring agent'),
+
+    ('AuditIntelligence', 'AUDIT_INTELLIGENCE', 'active',
+     '["audit_trail_analysis", "anomaly_detection", "compliance_reporting"]'::jsonb,
+     'Audit trail analysis and compliance reporting agent'),
+
+    ('DataIngestionOrchestrator', 'DATA_INGESTION', 'active',
+     '["data_pipeline_management", "quality_checks", "schema_validation"]'::jsonb,
+     'Data ingestion pipeline orchestration and quality management agent'),
+
+    ('KnowledgeBaseManager', 'KNOWLEDGE_MANAGEMENT', 'active',
+     '["semantic_search", "knowledge_indexing", "rag_queries"]'::jsonb,
+     'Knowledge base management and semantic search agent'),
+
+    ('DecisionOrchestrator', 'DECISION_ORCHESTRATION', 'active',
+     '["mcda_analysis", "consensus_building", "decision_tracking"]'::jsonb,
+     'Multi-criteria decision analysis and consensus orchestration agent')
+ON CONFLICT (agent_name) DO NOTHING;
+
+-- =============================================================================
 -- FINAL DATA VERIFICATION
 -- =============================================================================
 
 -- Display data counts
 SELECT
-    'Customer Profiles' as table_name, COUNT(*) as record_count FROM customer_profiles
+    'Agents' as table_name, COUNT(*) as record_count FROM agents
+UNION ALL
+SELECT 'Customer Profiles', COUNT(*) FROM customer_profiles
 UNION ALL
 SELECT 'Transactions', COUNT(*) FROM transactions
 UNION ALL
@@ -772,4 +804,32 @@ SELECT 'Agent Decision History', COUNT(*) FROM agent_decision_history
 UNION ALL
 SELECT 'Agent Performance Metrics', COUNT(*) FROM agent_performance_metrics
 ORDER BY record_count DESC;
+
+-- =============================================================================
+-- SYSTEM CONFIGURATION SEED DATA
+-- =============================================================================
+
+-- Insert default system configuration settings
+INSERT INTO system_configuration (config_key, config_value, config_type, description, is_sensitive, requires_restart) VALUES
+('max_concurrent_users', '100', 'integer', 'Maximum number of concurrent users allowed in the system', false, true),
+('session_timeout_minutes', '30', 'integer', 'User session timeout in minutes', false, false),
+('enable_audit_logging', 'true', 'boolean', 'Enable comprehensive audit logging for all system activities', false, true),
+('log_retention_days', '90', 'integer', 'Number of days to retain system logs', false, false),
+('alert_email_enabled', 'true', 'boolean', 'Enable email notifications for system alerts', false, false),
+('alert_email_recipients', 'admin@company.com,security@company.com', 'string', 'Comma-separated list of email addresses for alert notifications', false, false),
+('backup_frequency_hours', '24', 'integer', 'Frequency of automatic system backups in hours', false, true),
+('max_file_upload_size_mb', '50', 'integer', 'Maximum file upload size in megabytes', false, false),
+('enable_two_factor_auth', 'true', 'boolean', 'Require two-factor authentication for all users', true, false),
+('password_min_length', '12', 'integer', 'Minimum password length requirement', false, false),
+('password_complexity_required', 'true', 'boolean', 'Require complex passwords with mixed characters', false, false),
+('api_rate_limit_per_minute', '1000', 'integer', 'API rate limit per minute per user', false, true),
+('enable_ip_whitelisting', 'false', 'boolean', 'Enable IP address whitelisting for enhanced security', false, true),
+('system_maintenance_mode', 'false', 'boolean', 'Enable system maintenance mode (read-only access)', false, true),
+('debug_mode_enabled', 'false', 'boolean', 'Enable debug mode for detailed logging (not for production)', false, true),
+('cache_ttl_seconds', '300', 'integer', 'Default cache time-to-live in seconds', false, false),
+('max_database_connections', '50', 'integer', 'Maximum database connections allowed', false, true),
+('enable_performance_monitoring', 'true', 'boolean', 'Enable real-time performance monitoring', false, false),
+('compliance_check_frequency_minutes', '15', 'integer', 'Frequency of automated compliance checks in minutes', false, false),
+('agent_decision_timeout_seconds', '30', 'integer', 'Timeout for agent decision making in seconds', false, false)
+ON CONFLICT (config_key) DO NOTHING;
 

@@ -365,24 +365,112 @@ nlohmann::json DatabaseSource::execute_single_row_query(const DatabaseQuery& que
     return results.empty() ? nlohmann::json{} : results[0];
 }
 
-std::vector<nlohmann::json> DatabaseSource::load_by_timestamp(const std::string& /*table_name*/, const std::string& /*timestamp_column*/) {
-    return {
-        {
-            {"id", 1},
-            {"amount", 1500.00},
-            {"updated_at", "2024-01-01T12:00:00Z"}
+std::vector<nlohmann::json> DatabaseSource::load_by_timestamp(const std::string& table_name, const std::string& timestamp_column) {
+    std::vector<nlohmann::json> results;
+
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
         }
-    };
+
+        // Get last sync timestamp
+        std::string last_sync = "1970-01-01 00:00:00";
+        auto it = last_incremental_values_.find(table_name);
+        if (it != last_incremental_values_.end()) {
+            last_sync = it->second;
+        }
+
+        // Build query to load incremental data
+        std::string query = "SELECT * FROM " + table_name +
+                           " WHERE " + timestamp_column + " > $1 " +
+                           "ORDER BY " + timestamp_column + " ASC";
+
+        std::vector<std::string> params = {last_sync};
+        auto db_result = connection->execute_query(query, params);
+
+        // Convert rows to JSON
+        for (const auto& row : db_result.rows) {
+            nlohmann::json json_row;
+            for (const auto& [column, value] : row) {
+                json_row[column] = value;
+            }
+            results.push_back(json_row);
+        }
+
+        // Update last sync timestamp if we got new data
+        if (!results.empty()) {
+            // Get the maximum timestamp from the results
+            std::string max_timestamp = results.back()[timestamp_column];
+            last_incremental_values_[table_name] = max_timestamp;
+        }
+
+        logger_->info("Loaded {} rows from {} using timestamp column {}",
+                     results.size(), table_name, timestamp_column);
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to load by timestamp for table {}: {}", table_name, e.what());
+    }
+
+    return results;
 }
 
-std::vector<nlohmann::json> DatabaseSource::load_by_sequence(const std::string& /*table_name*/, const std::string& /*sequence_column*/) {
-    return {
-        {
-            {"id", 100},
-            {"action", "DATA_ACCESS"},
-            {"timestamp", "2024-01-01T13:00:00Z"}
+std::vector<nlohmann::json> DatabaseSource::load_by_sequence(const std::string& table_name, const std::string& sequence_column) {
+    std::vector<nlohmann::json> results;
+
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
         }
-    };
+
+        // Get last sequence value
+        int64_t last_sequence = 0;
+        auto it = last_incremental_values_.find(table_name);
+        if (it != last_incremental_values_.end()) {
+            try {
+                last_sequence = std::stoll(it->second);
+            } catch (...) {
+                last_sequence = 0;
+            }
+        }
+
+        // Build query to load incremental data by sequence
+        std::string query = "SELECT * FROM " + table_name +
+                           " WHERE " + sequence_column + " > $1 " +
+                           "ORDER BY " + sequence_column + " ASC";
+
+        std::vector<std::string> params = {std::to_string(last_sequence)};
+        auto db_result = connection->execute_query(query, params);
+
+        // Convert rows to JSON
+        for (const auto& row : db_result.rows) {
+            nlohmann::json json_row;
+            for (const auto& [column, value] : row) {
+                json_row[column] = value;
+            }
+            results.push_back(json_row);
+        }
+
+        // Update last sequence if we got new data
+        if (!results.empty()) {
+            // Get the maximum sequence from the results
+            auto max_seq_val = results.back()[sequence_column];
+            if (max_seq_val.is_number_integer()) {
+                last_incremental_values_[table_name] = std::to_string(max_seq_val.get<int64_t>());
+            } else if (max_seq_val.is_string()) {
+                last_incremental_values_[table_name] = max_seq_val.get<std::string>();
+            }
+        }
+
+        logger_->info("Loaded {} rows from {} using sequence column {}",
+                     results.size(), table_name, sequence_column);
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to load by sequence for table {}: {}", table_name, e.what());
+    }
+
+    return results;
 }
 
 std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::string& table_name) {
@@ -430,22 +518,71 @@ std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::s
 }
 
 nlohmann::json DatabaseSource::introspect_table_schema(const std::string& table_name) {
-    // Return sample schema
-    return {
-        {"table_name", table_name},
-        {"columns", {
-            {
-                {"name", "id"},
-                {"type", "integer"},
-                {"nullable", false}
-            },
-            {
-                {"name", "data"},
-                {"type", "jsonb"},
-                {"nullable", true}
+    nlohmann::json schema = nlohmann::json::object();
+    schema["table_name"] = table_name;
+    schema["columns"] = nlohmann::json::array();
+
+    try {
+        auto connection = get_connection();
+        if (!connection) {
+            throw std::runtime_error("No database connection available");
+        }
+
+        // Query information_schema for column metadata
+        std::string query = R"(
+            SELECT column_name, data_type, is_nullable, column_default,
+                   character_maximum_length, numeric_precision, numeric_scale
+            FROM information_schema.columns
+            WHERE table_name = $1
+              AND table_schema = 'public'
+            ORDER BY ordinal_position
+        )";
+
+        std::vector<std::string> params = {table_name};
+        auto result = connection->execute_query(query, params);
+
+        for (const auto& row : result.rows) {
+            nlohmann::json column;
+            column["name"] = row.at("column_name");
+            column["type"] = row.at("data_type");
+            column["nullable"] = (row.at("is_nullable") == "YES");
+
+            auto default_it = row.find("column_default");
+            if (default_it != row.end() && !default_it->second.empty()) {
+                column["default"] = default_it->second;
             }
-        }}
-    };
+
+            auto max_length_it = row.find("character_maximum_length");
+            if (max_length_it != row.end() && !max_length_it->second.empty()) {
+                try {
+                    column["max_length"] = std::stoi(max_length_it->second);
+                } catch (...) {}
+            }
+
+            auto precision_it = row.find("numeric_precision");
+            if (precision_it != row.end() && !precision_it->second.empty()) {
+                try {
+                    column["precision"] = std::stoi(precision_it->second);
+                } catch (...) {}
+            }
+
+            auto scale_it = row.find("numeric_scale");
+            if (scale_it != row.end() && !scale_it->second.empty()) {
+                try {
+                    column["scale"] = std::stoi(scale_it->second);
+                } catch (...) {}
+            }
+
+            schema["columns"].push_back(column);
+        }
+
+        logger_->info("Introspected schema for table {}: {} columns", table_name, schema["columns"].size());
+
+    } catch (const std::exception& e) {
+        logger_->error("Failed to introspect schema for table {}: {}", table_name, e.what());
+    }
+
+    return schema;
 }
 
 nlohmann::json DatabaseSource::introspect_database_schema() {

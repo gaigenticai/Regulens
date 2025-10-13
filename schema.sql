@@ -3466,6 +3466,358 @@ CREATE INDEX IF NOT EXISTS idx_chatbot_conv_platform ON chatbot_conversations(pl
 CREATE INDEX IF NOT EXISTS idx_chatbot_messages_conv ON chatbot_messages(conversation_id, created_at DESC);
 
 -- ============================================================================
+-- KNOWLEDGE BASE EXTENDED FEATURES (Cases, Q&A, Embeddings, Relationships)
+-- ============================================================================
+
+-- Knowledge base cases - Documented case examples for learning and reference
+CREATE TABLE IF NOT EXISTS knowledge_cases (
+    case_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_title VARCHAR(500) NOT NULL,
+    case_description TEXT NOT NULL,
+    domain VARCHAR(50) NOT NULL CHECK (domain IN ('REGULATORY_COMPLIANCE', 'TRANSACTION_MONITORING', 'AUDIT_INTELLIGENCE', 'BUSINESS_PROCESSES', 'RISK_MANAGEMENT', 'LEGAL_FRAMEWORKS', 'FINANCIAL_INSTRUMENTS', 'MARKET_INTELLIGENCE')),
+    case_type VARCHAR(50) NOT NULL CHECK (case_type IN ('SUCCESS', 'FAILURE', 'LESSON_LEARNED', 'BEST_PRACTICE', 'REGULATORY_BREACH', 'FRAUD_DETECTION', 'COMPLIANCE_AUDIT', 'RISK_MITIGATION')),
+    situation TEXT NOT NULL,  -- The situation/problem
+    action TEXT NOT NULL,     -- Actions taken
+    result TEXT NOT NULL,     -- Outcomes/results
+    lessons_learned TEXT,     -- Key takeaways
+    related_regulations TEXT[],
+    related_entities UUID[], -- References to knowledge_entities
+    severity VARCHAR(20) CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    outcome_status VARCHAR(30) CHECK (outcome_status IN ('POSITIVE', 'NEGATIVE', 'MIXED', 'PENDING')),
+    financial_impact DECIMAL(15, 2),
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    is_archived BOOLEAN DEFAULT false,
+    view_count INTEGER DEFAULT 0,
+    usefulness_score DECIMAL(3, 2) DEFAULT 0.0 CHECK (usefulness_score >= 0 AND usefulness_score <= 1)
+);
+
+-- Knowledge entry relationships (for similarity and related content)
+CREATE TABLE IF NOT EXISTS knowledge_entry_relationships (
+    relationship_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_a_id VARCHAR(255) NOT NULL REFERENCES knowledge_entities(entity_id) ON DELETE CASCADE,
+    entry_b_id VARCHAR(255) NOT NULL REFERENCES knowledge_entities(entity_id) ON DELETE CASCADE,
+    relationship_type VARCHAR(50) NOT NULL CHECK (relationship_type IN ('SIMILAR', 'RELATED', 'PARENT_CHILD', 'SUPERSEDES', 'REFERENCES', 'CONTRADICTS', 'EXTENDS', 'IMPLEMENTS')),
+    similarity_score DECIMAL(5, 4) CHECK (similarity_score >= 0 AND similarity_score <= 1),
+    relationship_metadata JSONB DEFAULT '{}'::jsonb,
+    computed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    computed_by VARCHAR(100), -- 'SYSTEM', 'USER', specific AI model name
+    is_validated BOOLEAN DEFAULT false,
+    validated_by VARCHAR(255),
+    validated_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(entry_a_id, entry_b_id, relationship_type),
+    CHECK (entry_a_id != entry_b_id)  -- Prevent self-referencing
+);
+
+-- Knowledge Q&A sessions (for interactive questioning and answers)
+CREATE TABLE IF NOT EXISTS knowledge_qa_sessions (
+    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question TEXT NOT NULL,
+    question_embedding VECTOR(384), -- Question vector for semantic search
+    answer TEXT,
+    answer_type VARCHAR(50) CHECK (answer_type IN ('DIRECT', 'SYNTHESIZED', 'REFERENCED', 'UNCERTAIN', 'NO_ANSWER')),
+    context_ids JSONB, -- Array of entry IDs used as context
+    sources JSONB, -- Detailed source information with snippets
+    confidence DECIMAL(3, 2) CHECK (confidence >= 0 AND confidence <= 1),
+    model_used VARCHAR(100), -- LLM or system used for answer generation
+    processing_time_ms INTEGER,
+    tokens_used INTEGER,
+    user_id VARCHAR(255),
+    session_context JSONB DEFAULT '{}'::jsonb, -- Additional context about the query
+    feedback_rating INTEGER CHECK (feedback_rating >= 1 AND feedback_rating <= 5),
+    feedback_comment TEXT,
+    feedback_at TIMESTAMP WITH TIME ZONE,
+    was_helpful BOOLEAN,
+    follow_up_questions TEXT[],
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    answered_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Embedding cache (for fast similarity search and vector operations)
+CREATE TABLE IF NOT EXISTS knowledge_embeddings (
+    embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_id VARCHAR(255) NOT NULL REFERENCES knowledge_entities(entity_id) ON DELETE CASCADE,
+    embedding_model VARCHAR(100) NOT NULL, -- e.g., 'sentence-transformers/all-MiniLM-L6-v2', 'openai/text-embedding-ada-002'
+    embedding_vector VECTOR(384), -- Vector representation (dimension varies by model)
+    embedding_type VARCHAR(50) CHECK (embedding_type IN ('TITLE', 'CONTENT', 'FULL', 'CHUNK', 'SUMMARY')),
+    chunk_index INTEGER DEFAULT 0, -- For entries split into chunks
+    chunk_text TEXT, -- The actual text that was embedded
+    chunk_metadata JSONB DEFAULT '{}'::jsonb,
+    generation_metadata JSONB DEFAULT '{}'::jsonb, -- Model params, API version, etc.
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE, -- For cache invalidation
+    is_current BOOLEAN DEFAULT true, -- Mark old embeddings as outdated
+    UNIQUE(entry_id, embedding_model, chunk_index, embedding_type)
+);
+
+-- Batch embedding jobs (for tracking large-scale embedding generation)
+CREATE TABLE IF NOT EXISTS knowledge_embedding_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name VARCHAR(255),
+    model_name VARCHAR(100) NOT NULL,
+    target_filter JSONB, -- Filter criteria for which entities to embed
+    total_entries INTEGER DEFAULT 0,
+    processed_entries INTEGER DEFAULT 0,
+    failed_entries INTEGER DEFAULT 0,
+    status VARCHAR(30) NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indices for knowledge base extended features
+CREATE INDEX IF NOT EXISTS idx_knowledge_cases_domain ON knowledge_cases(domain);
+CREATE INDEX IF NOT EXISTS idx_knowledge_cases_type ON knowledge_cases(case_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_cases_created ON knowledge_cases(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_cases_severity ON knowledge_cases(severity);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_entry_a ON knowledge_entry_relationships(entry_a_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_entry_b ON knowledge_entry_relationships(entry_b_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_type ON knowledge_entry_relationships(relationship_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_similarity ON knowledge_entry_relationships(similarity_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_qa_created ON knowledge_qa_sessions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_qa_user ON knowledge_qa_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_qa_confidence ON knowledge_qa_sessions(confidence DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_entry ON knowledge_embeddings(entry_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_model ON knowledge_embeddings(embedding_model);
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_current ON knowledge_embeddings(entry_id, is_current);
+-- Vector similarity search index (requires pgvector extension)
+-- CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_vector ON knowledge_embeddings USING ivfflat (embedding_vector vector_cosine_ops) WITH (lists = 100);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_embedding_jobs_status ON knowledge_embedding_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_embedding_jobs_created ON knowledge_embedding_jobs(created_at DESC);
+
+-- ============================================================================
+-- LLM INTEGRATION (Conversations, Batch, Fine-tuning, Analytics)
+-- ============================================================================
+
+-- LLM model registry (available models across providers)
+CREATE TABLE IF NOT EXISTS llm_model_registry (
+    model_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_name VARCHAR(255) NOT NULL UNIQUE,
+    provider VARCHAR(50) NOT NULL CHECK (provider IN ('openai', 'anthropic', 'local', 'custom', 'huggingface', 'cohere', 'google')),
+    model_version VARCHAR(50),
+    model_type VARCHAR(50) CHECK (model_type IN ('completion', 'chat', 'embedding', 'fine_tuned', 'instruct')),
+    context_length INTEGER,
+    max_tokens INTEGER,
+    cost_per_1k_input_tokens DECIMAL(10, 6),
+    cost_per_1k_output_tokens DECIMAL(10, 6),
+    capabilities JSONB DEFAULT '[]'::jsonb, -- Array of capabilities
+    parameters JSONB DEFAULT '{}'::jsonb, -- Model-specific parameters
+    is_available BOOLEAN DEFAULT true,
+    is_deprecated BOOLEAN DEFAULT false,
+    base_model_id UUID, -- For fine-tuned models
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (base_model_id) REFERENCES llm_model_registry(model_id) ON DELETE SET NULL
+);
+
+-- LLM conversations (chat history and context management)
+CREATE TABLE IF NOT EXISTS llm_conversations (
+    conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255),
+    model_id UUID REFERENCES llm_model_registry(model_id) ON DELETE SET NULL,
+    system_prompt TEXT,
+    user_id VARCHAR(255),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'archived', 'deleted')),
+    message_count INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    total_cost DECIMAL(10, 4) DEFAULT 0,
+    temperature DECIMAL(3, 2),
+    max_tokens INTEGER,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    last_activity_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- LLM messages (individual messages in conversations)
+CREATE TABLE IF NOT EXISTS llm_messages (
+    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID REFERENCES llm_conversations(conversation_id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'function')),
+    content TEXT NOT NULL,
+    tokens INTEGER,
+    cost DECIMAL(10, 6),
+    model_id UUID REFERENCES llm_model_registry(model_id),
+    latency_ms INTEGER,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    finish_reason VARCHAR(50), -- 'stop', 'length', 'content_filter', 'function_call'
+    function_call JSONB, -- For function calling support
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- LLM usage statistics (aggregated usage tracking)
+CREATE TABLE IF NOT EXISTS llm_usage_stats (
+    stat_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_id UUID REFERENCES llm_model_registry(model_id),
+    user_id VARCHAR(255),
+    usage_date DATE NOT NULL,
+    request_count INTEGER DEFAULT 0,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    total_cost DECIMAL(10, 4) DEFAULT 0,
+    avg_latency_ms INTEGER,
+    error_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(model_id, user_id, usage_date)
+);
+
+-- LLM batch processing jobs (async batch processing)
+CREATE TABLE IF NOT EXISTS llm_batch_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name VARCHAR(255),
+    model_id UUID REFERENCES llm_model_registry(model_id),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    items JSONB NOT NULL, -- Array of {id, prompt, context} objects
+    system_prompt TEXT,
+    temperature DECIMAL(3, 2) DEFAULT 0.7,
+    max_tokens INTEGER DEFAULT 1000,
+    batch_size INTEGER DEFAULT 10,
+    total_items INTEGER,
+    completed_items INTEGER DEFAULT 0,
+    failed_items INTEGER DEFAULT 0,
+    results JSONB DEFAULT '[]'::jsonb, -- Array of results
+    total_tokens INTEGER DEFAULT 0,
+    total_cost DECIMAL(10, 4) DEFAULT 0,
+    progress DECIMAL(5, 2) DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_by VARCHAR(255)
+);
+
+-- LLM fine-tuning jobs (model customization)
+CREATE TABLE IF NOT EXISTS llm_fine_tune_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name VARCHAR(255),
+    base_model_id UUID REFERENCES llm_model_registry(model_id),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    training_dataset TEXT NOT NULL, -- Path or URL to dataset
+    validation_dataset TEXT,
+    epochs INTEGER DEFAULT 3,
+    learning_rate DECIMAL(10, 8) DEFAULT 0.00001,
+    batch_size INTEGER DEFAULT 4,
+    fine_tuned_model_id UUID, -- Reference to new model after completion
+    training_progress DECIMAL(5, 2) DEFAULT 0 CHECK (training_progress >= 0 AND training_progress <= 100),
+    training_loss DECIMAL(10, 6),
+    validation_loss DECIMAL(10, 6),
+    training_samples INTEGER,
+    training_tokens BIGINT,
+    cost DECIMAL(10, 4),
+    hyperparameters JSONB DEFAULT '{}'::jsonb,
+    metrics JSONB DEFAULT '{}'::jsonb,
+    checkpoints JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    created_by VARCHAR(255),
+    FOREIGN KEY (fine_tuned_model_id) REFERENCES llm_model_registry(model_id) ON DELETE SET NULL
+);
+
+-- LLM model benchmarks (performance evaluation)
+CREATE TABLE IF NOT EXISTS llm_model_benchmarks (
+    benchmark_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_id UUID REFERENCES llm_model_registry(model_id) ON DELETE CASCADE,
+    benchmark_name VARCHAR(255) NOT NULL,
+    benchmark_type VARCHAR(50) CHECK (benchmark_type IN ('accuracy', 'latency', 'cost', 'quality', 'comprehensive', 'compliance', 'bias')),
+    score DECIMAL(8, 4),
+    percentile DECIMAL(5, 2),
+    comparison_baseline VARCHAR(100),
+    test_cases_count INTEGER,
+    passed_cases INTEGER,
+    failed_cases INTEGER,
+    avg_latency_ms INTEGER,
+    avg_tokens_per_request INTEGER,
+    avg_cost_per_request DECIMAL(10, 6),
+    details JSONB DEFAULT '{}'::jsonb,
+    dataset_used VARCHAR(255),
+    methodology TEXT,
+    tested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    tested_by VARCHAR(255)
+);
+
+-- LLM text analysis results (for analyze endpoint)
+CREATE TABLE IF NOT EXISTS llm_text_analysis (
+    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    text_input TEXT NOT NULL,
+    model_id UUID REFERENCES llm_model_registry(model_id),
+    analysis_type VARCHAR(50) CHECK (analysis_type IN ('sentiment', 'entities', 'summary', 'classification', 'compliance_check', 'risk_assessment', 'comprehensive')),
+    sentiment_score DECIMAL(3, 2), -- -1 to 1
+    sentiment_label VARCHAR(20),
+    entities JSONB DEFAULT '[]'::jsonb,
+    summary TEXT,
+    classifications JSONB DEFAULT '[]'::jsonb,
+    key_points JSONB DEFAULT '[]'::jsonb,
+    compliance_findings JSONB DEFAULT '[]'::jsonb,
+    risk_score DECIMAL(5, 2),
+    confidence DECIMAL(5, 4),
+    tokens_used INTEGER,
+    cost DECIMAL(10, 6),
+    processing_time_ms INTEGER,
+    user_id VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- LLM report exports
+CREATE TABLE IF NOT EXISTS llm_report_exports (
+    export_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    export_type VARCHAR(30) CHECK (export_type IN ('conversation', 'analysis', 'usage', 'batch', 'benchmark', 'fine_tune')),
+    format VARCHAR(20) CHECK (format IN ('pdf', 'json', 'txt', 'md', 'csv', 'excel')),
+    conversation_id UUID,
+    analysis_id UUID,
+    batch_job_id UUID,
+    include_metadata BOOLEAN DEFAULT false,
+    include_token_stats BOOLEAN DEFAULT false,
+    include_cost_breakdown BOOLEAN DEFAULT false,
+    time_range_start TIMESTAMP WITH TIME ZONE,
+    time_range_end TIMESTAMP WITH TIME ZONE,
+    file_path TEXT,
+    file_url TEXT,
+    file_size_bytes BIGINT,
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'generating', 'completed', 'failed', 'expired')),
+    generated_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    download_count INTEGER DEFAULT 0,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (conversation_id) REFERENCES llm_conversations(conversation_id) ON DELETE SET NULL,
+    FOREIGN KEY (analysis_id) REFERENCES llm_text_analysis(analysis_id) ON DELETE SET NULL,
+    FOREIGN KEY (batch_job_id) REFERENCES llm_batch_jobs(job_id) ON DELETE SET NULL
+);
+
+-- Indices for LLM integration
+CREATE INDEX IF NOT EXISTS idx_llm_models_provider ON llm_model_registry(provider, is_available);
+CREATE INDEX IF NOT EXISTS idx_llm_conversations_user ON llm_conversations(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_conversations_status ON llm_conversations(status, last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_messages_conversation ON llm_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_date ON llm_usage_stats(usage_date DESC, model_id);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_user ON llm_usage_stats(user_id, usage_date DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_batch_jobs_status ON llm_batch_jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_batch_jobs_user ON llm_batch_jobs(created_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_fine_tune_jobs_status ON llm_fine_tune_jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_fine_tune_jobs_user ON llm_fine_tune_jobs(created_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_benchmarks_model ON llm_model_benchmarks(model_id, tested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_text_analysis_user ON llm_text_analysis(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_exports_status ON llm_report_exports(status, expires_at);
+
+-- ============================================================================
 -- FEATURE 13: INTEGRATION MARKETPLACE (PRE-BUILT CONNECTORS)
 -- ============================================================================
 
@@ -3589,5 +3941,860 @@ CREATE INDEX IF NOT EXISTS idx_training_enrollments_user ON training_enrollments
 CREATE INDEX IF NOT EXISTS idx_training_leaderboard_rank ON training_leaderboard(rank);
 
 -- ============================================================================
+-- JURISDICTION RISK RATINGS TABLE
+-- Production-grade country/jurisdiction risk assessment database
+-- Integrates FATF, OFAC, EU regulatory risk ratings
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS jurisdiction_risk_ratings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    country_code VARCHAR(3) NOT NULL,
+    country_name VARCHAR(255) NOT NULL,
+    risk_tier VARCHAR(50) NOT NULL CHECK (risk_tier IN ('EXTREME', 'HIGH', 'MODERATE', 'LOW', 'MINIMAL')),
+    risk_score DECIMAL(3, 2) NOT NULL CHECK (risk_score >= 0.0 AND risk_score <= 1.0),
+    fatf_listing VARCHAR(50) CHECK (fatf_listing IN ('BLACK', 'GREY', 'WHITE', 'NOT_LISTED')),
+    ofac_sanctions BOOLEAN DEFAULT false,
+    eu_high_risk BOOLEAN DEFAULT false,
+    transparency_score DECIMAL(3, 2) CHECK (transparency_score >= 0.0 AND transparency_score <= 1.0),
+    corruption_index INTEGER CHECK (corruption_index >= 0 AND corruption_index <= 100),
+    aml_compliance_score DECIMAL(3, 2) CHECK (aml_compliance_score >= 0.0 AND aml_compliance_score <= 1.0),
+    cfr_rating VARCHAR(50),
+    regulatory_strength VARCHAR(50) CHECK (regulatory_strength IN ('STRONG', 'ADEQUATE', 'WEAK', 'VERY_WEAK')),
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source_references JSONB,
+    notes TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_jurisdiction_risk_country_code ON jurisdiction_risk_ratings(country_code);
+CREATE INDEX IF NOT EXISTS idx_jurisdiction_risk_tier ON jurisdiction_risk_ratings(risk_tier);
+CREATE INDEX IF NOT EXISTS idx_jurisdiction_risk_active ON jurisdiction_risk_ratings(is_active, last_updated);
+CREATE INDEX IF NOT EXISTS idx_jurisdiction_risk_score ON jurisdiction_risk_ratings(risk_score DESC);
+
+COMMENT ON TABLE jurisdiction_risk_ratings IS 'Production-grade jurisdiction risk assessment database integrating FATF, OFAC, EU, and other regulatory risk sources';
+COMMENT ON COLUMN jurisdiction_risk_ratings.country_code IS 'ISO 3166-1 alpha-2 or alpha-3 country code';
+COMMENT ON COLUMN jurisdiction_risk_ratings.risk_tier IS 'Overall risk tier classification: EXTREME, HIGH, MODERATE, LOW, MINIMAL';
+COMMENT ON COLUMN jurisdiction_risk_ratings.risk_score IS 'Normalized risk score from 0.0 (lowest risk) to 1.0 (highest risk)';
+COMMENT ON COLUMN jurisdiction_risk_ratings.fatf_listing IS 'FATF list status: BLACK (high-risk), GREY (monitoring), WHITE (compliant)';
+COMMENT ON COLUMN jurisdiction_risk_ratings.ofac_sanctions IS 'US OFAC sanctions program active';
+COMMENT ON COLUMN jurisdiction_risk_ratings.eu_high_risk IS 'EU high-risk third country designation';
+COMMENT ON COLUMN jurisdiction_risk_ratings.transparency_score IS 'Transparency International CPI normalized score';
+COMMENT ON COLUMN jurisdiction_risk_ratings.aml_compliance_score IS 'AML/CFT compliance effectiveness score';
+
+-- ============================================================================
+-- FRAUD DETECTION MANAGEMENT TABLES
+-- Production-grade fraud detection system with ML models, alerts, and rules
+-- ============================================================================
+
+-- Fraud alerts (if not already in schema, create complete version)
+CREATE TABLE IF NOT EXISTS fraud_alerts (
+    alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID,
+    rule_id UUID,
+    model_id UUID,
+    alert_type VARCHAR(50) NOT NULL CHECK (alert_type IN ('rule_violation', 'ml_detection', 'pattern_match', 'anomaly', 'manual_review', 'velocity_check', 'amount_threshold')),
+    severity VARCHAR(20) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'resolved', 'false_positive', 'confirmed_fraud', 'escalated')),
+    risk_score DECIMAL(5, 2) CHECK (risk_score >= 0 AND risk_score <= 100),
+    triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    details JSONB,
+    indicators JSONB, -- Array of fraud indicators that triggered this alert
+    assigned_to VARCHAR(255),
+    investigated_at TIMESTAMP,
+    investigation_notes TEXT,
+    resolved_at TIMESTAMP,
+    resolution_action VARCHAR(100),
+    resolution_notes TEXT,
+    false_positive_reason VARCHAR(255),
+    customer_id VARCHAR(255),
+    amount DECIMAL(18, 2),
+    currency VARCHAR(3),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Fraud detection models (ML models for fraud detection)
+CREATE TABLE IF NOT EXISTS fraud_detection_models (
+    model_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_name VARCHAR(255) NOT NULL UNIQUE,
+    model_type VARCHAR(50) NOT NULL CHECK (model_type IN ('random_forest', 'neural_network', 'xgboost', 'isolation_forest', 'svm', 'ensemble', 'logistic_regression', 'gradient_boosting')),
+    model_version VARCHAR(50) NOT NULL,
+    framework VARCHAR(50) NOT NULL, -- scikit-learn, tensorflow, pytorch, xgboost
+    model_binary BYTEA, -- Serialized model (optional, can use file path)
+    model_path TEXT, -- Path to model file on disk
+    training_dataset_id UUID,
+    training_dataset_path TEXT,
+    training_date TIMESTAMP,
+    training_samples_count INTEGER,
+    training_duration_seconds INTEGER,
+    accuracy DECIMAL(5, 4) CHECK (accuracy >= 0 AND accuracy <= 1),
+    precision_score DECIMAL(5, 4) CHECK (precision_score >= 0 AND precision_score <= 1),
+    recall DECIMAL(5, 4) CHECK (recall >= 0 AND recall <= 1),
+    f1_score DECIMAL(5, 4) CHECK (f1_score >= 0 AND f1_score <= 1),
+    roc_auc DECIMAL(5, 4) CHECK (roc_auc >= 0 AND roc_auc <= 1),
+    confusion_matrix JSONB, -- [[TP, FP], [FN, TN]]
+    feature_importance JSONB, -- {feature_name: importance_score}
+    hyperparameters JSONB, -- Model hyperparameters used
+    threshold DECIMAL(3, 2) DEFAULT 0.5 CHECK (threshold >= 0 AND threshold <= 1),
+    is_active BOOLEAN DEFAULT false,
+    deployment_date TIMESTAMP,
+    last_prediction_at TIMESTAMP,
+    prediction_count INTEGER DEFAULT 0,
+    true_positive_count INTEGER DEFAULT 0,
+    false_positive_count INTEGER DEFAULT 0,
+    true_negative_count INTEGER DEFAULT 0,
+    false_negative_count INTEGER DEFAULT 0,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Model performance tracking (historical performance metrics)
+CREATE TABLE IF NOT EXISTS model_performance_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_id UUID REFERENCES fraud_detection_models(model_id) ON DELETE CASCADE,
+    evaluation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    dataset_type VARCHAR(20) NOT NULL CHECK (dataset_type IN ('train', 'validation', 'test', 'production')),
+    dataset_size INTEGER,
+    accuracy DECIMAL(5, 4) CHECK (accuracy >= 0 AND accuracy <= 1),
+    precision_score DECIMAL(5, 4) CHECK (precision_score >= 0 AND precision_score <= 1),
+    recall DECIMAL(5, 4) CHECK (recall >= 0 AND recall <= 1),
+    f1_score DECIMAL(5, 4) CHECK (f1_score >= 0 AND f1_score <= 1),
+    roc_auc DECIMAL(5, 4) CHECK (roc_auc >= 0 AND roc_auc <= 1),
+    confusion_matrix JSONB, -- [[TP, FP], [FN, TN]]
+    threshold DECIMAL(3, 2) CHECK (threshold >= 0 AND threshold <= 1),
+    sample_size INTEGER,
+    false_positive_rate DECIMAL(5, 4) CHECK (false_positive_rate >= 0 AND false_positive_rate <= 1),
+    false_negative_rate DECIMAL(5, 4) CHECK (false_negative_rate >= 0 AND false_negative_rate <= 1),
+    true_positive_rate DECIMAL(5, 4) CHECK (true_positive_rate >= 0 AND true_positive_rate <= 1),
+    true_negative_rate DECIMAL(5, 4) CHECK (true_negative_rate >= 0 AND true_negative_rate <= 1),
+    avg_prediction_time_ms INTEGER,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Batch fraud scan jobs (for bulk transaction scanning)
+CREATE TABLE IF NOT EXISTS fraud_batch_scan_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    scan_type VARCHAR(50) NOT NULL CHECK (scan_type IN ('transaction_range', 'customer_profile', 'pattern_detection', 'anomaly_detection', 'full_rescan', 'scheduled_scan')),
+    start_date TIMESTAMP,
+    end_date TIMESTAMP,
+    transaction_ids JSONB, -- Array of specific transaction IDs to scan
+    rule_ids JSONB, -- Array of fraud rule IDs to apply
+    model_ids JSONB, -- Array of ML model IDs to use
+    customer_ids JSONB, -- Array of customer IDs to scan
+    priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
+    progress DECIMAL(5, 2) DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+    transactions_scanned INTEGER DEFAULT 0,
+    transactions_total INTEGER DEFAULT 0,
+    alerts_generated INTEGER DEFAULT 0,
+    high_risk_count INTEGER DEFAULT 0,
+    medium_risk_count INTEGER DEFAULT 0,
+    low_risk_count INTEGER DEFAULT 0,
+    processing_rate_per_second DECIMAL(10, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    estimated_completion_at TIMESTAMP,
+    error_message TEXT,
+    error_count INTEGER DEFAULT 0,
+    result_summary JSONB,
+    created_by VARCHAR(255),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Fraud reports export (for generating fraud detection reports)
+CREATE TABLE IF NOT EXISTS fraud_report_exports (
+    export_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    export_type VARCHAR(20) NOT NULL CHECK (export_type IN ('pdf', 'csv', 'json', 'excel', 'html')),
+    report_name VARCHAR(255) NOT NULL,
+    report_title VARCHAR(500),
+    time_range_start TIMESTAMP,
+    time_range_end TIMESTAMP,
+    include_alerts BOOLEAN DEFAULT true,
+    include_rules BOOLEAN DEFAULT true,
+    include_stats BOOLEAN DEFAULT true,
+    include_transactions BOOLEAN DEFAULT false,
+    include_models BOOLEAN DEFAULT false,
+    include_charts BOOLEAN DEFAULT true,
+    filter_criteria JSONB, -- Additional filters applied
+    file_path TEXT,
+    file_url TEXT,
+    file_size_bytes BIGINT,
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'generating', 'completed', 'failed', 'expired')),
+    progress DECIMAL(5, 2) DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+    generated_at TIMESTAMP,
+    expires_at TIMESTAMP,
+    download_count INTEGER DEFAULT 0,
+    last_downloaded_at TIMESTAMP,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    error_message TEXT
+);
+
+-- Fraud rule test results (for testing rules against historical data)
+CREATE TABLE IF NOT EXISTS fraud_rule_test_results (
+    test_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id UUID NOT NULL,
+    test_name VARCHAR(255),
+    time_range_start TIMESTAMP NOT NULL,
+    time_range_end TIMESTAMP NOT NULL,
+    transactions_tested INTEGER DEFAULT 0,
+    matches_found INTEGER DEFAULT 0,
+    true_positives INTEGER DEFAULT 0,
+    false_positives INTEGER DEFAULT 0,
+    true_negatives INTEGER DEFAULT 0,
+    false_negatives INTEGER DEFAULT 0,
+    accuracy DECIMAL(5, 4) CHECK (accuracy >= 0 AND accuracy <= 1),
+    precision_score DECIMAL(5, 4) CHECK (precision_score >= 0 AND precision_score <= 1),
+    recall DECIMAL(5, 4) CHECK (recall >= 0 AND recall <= 1),
+    f1_score DECIMAL(5, 4) CHECK (f1_score >= 0 AND f1_score <= 1),
+    match_count INTEGER DEFAULT 0,
+    false_positive_count INTEGER DEFAULT 0,
+    matched_transaction_ids JSONB, -- Array of transaction IDs that matched
+    false_positive_transaction_ids JSONB, -- Sample false positives
+    test_duration_ms INTEGER,
+    tested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    tested_by VARCHAR(255),
+    notes TEXT
+);
+
+-- Indexes for fraud detection tables
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_status ON fraud_alerts(status, severity, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_transaction ON fraud_alerts(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_rule ON fraud_alerts(rule_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_model ON fraud_alerts(model_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_customer ON fraud_alerts(customer_id, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_assigned ON fraud_alerts(assigned_to, status);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_models_active ON fraud_detection_models(is_active, accuracy DESC);
+CREATE INDEX IF NOT EXISTS idx_fraud_models_type ON fraud_detection_models(model_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_fraud_models_name ON fraud_detection_models(model_name);
+
+CREATE INDEX IF NOT EXISTS idx_model_performance_model ON model_performance_metrics(model_id, evaluation_date DESC);
+CREATE INDEX IF NOT EXISTS idx_model_performance_dataset ON model_performance_metrics(dataset_type, evaluation_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_batch_jobs_status ON fraud_batch_scan_jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_batch_jobs_priority ON fraud_batch_scan_jobs(priority DESC, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_exports_status ON fraud_report_exports(status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_fraud_exports_created ON fraud_report_exports(created_by, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_rule_test_results_rule ON fraud_rule_test_results(rule_id, tested_at DESC);
+
+-- Comments for fraud detection tables
+COMMENT ON TABLE fraud_alerts IS 'Production fraud alerts triggered by rules, ML models, or manual review';
+COMMENT ON TABLE fraud_detection_models IS 'ML models for fraud detection with performance tracking';
+COMMENT ON TABLE model_performance_metrics IS 'Historical performance metrics for fraud detection models';
+COMMENT ON TABLE fraud_batch_scan_jobs IS 'Batch jobs for scanning transactions for fraud';
+COMMENT ON TABLE fraud_report_exports IS 'Export jobs for fraud detection reports';
+COMMENT ON TABLE fraud_rule_test_results IS 'Test results for fraud rules against historical data';
+
+-- ============================================================================
+-- DATA INGESTION MONITORING TABLES
+-- Production-grade data pipeline monitoring and quality checks
+-- ============================================================================
+
+-- Data ingestion metrics (real-time and historical)
+CREATE TABLE IF NOT EXISTS data_ingestion_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID,
+    source_name VARCHAR(255) NOT NULL,
+    source_type VARCHAR(50) NOT NULL CHECK (source_type IN ('database', 'api', 'file', 'stream', 'queue', 'kafka', 's3', 'ftp')),
+    pipeline_name VARCHAR(255),
+    ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    records_ingested INTEGER DEFAULT 0,
+    records_failed INTEGER DEFAULT 0,
+    records_skipped INTEGER DEFAULT 0,
+    records_updated INTEGER DEFAULT 0,
+    records_deleted INTEGER DEFAULT 0,
+    bytes_processed BIGINT DEFAULT 0,
+    duration_ms INTEGER,
+    throughput_records_per_sec DECIMAL(12, 2),
+    throughput_mb_per_sec DECIMAL(12, 2),
+    error_count INTEGER DEFAULT 0,
+    error_messages JSONB,
+    warning_count INTEGER DEFAULT 0,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('success', 'partial', 'failed', 'running', 'queued', 'cancelled')),
+    lag_seconds INTEGER,
+    last_record_timestamp TIMESTAMP,
+    batch_id VARCHAR(255),
+    job_id VARCHAR(255),
+    execution_host VARCHAR(255),
+    memory_used_mb INTEGER,
+    cpu_usage_percent DECIMAL(5, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Data quality check results
+CREATE TABLE IF NOT EXISTS data_quality_checks (
+    check_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID,
+    source_name VARCHAR(255),
+    table_name VARCHAR(255) NOT NULL,
+    column_name VARCHAR(255),
+    check_type VARCHAR(50) NOT NULL CHECK (check_type IN ('completeness', 'accuracy', 'consistency', 'validity', 'uniqueness', 'timeliness', 'schema_compliance', 'referential_integrity', 'range', 'format', 'pattern')),
+    check_name VARCHAR(255) NOT NULL,
+    check_description TEXT,
+    check_rule JSONB NOT NULL,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    passed BOOLEAN NOT NULL,
+    quality_score DECIMAL(5, 2) CHECK (quality_score >= 0 AND quality_score <= 100),
+    records_checked INTEGER,
+    records_passed INTEGER,
+    records_failed INTEGER,
+    null_count INTEGER DEFAULT 0,
+    failure_rate DECIMAL(5, 4),
+    failure_examples JSONB,
+    severity VARCHAR(20) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    threshold_min DECIMAL(18, 4),
+    threshold_max DECIMAL(18, 4),
+    measured_value DECIMAL(18, 4),
+    expected_value DECIMAL(18, 4),
+    deviation DECIMAL(18, 4),
+    recommendation TEXT,
+    remediation_action VARCHAR(255),
+    remediation_status VARCHAR(20) CHECK (remediation_status IN ('pending', 'in_progress', 'completed', 'failed', 'skipped')),
+    remediated_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Data quality dimensions summary
+CREATE TABLE IF NOT EXISTS data_quality_summary (
+    summary_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID,
+    source_name VARCHAR(255),
+    table_name VARCHAR(255) NOT NULL,
+    snapshot_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completeness_score DECIMAL(5, 2) CHECK (completeness_score >= 0 AND completeness_score <= 100),
+    accuracy_score DECIMAL(5, 2) CHECK (accuracy_score >= 0 AND accuracy_score <= 100),
+    consistency_score DECIMAL(5, 2) CHECK (consistency_score >= 0 AND consistency_score <= 100),
+    validity_score DECIMAL(5, 2) CHECK (validity_score >= 0 AND validity_score <= 100),
+    uniqueness_score DECIMAL(5, 2) CHECK (uniqueness_score >= 0 AND uniqueness_score <= 100),
+    timeliness_score DECIMAL(5, 2) CHECK (timeliness_score >= 0 AND timeliness_score <= 100),
+    overall_quality_score DECIMAL(5, 2) CHECK (overall_quality_score >= 0 AND overall_quality_score <= 100),
+    total_records BIGINT,
+    null_records INTEGER DEFAULT 0,
+    duplicate_records INTEGER DEFAULT 0,
+    invalid_records INTEGER DEFAULT 0,
+    quality_issues_count INTEGER DEFAULT 0,
+    critical_issues_count INTEGER DEFAULT 0,
+    high_issues_count INTEGER DEFAULT 0,
+    medium_issues_count INTEGER DEFAULT 0,
+    low_issues_count INTEGER DEFAULT 0,
+    data_freshness_hours DECIMAL(10, 2),
+    last_ingestion_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Indexes for data ingestion tables
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_source ON data_ingestion_metrics(source_name, ingestion_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_source_id ON data_ingestion_metrics(source_id, ingestion_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_status ON data_ingestion_metrics(status, ingestion_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_timestamp ON data_ingestion_metrics(ingestion_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ingestion_metrics_batch ON data_ingestion_metrics(batch_id);
+
+CREATE INDEX IF NOT EXISTS idx_quality_checks_source ON data_quality_checks(source_name, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_checks_table ON data_quality_checks(table_name, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_checks_passed ON data_quality_checks(passed, severity, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_checks_type ON data_quality_checks(check_type, executed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_quality_summary_source ON data_quality_summary(source_name, snapshot_date DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_summary_table ON data_quality_summary(table_name, snapshot_date DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_summary_score ON data_quality_summary(overall_quality_score, snapshot_date DESC);
+
+-- Comments for data ingestion tables
+COMMENT ON TABLE data_ingestion_metrics IS 'Real-time and historical data ingestion pipeline metrics';
+COMMENT ON TABLE data_quality_checks IS 'Data quality validation check results with remediation tracking';
+COMMENT ON TABLE data_quality_summary IS 'Aggregated data quality scores across multiple dimensions';
+
+COMMENT ON COLUMN data_ingestion_metrics.lag_seconds IS 'Data freshness lag - time between source data creation and ingestion';
+COMMENT ON COLUMN data_ingestion_metrics.throughput_records_per_sec IS 'Ingestion rate in records per second';
+COMMENT ON COLUMN data_quality_checks.check_rule IS 'JSONB definition of the quality rule being validated';
+COMMENT ON COLUMN data_quality_checks.failure_examples IS 'Sample records that failed the quality check';
+COMMENT ON COLUMN data_quality_summary.overall_quality_score IS 'Weighted average of all quality dimension scores';
+
+-- ============================================================================
 -- END OF SPEC.md FEATURE IMPLEMENTATIONS
+-- ============================================================================
+
+-- ============================================================================
+-- DECISION TREE VISUALIZATION TABLES (GET /decisions/tree, POST /decisions/visualize, POST /decisions)
+-- ============================================================================
+
+-- Decisions master table (for MCDA analysis and decision trees)
+CREATE TABLE IF NOT EXISTS decisions (
+    decision_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_problem TEXT NOT NULL,
+    decision_context TEXT,
+    decision_method VARCHAR(50) NOT NULL CHECK (decision_method IN ('WEIGHTED_SUM', 'WEIGHTED_PRODUCT', 'TOPSIS', 'ELECTRE', 'PROMETHEE', 'AHP', 'VIKOR')),
+    recommended_alternative_id UUID,
+    expected_value DECIMAL(18, 6),
+    confidence_score DECIMAL(5, 4) CHECK (confidence_score >= 0 AND confidence_score <= 1),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'analyzing', 'completed', 'failed', 'archived')),
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    ai_analysis JSONB,
+    risk_assessment JSONB,
+    sensitivity_analysis JSONB,
+    metadata JSONB
+);
+
+-- Decision tree nodes for visualization
+CREATE TABLE IF NOT EXISTS decision_tree_nodes (
+    node_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID REFERENCES decisions(decision_id) ON DELETE CASCADE,
+    parent_node_id UUID REFERENCES decision_tree_nodes(node_id) ON DELETE CASCADE,
+    node_type VARCHAR(50) NOT NULL CHECK (node_type IN ('ROOT', 'DECISION', 'CHANCE', 'TERMINAL', 'UTILITY', 'CONDITION', 'ACTION', 'FACTOR', 'EVIDENCE', 'OUTCOME')),
+    node_label VARCHAR(255) NOT NULL,
+    node_description TEXT,
+    node_value JSONB,
+    probabilities JSONB, -- For chance nodes: {outcome: probability}
+    utility_values JSONB, -- For utility nodes: {criterion: value}
+    node_position JSONB, -- {x: number, y: number} for visualization
+    level INTEGER DEFAULT 0,
+    order_index INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Decision criteria weights (for MCDA analysis)
+CREATE TABLE IF NOT EXISTS decision_criteria (
+    criterion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID REFERENCES decisions(decision_id) ON DELETE CASCADE,
+    criterion_name VARCHAR(255) NOT NULL,
+    criterion_type VARCHAR(50) NOT NULL CHECK (criterion_type IN ('FINANCIAL_IMPACT', 'REGULATORY_COMPLIANCE', 'RISK_LEVEL', 'OPERATIONAL_IMPACT', 'STRATEGIC_ALIGNMENT', 'ETHICAL_CONSIDERATIONS', 'LEGAL_RISK', 'REPUTATIONAL_IMPACT', 'TIME_TO_IMPLEMENT', 'RESOURCE_REQUIREMENTS', 'STAKEHOLDER_IMPACT', 'MARKET_POSITION')),
+    weight DECIMAL(5, 4) NOT NULL CHECK (weight >= 0 AND weight <= 1),
+    benefit_criterion BOOLEAN DEFAULT TRUE, -- TRUE = maximize, FALSE = minimize
+    description TEXT,
+    threshold_min DECIMAL(18, 6),
+    threshold_max DECIMAL(18, 6),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Decision alternatives (options being evaluated)
+CREATE TABLE IF NOT EXISTS decision_alternatives (
+    alternative_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID REFERENCES decisions(decision_id) ON DELETE CASCADE,
+    alternative_name VARCHAR(255) NOT NULL,
+    alternative_description TEXT,
+    scores JSONB NOT NULL, -- {criterion_id: score}
+    total_score DECIMAL(18, 6),
+    normalized_score DECIMAL(18, 6),
+    ranking INTEGER,
+    selected BOOLEAN DEFAULT false,
+    advantages TEXT[],
+    disadvantages TEXT[],
+    risks TEXT[],
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Indexes for decision tree tables
+CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_method ON decisions(decision_method, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_created_by ON decisions(created_by, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_decision_tree_nodes_decision ON decision_tree_nodes(decision_id, level);
+CREATE INDEX IF NOT EXISTS idx_decision_tree_nodes_parent ON decision_tree_nodes(parent_node_id);
+CREATE INDEX IF NOT EXISTS idx_decision_tree_nodes_type ON decision_tree_nodes(decision_id, node_type);
+
+CREATE INDEX IF NOT EXISTS idx_decision_criteria_decision ON decision_criteria(decision_id);
+CREATE INDEX IF NOT EXISTS idx_decision_criteria_type ON decision_criteria(decision_id, criterion_type);
+
+CREATE INDEX IF NOT EXISTS idx_decision_alternatives_decision ON decision_alternatives(decision_id);
+CREATE INDEX IF NOT EXISTS idx_decision_alternatives_ranking ON decision_alternatives(decision_id, ranking);
+CREATE INDEX IF NOT EXISTS idx_decision_alternatives_score ON decision_alternatives(decision_id, total_score DESC);
+
+-- Comments for decision tree tables
+COMMENT ON TABLE decisions IS 'Master table for MCDA decision analyses and decision tree evaluations';
+COMMENT ON TABLE decision_tree_nodes IS 'Hierarchical decision tree structure for visualization';
+COMMENT ON TABLE decision_criteria IS 'Multi-criteria decision analysis evaluation criteria with weights';
+COMMENT ON TABLE decision_alternatives IS 'Decision alternatives/options being evaluated with scores';
+
+COMMENT ON COLUMN decisions.decision_method IS 'MCDA algorithm used: WEIGHTED_SUM, TOPSIS, ELECTRE, PROMETHEE, AHP, VIKOR';
+COMMENT ON COLUMN decisions.expected_value IS 'Expected utility value calculated from decision tree';
+COMMENT ON COLUMN decision_tree_nodes.node_type IS 'Type: ROOT, DECISION (choice), CHANCE (probability), TERMINAL (outcome), UTILITY, etc.';
+COMMENT ON COLUMN decision_tree_nodes.probabilities IS 'JSON map of {outcome: probability} for chance nodes';
+COMMENT ON COLUMN decision_criteria.benefit_criterion IS 'TRUE = maximize (benefit), FALSE = minimize (cost)';
+COMMENT ON COLUMN decision_alternatives.scores IS 'JSON map of {criterion_id: score_value} for each criterion';
+
+-- ============================================================================
+-- END OF DECISION TREE VISUALIZATION TABLES
+-- ============================================================================
+
+-- ============================================================================
+-- TRANSACTION ANALYSIS & PATTERN DETECTION TABLES (POST /transactions/{id}/analyze, GET /transactions/patterns, etc.)
+-- ============================================================================
+
+-- Transaction fraud analysis results (detailed fraud analysis for single transaction)
+CREATE TABLE IF NOT EXISTS transaction_fraud_analysis (
+    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL,
+    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    risk_score DECIMAL(5, 2) NOT NULL CHECK (risk_score >= 0 AND risk_score <= 100),
+    risk_level VARCHAR(20) NOT NULL CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
+    fraud_indicators JSONB, -- Array of indicator objects: [{indicator: string, severity: string, description: string}]
+    ml_model_used VARCHAR(100),
+    confidence DECIMAL(3, 2) CHECK (confidence >= 0 AND confidence <= 1),
+    recommendation TEXT,
+    analyzed_by VARCHAR(100), -- agent_id or user_id
+    velocity_check_passed BOOLEAN,
+    amount_check_passed BOOLEAN,
+    location_check_passed BOOLEAN,
+    device_check_passed BOOLEAN,
+    behavioral_check_passed BOOLEAN,
+    analysis_details JSONB, -- Detailed breakdown of analysis
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
+);
+
+-- Transaction patterns (detected behavioral patterns across transactions)
+CREATE TABLE IF NOT EXISTS transaction_patterns (
+    pattern_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_name VARCHAR(255) NOT NULL,
+    pattern_type VARCHAR(50) NOT NULL CHECK (pattern_type IN ('velocity', 'amount', 'geographic', 'temporal', 'network', 'sequence', 'behavioral', 'merchant', 'channel')),
+    pattern_description TEXT,
+    detection_algorithm VARCHAR(100), -- Algorithm used: statistical, ml_clustering, rule_based, time_series
+    pattern_definition JSONB NOT NULL, -- Pattern parameters and rules
+    frequency INTEGER DEFAULT 0, -- How often pattern has been detected
+    risk_association VARCHAR(20) CHECK (risk_association IN ('low', 'medium', 'high', 'critical')),
+    severity_score DECIMAL(5, 2) CHECK (severity_score >= 0 AND severity_score <= 100),
+    customer_segments JSONB, -- Which customer segments exhibit this pattern
+    first_detected TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_detected TIMESTAMP,
+    is_active BOOLEAN DEFAULT true,
+    is_anomalous BOOLEAN DEFAULT false,
+    statistical_significance DECIMAL(5, 4), -- P-value or confidence level
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    metadata JSONB
+);
+
+-- Transaction pattern occurrences (instances of patterns in specific transactions)
+CREATE TABLE IF NOT EXISTS transaction_pattern_occurrences (
+    occurrence_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_id UUID REFERENCES transaction_patterns(pattern_id) ON DELETE CASCADE,
+    transaction_id UUID,
+    customer_id VARCHAR(255),
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    confidence DECIMAL(3, 2) CHECK (confidence >= 0 AND confidence <= 1),
+    context JSONB, -- Additional context about this occurrence
+    impact_score DECIMAL(5, 2), -- Impact/risk score for this specific occurrence
+    triggered_alert BOOLEAN DEFAULT false,
+    alert_id UUID,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE SET NULL
+);
+
+-- Anomaly detection results (statistical anomalies in transactions)
+CREATE TABLE IF NOT EXISTS transaction_anomalies (
+    anomaly_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID,
+    anomaly_type VARCHAR(50) NOT NULL CHECK (anomaly_type IN ('statistical', 'behavioral', 'temporal', 'geographic', 'network', 'value', 'frequency', 'sequence')),
+    anomaly_score DECIMAL(5, 2) NOT NULL CHECK (anomaly_score >= 0 AND anomaly_score <= 100),
+    severity VARCHAR(20) CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    description TEXT,
+    baseline_value DECIMAL(18, 2),
+    observed_value DECIMAL(18, 2),
+    deviation_percent DECIMAL(8, 2),
+    detection_method VARCHAR(100), -- Algorithm used: isolation_forest, z_score, iqr, clustering
+    model_id VARCHAR(100), -- ML model identifier if ML-based
+    feature_name VARCHAR(100), -- Which feature/attribute showed anomaly
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved BOOLEAN DEFAULT false,
+    resolution_notes TEXT,
+    resolved_at TIMESTAMP,
+    resolved_by VARCHAR(100),
+    false_positive BOOLEAN,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
+);
+
+-- Transaction metrics aggregation (for GET /transactions/metrics endpoint)
+CREATE TABLE IF NOT EXISTS transaction_metrics_snapshot (
+    snapshot_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    time_period VARCHAR(20) NOT NULL CHECK (time_period IN ('hourly', 'daily', 'weekly', 'monthly')),
+    total_transactions BIGINT DEFAULT 0,
+    total_volume DECIMAL(20, 2) DEFAULT 0,
+    avg_transaction_amount DECIMAL(20, 2),
+    median_transaction_amount DECIMAL(20, 2),
+    max_transaction_amount DECIMAL(20, 2),
+    min_transaction_amount DECIMAL(20, 2),
+    flagged_transactions INTEGER DEFAULT 0,
+    high_risk_transactions INTEGER DEFAULT 0,
+    anomalies_detected INTEGER DEFAULT 0,
+    patterns_detected INTEGER DEFAULT 0,
+    unique_customers INTEGER DEFAULT 0,
+    unique_merchants INTEGER DEFAULT 0,
+    cross_border_transactions INTEGER DEFAULT 0,
+    currency_distribution JSONB, -- {currency: count}
+    channel_distribution JSONB, -- {channel: count}
+    country_distribution JSONB, -- {country: count}
+    fraud_detection_rate DECIMAL(5, 4), -- % of transactions flagged
+    false_positive_rate DECIMAL(5, 4), -- Estimated false positive rate
+    processing_time_avg_ms INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Indexes for transaction analysis tables
+CREATE INDEX IF NOT EXISTS idx_fraud_analysis_transaction ON transaction_fraud_analysis(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_analysis_risk ON transaction_fraud_analysis(risk_level, analyzed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fraud_analysis_analyzed_at ON transaction_fraud_analysis(analyzed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fraud_analysis_risk_score ON transaction_fraud_analysis(risk_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_patterns_type ON transaction_patterns(pattern_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_transaction_patterns_risk ON transaction_patterns(risk_association, severity_score DESC);
+CREATE INDEX IF NOT EXISTS idx_transaction_patterns_detected ON transaction_patterns(last_detected DESC);
+CREATE INDEX IF NOT EXISTS idx_transaction_patterns_active ON transaction_patterns(is_active, is_anomalous);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_pattern ON transaction_pattern_occurrences(pattern_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_transaction ON transaction_pattern_occurrences(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_customer ON transaction_pattern_occurrences(customer_id, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_detected ON transaction_pattern_occurrences(detected_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_anomalies_transaction ON transaction_anomalies(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_anomalies_severity ON transaction_anomalies(severity, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anomalies_type ON transaction_anomalies(anomaly_type, severity);
+CREATE INDEX IF NOT EXISTS idx_anomalies_resolved ON transaction_anomalies(resolved, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anomalies_score ON transaction_anomalies(anomaly_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_metrics_snapshot_period ON transaction_metrics_snapshot(time_period, snapshot_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_snapshot_timestamp ON transaction_metrics_snapshot(snapshot_timestamp DESC);
+
+-- Comments for transaction analysis tables
+COMMENT ON TABLE transaction_fraud_analysis IS 'Detailed fraud analysis results for individual transactions';
+COMMENT ON TABLE transaction_patterns IS 'Detected behavioral and statistical patterns across transactions';
+COMMENT ON TABLE transaction_pattern_occurrences IS 'Instances where patterns were detected in specific transactions';
+COMMENT ON TABLE transaction_anomalies IS 'Statistical and behavioral anomalies detected in transactions';
+COMMENT ON TABLE transaction_metrics_snapshot IS 'Aggregated transaction metrics for monitoring and reporting';
+
+COMMENT ON COLUMN transaction_fraud_analysis.fraud_indicators IS 'Array of fraud indicators: [{indicator, severity, description}]';
+COMMENT ON COLUMN transaction_patterns.pattern_definition IS 'JSON definition of pattern rules and parameters';
+COMMENT ON COLUMN transaction_patterns.detection_algorithm IS 'Algorithm: statistical, ml_clustering, rule_based, time_series';
+COMMENT ON COLUMN transaction_anomalies.detection_method IS 'Method: isolation_forest, z_score, iqr, clustering, etc.';
+COMMENT ON COLUMN transaction_metrics_snapshot.time_period IS 'Aggregation period: hourly, daily, weekly, monthly';
+
+-- ============================================================================
+-- END OF TRANSACTION ANALYSIS & PATTERN DETECTION TABLES
+-- ============================================================================
+
+-- ============================================================================
+-- PATTERN ANALYSIS TABLES (GET /patterns, POST /patterns/detect, etc.)
+-- Production-grade pattern detection for compliance, regulatory, and behavioral analysis
+-- ============================================================================
+
+-- Detected patterns (compliance/regulatory/transaction/behavioral patterns)
+CREATE TABLE IF NOT EXISTS detected_patterns (
+    pattern_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_name VARCHAR(255) NOT NULL,
+    pattern_type VARCHAR(50) NOT NULL CHECK (pattern_type IN ('compliance', 'regulatory', 'transaction', 'behavioral', 'temporal', 'network', 'anomaly', 'fraud', 'operational')),
+    pattern_category VARCHAR(100),
+    detection_algorithm VARCHAR(100), -- clustering, sequential, association, neural, ml_based, rule_based
+    pattern_definition JSONB NOT NULL, -- Pattern structure and rules
+    support DECIMAL(5, 4) CHECK (support >= 0 AND support <= 1), -- Frequency of pattern
+    confidence DECIMAL(5, 4) CHECK (confidence >= 0 AND confidence <= 1), -- Reliability score
+    lift DECIMAL(8, 4), -- Association strength (how much more likely than random)
+    occurrence_count INTEGER DEFAULT 0,
+    first_detected TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_detected TIMESTAMP,
+    data_source VARCHAR(255), -- Source table/system
+    sample_instances JSONB, -- Example instances of the pattern
+    is_significant BOOLEAN DEFAULT false,
+    risk_association VARCHAR(20) CHECK (risk_association IN ('low', 'medium', 'high', 'critical')),
+    severity_level VARCHAR(20) CHECK (severity_level IN ('informational', 'low', 'medium', 'high', 'critical')),
+    description TEXT,
+    recommendation TEXT, -- Action recommendation
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    metadata JSONB
+);
+
+-- Pattern detection jobs (async processing for long-running pattern detection)
+CREATE TABLE IF NOT EXISTS pattern_detection_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    data_source VARCHAR(255) NOT NULL, -- transactions, customers, regulations, etc.
+    algorithm VARCHAR(50) CHECK (algorithm IN ('clustering', 'sequential', 'association', 'neural', 'auto', 'apriori', 'fp_growth')),
+    time_range_start TIMESTAMP,
+    time_range_end TIMESTAMP,
+    parameters JSONB, -- minSupport, minConfidence, maxPatterns, etc.
+    progress DECIMAL(5, 2) DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+    records_analyzed BIGINT DEFAULT 0,
+    patterns_found INTEGER DEFAULT 0,
+    significant_patterns INTEGER DEFAULT 0,
+    validation_passed INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    error_message TEXT,
+    result_summary JSONB,
+    created_by VARCHAR(255)
+);
+
+-- Pattern predictions (future occurrence likelihood)
+CREATE TABLE IF NOT EXISTS pattern_predictions (
+    prediction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_id UUID REFERENCES detected_patterns(pattern_id) ON DELETE CASCADE,
+    prediction_timestamp TIMESTAMP NOT NULL,
+    predicted_value DECIMAL(18, 4),
+    probability DECIMAL(5, 4) CHECK (probability >= 0 AND probability <= 1),
+    confidence_interval_lower DECIMAL(18, 4),
+    confidence_interval_upper DECIMAL(18, 4),
+    prediction_horizon VARCHAR(20), -- 1h, 1d, 1w, 1m, 1q, 1y
+    model_used VARCHAR(100), -- arima, lstm, prophet, etc.
+    actual_value DECIMAL(18, 4), -- Filled in after event occurs
+    prediction_error DECIMAL(18, 4),
+    prediction_accuracy DECIMAL(5, 4),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+-- Pattern correlations (relationships between patterns)
+CREATE TABLE IF NOT EXISTS pattern_correlations (
+    correlation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_a_id UUID REFERENCES detected_patterns(pattern_id) ON DELETE CASCADE,
+    pattern_b_id UUID REFERENCES detected_patterns(pattern_id) ON DELETE CASCADE,
+    correlation_coefficient DECIMAL(5, 4) CHECK (correlation_coefficient >= -1 AND correlation_coefficient <= 1),
+    correlation_type VARCHAR(50) CHECK (correlation_type IN ('positive', 'negative', 'causal', 'coincidental', 'sequential', 'inverse')),
+    statistical_significance DECIMAL(5, 4), -- P-value
+    lag_seconds INTEGER, -- Time lag between patterns
+    co_occurrence_count INTEGER DEFAULT 0,
+    description TEXT,
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    discovered_by VARCHAR(100),
+    UNIQUE(pattern_a_id, pattern_b_id)
+);
+
+-- Pattern timeline (historical occurrences for visualization)
+CREATE TABLE IF NOT EXISTS pattern_timeline (
+    timeline_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_id UUID REFERENCES detected_patterns(pattern_id) ON DELETE CASCADE,
+    occurred_at TIMESTAMP NOT NULL,
+    occurrence_value DECIMAL(18, 4),
+    occurrence_context JSONB, -- Additional context about this occurrence
+    entity_id VARCHAR(255), -- Transaction ID, customer ID, regulation ID, etc.
+    entity_type VARCHAR(50), -- transaction, customer, regulation, agent, etc.
+    strength DECIMAL(5, 4) CHECK (strength >= 0 AND strength <= 1), -- How strongly pattern matched
+    impact_score DECIMAL(5, 2), -- Impact of this occurrence
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pattern anomalies (deviations from expected patterns)
+CREATE TABLE IF NOT EXISTS pattern_anomalies (
+    anomaly_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_id UUID REFERENCES detected_patterns(pattern_id) ON DELETE CASCADE,
+    anomaly_type VARCHAR(50) NOT NULL CHECK (anomaly_type IN ('frequency_deviation', 'value_deviation', 'timing_deviation', 'missing_occurrence', 'unexpected_occurrence', 'intensity_change')),
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    severity VARCHAR(20) CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    expected_value DECIMAL(18, 4),
+    observed_value DECIMAL(18, 4),
+    deviation_percent DECIMAL(8, 2),
+    z_score DECIMAL(8, 4), -- Statistical z-score
+    details JSONB,
+    impact_assessment TEXT,
+    investigated BOOLEAN DEFAULT false,
+    investigation_notes TEXT,
+    resolved_at TIMESTAMP,
+    resolved_by VARCHAR(100),
+    false_positive BOOLEAN
+);
+
+-- Pattern export reports (for generating pattern analysis reports)
+CREATE TABLE IF NOT EXISTS pattern_export_reports (
+    export_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    export_format VARCHAR(20) CHECK (export_format IN ('pdf', 'csv', 'json', 'excel')),
+    pattern_ids JSONB, -- Array of pattern IDs to include
+    include_visualization BOOLEAN DEFAULT true,
+    include_stats BOOLEAN DEFAULT true,
+    include_predictions BOOLEAN DEFAULT false,
+    include_timeline BOOLEAN DEFAULT false,
+    include_correlations BOOLEAN DEFAULT false,
+    file_path TEXT,
+    file_url TEXT,
+    file_size_bytes BIGINT,
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'generating', 'completed', 'failed', 'expired')),
+    generated_at TIMESTAMP,
+    expires_at TIMESTAMP,
+    download_count INTEGER DEFAULT 0,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pattern validation results (for POST /patterns/{id}/validate)
+CREATE TABLE IF NOT EXISTS pattern_validation_results (
+    validation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_id UUID REFERENCES detected_patterns(pattern_id) ON DELETE CASCADE,
+    validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    validation_method VARCHAR(50) CHECK (validation_method IN ('cross_validation', 'holdout', 'temporal', 'manual')),
+    validation_passed BOOLEAN NOT NULL,
+    accuracy DECIMAL(5, 4) CHECK (accuracy >= 0 AND accuracy <= 1),
+    precision_score DECIMAL(5, 4),
+    recall_score DECIMAL(5, 4),
+    f1_score DECIMAL(5, 4),
+    true_positives INTEGER DEFAULT 0,
+    false_positives INTEGER DEFAULT 0,
+    true_negatives INTEGER DEFAULT 0,
+    false_negatives INTEGER DEFAULT 0,
+    validation_notes TEXT,
+    validated_by VARCHAR(100)
+);
+
+-- Indexes for pattern analysis tables
+CREATE INDEX IF NOT EXISTS idx_patterns_type ON detected_patterns(pattern_type, confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_patterns_detected ON detected_patterns(last_detected DESC);
+CREATE INDEX IF NOT EXISTS idx_patterns_significant ON detected_patterns(is_significant, occurrence_count DESC);
+CREATE INDEX IF NOT EXISTS idx_patterns_risk ON detected_patterns(risk_association, severity_level);
+CREATE INDEX IF NOT EXISTS idx_patterns_category ON detected_patterns(pattern_category, pattern_type);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_jobs_status ON pattern_detection_jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_jobs_source ON pattern_detection_jobs(data_source, status);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_predictions_pattern ON pattern_predictions(pattern_id, prediction_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_predictions_timestamp ON pattern_predictions(prediction_timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_correlations_pattern_a ON pattern_correlations(pattern_a_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_correlations_pattern_b ON pattern_correlations(pattern_b_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_correlations_type ON pattern_correlations(correlation_type, correlation_coefficient);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_timeline_pattern ON pattern_timeline(pattern_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_timeline_entity ON pattern_timeline(entity_id, entity_type, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_anomalies_pattern ON pattern_anomalies(pattern_id, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_anomalies_severity ON pattern_anomalies(severity, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_anomalies_investigated ON pattern_anomalies(investigated, resolved_at);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_exports_status ON pattern_export_reports(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_validation_pattern ON pattern_validation_results(pattern_id, validated_at DESC);
+
+-- Comments for pattern analysis tables
+COMMENT ON TABLE detected_patterns IS 'Master table for detected patterns across all domains (compliance, fraud, behavioral, etc.)';
+COMMENT ON TABLE pattern_detection_jobs IS 'Async pattern detection jobs with progress tracking';
+COMMENT ON TABLE pattern_predictions IS 'Predictions for future pattern occurrences using time series models';
+COMMENT ON TABLE pattern_correlations IS 'Relationships and correlations between different patterns';
+COMMENT ON TABLE pattern_timeline IS 'Historical timeline of pattern occurrences for visualization';
+COMMENT ON TABLE pattern_anomalies IS 'Anomalies and deviations from expected pattern behavior';
+COMMENT ON TABLE pattern_export_reports IS 'Pattern analysis report exports in various formats';
+COMMENT ON TABLE pattern_validation_results IS 'Pattern validation results and accuracy metrics';
+
+COMMENT ON COLUMN detected_patterns.support IS 'Frequency: percentage of data that contains the pattern';
+COMMENT ON COLUMN detected_patterns.confidence IS 'Reliability: probability that the pattern holds true';
+COMMENT ON COLUMN detected_patterns.lift IS 'How much more likely the pattern is than random occurrence';
+COMMENT ON COLUMN pattern_correlations.correlation_coefficient IS 'Pearson correlation: -1 (inverse) to +1 (direct)';
+COMMENT ON COLUMN pattern_timeline.strength IS 'Pattern match strength: 0 (weak) to 1 (strong)';
+COMMENT ON COLUMN pattern_anomalies.z_score IS 'Statistical z-score showing deviation from normal';
+
+-- ============================================================================
+-- END OF PATTERN ANALYSIS TABLES
 -- ============================================================================

@@ -281,15 +281,8 @@ class RegulesAPIClient {
       }
     }
     
-    // Return synthetic stats based on agent type
-    return {
-      tasks_completed: Math.floor(Math.random() * 1000) + 500,
-      success_rate: Math.floor(Math.random() * 20) + 80,
-      avg_response_time_ms: Math.floor(Math.random() * 500) + 200,
-      uptime_seconds: Math.floor(Math.random() * 86400) + 3600,
-      cpu_usage: Math.floor(Math.random() * 30) + 10,
-      memory_usage: Math.floor(Math.random() * 200) + 100
-    };
+    // Production: No synthetic data - throw error if all endpoints fail
+    throw new Error(`Agent ${id} stats not available from any endpoint`);
   }
 
   async getAgentTasks(id: string): Promise<API.AgentTask[]> {
@@ -307,21 +300,8 @@ class RegulesAPIClient {
       }
     }
     
-    // Return synthetic task history
-    const tasks: API.AgentTask[] = [];
-    for (let i = 0; i < 5; i++) {
-      const now = new Date();
-      tasks.push({
-        id: `task_${Date.now()}_${i}`,
-        description: `Agent task ${i + 1}: ${['Compliance scan', 'Risk assessment', 'Data validation', 'Monitoring check', 'Report generation'][i]}`,
-        status: ['completed', 'completed', 'running', 'completed', 'failed'][i] as any,
-        created_at: new Date(now.getTime() - (i * 60 * 60 * 1000)).toISOString(),
-        completed_at: i < 4 ? new Date(now.getTime() - (i * 60 * 60 * 1000) + (30 * 60 * 1000)).toISOString() : undefined,
-        duration_ms: i < 4 ? Math.floor(Math.random() * 30000) + 5000 : undefined,
-        error_message: i === 4 ? 'Connection timeout to external service' : undefined
-      });
-    }
-    return tasks;
+    // Production: No synthetic data - throw error if all endpoints fail
+    throw new Error(`Agent ${id} tasks not available from any endpoint`);
   }
 
   async controlAgent(id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {

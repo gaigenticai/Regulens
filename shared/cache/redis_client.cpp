@@ -33,9 +33,8 @@ RedisConnectionWrapper::~RedisConnectionWrapper() {
 bool RedisConnectionWrapper::connect() {
     try {
         // Production Redis connection using hiredis
-        // Requires hiredis library to be installed and linked
-        auto redis_context = redisConnect(connection_config_.host.c_str(), connection_config_.port);
-        
+        auto redis_context = redisConnect(config_.host.c_str(), config_.port);
+
         if (!redis_context || redis_context->err) {
             std::string error_msg = "Failed to connect to Redis: ";
             if (redis_context) {
@@ -46,16 +45,18 @@ bool RedisConnectionWrapper::connect() {
             }
             throw std::runtime_error(error_msg);
         }
-        
+
         // Set connection timeout
-        struct timeval timeout = { connection_config_.connect_timeout_ms / 1000, 
-                                   (connection_config_.connect_timeout_ms % 1000) * 1000 };
+        struct timeval timeout = {
+            static_cast<long>(config_.connect_timeout.count() / 1000),
+            static_cast<long>((config_.connect_timeout.count() % 1000) * 1000)
+        };
         redisSetTimeout(redis_context, timeout);
-        
+
         // Authenticate if password is provided
-        if (!connection_config_.password.empty()) {
+        if (!config_.password.empty()) {
             redisReply* reply = static_cast<redisReply*>(
-                redisCommand(redis_context, "AUTH %s", connection_config_.password.c_str()));
+                redisCommand(redis_context, "AUTH %s", config_.password.c_str()));
             if (!reply || reply->type == REDIS_REPLY_ERROR) {
                 std::string error_msg = "Redis authentication failed";
                 if (reply) {
@@ -67,11 +68,11 @@ bool RedisConnectionWrapper::connect() {
             }
             freeReplyObject(reply);
         }
-        
+
         // Select database
-        if (connection_config_.database > 0) {
+        if (config_.database > 0) {
             redisReply* reply = static_cast<redisReply*>(
-                redisCommand(redis_context, "SELECT %d", connection_config_.database));
+                redisCommand(redis_context, "SELECT %d", config_.database));
             if (!reply || reply->type == REDIS_REPLY_ERROR) {
                 std::string error_msg = "Failed to select Redis database";
                 if (reply) {
@@ -82,7 +83,7 @@ bool RedisConnectionWrapper::connect() {
             }
             freeReplyObject(reply);
         }
-        
+
         connection_ = redis_context;
         creation_time_ = std::chrono::system_clock::now();
         last_activity_ = creation_time_;
@@ -106,7 +107,7 @@ bool RedisConnectionWrapper::connect() {
 
 void RedisConnectionWrapper::disconnect() {
     if (connection_) {
-        // In production: redisFree(connection_);
+        redisFree(connection_);
         connection_ = nullptr;
 
         if (logger_) {
@@ -131,10 +132,93 @@ bool RedisConnectionWrapper::is_connected() const {
 
 RedisResult RedisConnectionWrapper::execute_command(const std::string& command,
                                                    const std::vector<std::string>& args) {
-    // PRODUCTION REQUIREMENT: Redis command execution requires proper hiredis integration
-    // Cannot use simulation code per rule.mdc requirements
-    throw std::runtime_error("Redis command execution requires proper hiredis integration. "
-                           "This cannot use simulation code - must implement real Redis connectivity.");
+    if (!connection_) {
+        return RedisResult(false, "Not connected to Redis");
+    }
+
+    update_activity();
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    try {
+        // Build command with arguments for hiredis
+        std::vector<const char*> argv;
+        std::vector<size_t> argvlen;
+
+        argv.push_back(command.c_str());
+        argvlen.push_back(command.length());
+
+        for (const auto& arg : args) {
+            argv.push_back(arg.c_str());
+            argvlen.push_back(arg.length());
+        }
+
+        // Execute command using hiredis
+        redisReply* reply = static_cast<redisReply*>(
+            redisCommandArgv(connection_, argv.size(), argv.data(), argvlen.data()));
+
+        if (!reply) {
+            auto end_time = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+            return RedisResult(false, connection_->errstr, duration);
+        }
+
+        // Process reply based on type
+        RedisResult result(true, "", std::chrono::milliseconds(0));
+
+        switch (reply->type) {
+            case REDIS_REPLY_STRING:
+                result.value = std::string(reply->str, reply->len);
+                break;
+
+            case REDIS_REPLY_ARRAY:
+                result.array_value = std::vector<std::string>();
+                for (size_t i = 0; i < reply->elements; i++) {
+                    if (reply->element[i]->type == REDIS_REPLY_STRING) {
+                        result.array_value->push_back(
+                            std::string(reply->element[i]->str, reply->element[i]->len));
+                    } else if (reply->element[i]->type == REDIS_REPLY_NIL) {
+                        result.array_value->push_back("");
+                    }
+                }
+                break;
+
+            case REDIS_REPLY_INTEGER:
+                result.integer_value = reply->integer;
+                break;
+
+            case REDIS_REPLY_NIL:
+                result.success = true;
+                result.value = std::nullopt;
+                break;
+
+            case REDIS_REPLY_STATUS:
+                result.value = std::string(reply->str, reply->len);
+                break;
+
+            case REDIS_REPLY_ERROR:
+                result.success = false;
+                result.error_message = std::string(reply->str, reply->len);
+                break;
+
+            default:
+                result.success = false;
+                result.error_message = "Unknown reply type";
+                break;
+        }
+
+        freeReplyObject(reply);
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        result.execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+        return result;
+
+    } catch (const std::exception& e) {
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        return RedisResult(false, std::string("Exception: ") + e.what(), duration);
+    }
 }
 
 void RedisConnectionWrapper::update_activity() {
@@ -355,21 +439,56 @@ void RedisClient::set_metrics_collector(std::shared_ptr<PrometheusMetricsCollect
 }
 
 bool RedisClient::initialize() {
-    // PRODUCTION REQUIREMENT: Redis client requires proper hiredis integration
-    // Per production rule #1: No simulation, mock, or placeholder code allowed in production
-
-    if (logger_) {
-        logger_->error("Redis client initialization failed - hiredis integration required",
-                      "RedisClient", "initialize",
-                      {{"error", "PRODUCTION_REQUIREMENT: Redis requires hiredis library integration"}});
+    if (initialized_) {
+        if (logger_) {
+            logger_->warn("Redis client already initialized", "RedisClient", "initialize");
+        }
+        return true;
     }
 
-    // This will cause the application to fail fast rather than silently use incomplete implementation
-    throw std::runtime_error("Redis client requires proper hiredis integration for production use. "
-                           "Cannot use incomplete implementation per production requirements. "
-                           "Please integrate hiredis library and implement real Redis connectivity.");
+    try {
+        // Load Redis configuration from environment
+        load_config();
 
-    return false; // Never reached, but required for compilation
+        // Initialize connection pool with production hiredis connections
+        connection_pool_ = std::make_shared<RedisConnectionPool>(redis_config_, logger_);
+
+        if (!connection_pool_->initialize()) {
+            if (logger_) {
+                logger_->error("Failed to initialize Redis connection pool",
+                              "RedisClient", "initialize");
+            }
+            return false;
+        }
+
+        initialized_ = true;
+
+        if (logger_) {
+            logger_->info("Redis client initialized successfully",
+                         "RedisClient", "initialize",
+                         {{"host", redis_config_.host},
+                          {"port", std::to_string(redis_config_.port)},
+                          {"database", std::to_string(redis_config_.database)}});
+        }
+
+        // Perform initial health check
+        if (!ping()) {
+            if (logger_) {
+                logger_->warn("Redis client initialized but initial PING failed",
+                             "RedisClient", "initialize");
+            }
+        }
+
+        return true;
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->error("Exception during Redis client initialization: " + std::string(e.what()),
+                          "RedisClient", "initialize");
+        }
+        initialized_ = false;
+        return false;
+    }
 }
 
 void RedisClient::shutdown() {
@@ -516,9 +635,32 @@ void RedisClient::load_config() {
 }
 
 RedisResult RedisClient::get(const std::string& key) {
-    // PRODUCTION REQUIREMENT: Redis GET operation requires hiredis integration
-    throw std::runtime_error("Redis GET operation requires proper hiredis integration. "
-                           "Cannot use simulation code per rule.mdc requirements.");
+    auto result = execute_with_connection([key](std::shared_ptr<RedisConnectionWrapper> conn) {
+        return conn->execute_command("GET", {key});
+    });
+
+    // Record metrics
+    if (metrics_collector_) {
+        std::string cache_type = "unknown";
+        if (key.find("llm:") != std::string::npos) cache_type = "llm";
+        else if (key.find("regulatory:") != std::string::npos) cache_type = "regulatory";
+        else if (key.find("session:") != std::string::npos) cache_type = "session";
+        else if (key.find("temp:") != std::string::npos) cache_type = "temp";
+        else if (key.find("preferences:") != std::string::npos) cache_type = "preferences";
+
+        metrics_collector_->get_redis_collector().record_redis_operation(
+            "GET", cache_type, result.success,
+            std::chrono::duration_cast<std::chrono::milliseconds>(result.execution_time).count());
+    }
+
+    // Update cache hit/miss stats
+    if (result.success && result.value) {
+        cache_hits_++;
+    } else {
+        cache_misses_++;
+    }
+
+    return result;
 }
 
 RedisResult RedisClient::set(const std::string& key, const std::string& value,
@@ -617,10 +759,75 @@ RedisResult RedisClient::publish(const std::string& channel, const std::string& 
 RedisResult RedisClient::subscribe(const std::vector<std::string>& channels,
                                  std::function<void(const std::string&, const std::string&)> message_callback,
                                  int timeout_seconds) {
-    // PRODUCTION REQUIREMENT: Redis pub/sub requires proper hiredis integration
-    // Cannot use simulation - must implement real Redis pub/sub functionality
-    throw std::runtime_error("Redis pub/sub functionality requires proper hiredis integration. "
-                           "This cannot be simulated per rule.mdc requirements.");
+    if (!initialized_ || !connection_pool_) {
+        return RedisResult(false, "Redis client not initialized");
+    }
+
+    try {
+        // Get dedicated connection for subscription (pub/sub requires exclusive connection)
+        auto connection = connection_pool_->get_connection();
+        if (!connection) {
+            return RedisResult(false, "No available Redis connections for subscription");
+        }
+
+        // Subscribe to channels
+        for (const auto& channel : channels) {
+            auto result = connection->execute_command("SUBSCRIBE", {channel});
+            if (!result.success) {
+                connection_pool_->return_connection(connection);
+                return RedisResult(false, "Failed to subscribe to channel " + channel + ": " + result.error_message);
+            }
+        }
+
+        // Listen for messages with timeout
+        auto start_time = std::chrono::high_resolution_clock::now();
+        auto timeout_duration = std::chrono::seconds(timeout_seconds);
+
+        while (true) {
+            // Check timeout
+            auto now = std::chrono::high_resolution_clock::now();
+            if (timeout_seconds > 0 && (now - start_time) >= timeout_duration) {
+                break;
+            }
+
+            // Receive message (non-blocking with short timeout)
+            redisReply* reply;
+            if (redisGetReply(connection->get_connection(), reinterpret_cast<void**>(&reply)) != REDIS_OK) {
+                break;
+            }
+
+            if (!reply) continue;
+
+            // Process message
+            if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 3) {
+                std::string message_type(reply->element[0]->str, reply->element[0]->len);
+
+                if (message_type == "message") {
+                    std::string channel(reply->element[1]->str, reply->element[1]->len);
+                    std::string message(reply->element[2]->str, reply->element[2]->len);
+
+                    // Invoke callback
+                    if (message_callback) {
+                        message_callback(channel, message);
+                    }
+                }
+            }
+
+            freeReplyObject(reply);
+        }
+
+        // Unsubscribe and return connection to pool
+        for (const auto& channel : channels) {
+            connection->execute_command("UNSUBSCRIBE", {channel});
+        }
+
+        connection_pool_->return_connection(connection);
+
+        return RedisResult(true, "Subscription completed");
+
+    } catch (const std::exception& e) {
+        return RedisResult(false, "Exception during subscription: " + std::string(e.what()));
+    }
 }
 
 RedisResult RedisClient::eval(const std::string& script,

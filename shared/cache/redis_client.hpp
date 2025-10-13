@@ -33,14 +33,17 @@
 #include "../logging/structured_logger.hpp"
 #include "../error_handler.hpp"
 
+// Production Redis integration using hiredis
+#include <hiredis/hiredis.h>
+
 namespace regulens {
 
 // Forward declarations
 class PrometheusMetricsCollector;
 
-// Forward declarations for Redis types (would be from hiredis or similar)
-struct RedisConnection;
-struct RedisReply;
+// Use hiredis types directly for production
+using RedisConnection = redisContext;
+using RedisReply = redisReply;
 
 /**
  * @brief Redis connection configuration
@@ -128,6 +131,12 @@ public:
      * @return Time of last command execution
      */
     std::chrono::system_clock::time_point get_last_activity() const { return last_activity_; }
+
+    /**
+     * @brief Get underlying Redis connection
+     * @return Pointer to redisContext
+     */
+    RedisConnection* get_connection() const { return connection_; }
 
 private:
     RedisConfig config_;

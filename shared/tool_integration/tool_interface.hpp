@@ -249,6 +249,16 @@ public:
     static std::unique_ptr<Tool> create_slack_tool(const ToolConfig& config,
                                                   StructuredLogger* logger);
 
+    // Tool category factories
+    static std::unique_ptr<Tool> create_analytics_tool(const ToolConfig& config,
+                                                      StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_workflow_tool(const ToolConfig& config,
+                                                     StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_security_tool(const ToolConfig& config,
+                                                     StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_monitoring_tool(const ToolConfig& config,
+                                                       StructuredLogger* logger);
+
 private:
     ToolFactory() = delete; // Static factory only
 };

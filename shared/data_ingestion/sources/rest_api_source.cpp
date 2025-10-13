@@ -918,7 +918,7 @@ void RESTAPISource::refresh_auth_token() {
         // Fallback to full re-authentication
         authenticate_oauth2();
         
-    } else if (api_config_.auth_type == AuthenticationType::JWT) {
+    } else if (api_config_.auth_type == AuthenticationType::JWT_BEARER) {
         // For JWT, check if token is expired and re-authenticate
         auto now = std::chrono::system_clock::now();
         

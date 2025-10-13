@@ -1401,6 +1401,70 @@ double ConversationMemory::calculate_conversation_confidence(const nlohmann::jso
     return confidence;
 }
 
+nlohmann::json ConversationMemory::get_tier_statistics() const {
+    // Production-grade tier statistics with detailed memory distribution analysis
+    nlohmann::json stats = nlohmann::json::object();
+    
+    std::lock_guard<std::mutex> lock(memory_mutex_);
+    
+    // Count memories by type (as proxy for tier)
+    std::unordered_map<int, size_t> type_counts;
+    std::unordered_map<int, double> type_total_importance;
+    
+    for (const auto& [id, entry] : memory_cache_) {
+        int type_val = static_cast<int>(entry.memory_type);
+        type_counts[type_val]++;
+        type_total_importance[type_val] += static_cast<double>(entry.importance_level);
+    }
+    
+    for (const auto& [type_val, count] : type_counts) {
+        std::string type_name;
+        if (type_val == static_cast<int>(MemoryType::EPISODIC)) type_name = "episodic";
+        else if (type_val == static_cast<int>(MemoryType::SEMANTIC)) type_name = "semantic";
+        else if (type_val == static_cast<int>(MemoryType::PROCEDURAL)) type_name = "procedural";
+        else if (type_val == static_cast<int>(MemoryType::WORKING)) type_name = "working";
+        else type_name = "unknown";
+        
+        stats[type_name] = {
+            {"count", count},
+            {"avg_importance", count > 0 ? type_total_importance[type_val] / count : 0.0}
+        };
+    }
+    
+    return stats;
+}
+
+nlohmann::json ConversationMemory::analyze_access_patterns() const {
+    // Production-grade access pattern analysis for memory optimization
+    nlohmann::json analysis = nlohmann::json::object();
+    
+    std::lock_guard<std::mutex> lock(memory_mutex_);
+    
+    // Analyze access frequency and recency
+    auto now = std::chrono::system_clock::now();
+    size_t recently_accessed = 0;
+    size_t frequently_accessed = 0;
+    
+    for (const auto& [id, entry] : memory_cache_) {
+        auto time_since_access = std::chrono::duration_cast<std::chrono::hours>(
+            now - entry.last_accessed).count();
+        
+        if (time_since_access < 24) {
+            recently_accessed++;
+        }
+        if (entry.access_count > 5) {
+            frequently_accessed++;
+        }
+    }
+    
+    analysis["recently_accessed_count"] = recently_accessed;
+    analysis["frequently_accessed_count"] = frequently_accessed;
+    analysis["total_memories"] = memory_cache_.size();
+    analysis["access_analysis_timestamp"] = std::chrono::system_clock::to_time_t(now);
+    
+    return analysis;
+}
+
 // Factory function
 
 std::shared_ptr<ConversationMemory> create_conversation_memory(

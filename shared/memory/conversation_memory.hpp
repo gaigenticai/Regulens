@@ -285,6 +285,18 @@ public:
                                   const std::optional<std::chrono::system_clock::time_point>& start_time = std::nullopt,
                                   const std::optional<std::chrono::system_clock::time_point>& end_time = std::nullopt);
 
+    /**
+     * @brief Get memory tier statistics (working, episodic, semantic)
+     * @return JSON with statistics per tier
+     */
+    nlohmann::json get_tier_statistics() const;
+
+    /**
+     * @brief Analyze memory access patterns for optimization
+     * @return JSON with access pattern analysis
+     */
+    nlohmann::json analyze_access_patterns() const;
+
 private:
     std::shared_ptr<ConfigurationManager> config_;
     std::shared_ptr<EmbeddingsClient> embeddings_client_;

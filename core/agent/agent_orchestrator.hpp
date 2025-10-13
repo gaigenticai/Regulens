@@ -19,10 +19,54 @@
 #include "../shared/models/compliance_event.hpp"
 #include "../shared/models/agent_decision.hpp"
 #include "../shared/models/agent_state.hpp"
-#include "agent_communication.hpp"  // Provides MessageType, AgentMessage, AgentCommCapabilities
-#include "consensus_engine.hpp"      // Provides ConsensusAlgorithm, ConsensusResult
+// Note: agent_communication.hpp and consensus_engine.hpp not yet implemented
+// Defining types inline for compilation
 
 namespace regulens {
+
+// Production-grade type definitions for inter-agent communication
+enum class MessageType {
+    TASK_ASSIGNMENT,
+    TASK_RESULT,
+    AGENT_QUERY,
+    AGENT_RESPONSE,
+    CONSENSUS_REQUEST,
+    CONSENSUS_VOTE,
+    STATUS_UPDATE,
+    ERROR_NOTIFICATION
+};
+
+struct AgentMessage {
+    std::string message_id;
+    std::string sender_agent;
+    std::string receiver_agent;
+    MessageType type;
+    nlohmann::json payload;
+    std::chrono::system_clock::time_point timestamp;
+    int priority{0};
+};
+
+struct AgentCommCapabilities {
+    std::vector<std::string> supported_tasks;
+    std::vector<MessageType> supported_message_types;
+    bool can_participate_in_consensus{true};
+    int max_concurrent_tasks{5};
+};
+
+enum class ConsensusAlgorithm {
+    MAJORITY_VOTE,
+    WEIGHTED_VOTE,
+    RAFT,
+    BYZANTINE_FAULT_TOLERANT
+};
+
+struct ConsensusResult {
+    bool consensus_reached{false};
+    nlohmann::json agreed_decision;
+    std::vector<std::string> participating_agents;
+    int total_votes{0};
+    int agreeing_votes{0};
+};
 
 // Forward declarations
 class ComplianceAgent;

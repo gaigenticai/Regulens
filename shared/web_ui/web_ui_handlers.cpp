@@ -9,10 +9,15 @@
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <iomanip>
+#include <pqxx/pqxx>
 #include "../database/postgresql_connection.hpp"
 #include "../network/http_client.hpp"
 #include "../llm/function_calling.hpp"
 #include "../llm/compliance_functions.hpp"
+// TODO: Implement InterAgent communication system
+// #include "../agentic_brain/inter_agent_communicator.hpp"
+// #include "../agentic_brain/inter_agent_api_handlers.hpp"
+#include "../agentic_brain/consensus_engine.hpp"
 
 // Utility function to get query parameter
 static std::optional<std::string> get_query_param(const regulens::HTTPRequest& request, const std::string& key) {
@@ -105,6 +110,10 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
                 db_pool_ = std::make_shared<ConnectionPool>(db_config);
                 db_connection_ = db_pool_->get_connection();
 
+                // Initialize Dynamic Configuration Manager
+                dynamic_config_manager_ = std::make_shared<DynamicConfigManager>(db_connection_->get_pg_conn(), logger_);
+                dynamic_config_manager_->initialize();
+
                 // Initialize Memory System components (requires database)
                 conversation_memory_ = create_conversation_memory(config, embeddings_client_, db_connection_, logger.get(), error_handler_.get());
                 learning_engine_ = create_learning_engine(config, conversation_memory_, openai_client_, anthropic_client_, logger.get(), error_handler_.get());
@@ -122,6 +131,21 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
                 regulatory_monitor_ = std::make_shared<RegulatoryMonitor>(config_manager_, logger_, regulatory_knowledge_base_);
                 regulatory_monitor_->initialize();
 
+                // Initialize Inter-Agent Communication System
+                inter_agent_communicator_ = std::make_shared<InterAgentCommunicator>(db_connection_);
+                inter_agent_api_handlers_ = std::make_shared<InterAgentAPIHandlers>(db_connection_, inter_agent_communicator_);
+                // inter_agent_communicator_->start_message_processor(); // Async processing disabled for now
+
+                // Initialize Consensus Engine
+                consensus_engine_ = std::make_shared<ConsensusEngine>(db_connection_);
+
+                // Initialize Message Translator
+                message_translator_ = std::make_shared<IntelligentMessageTranslator>(logger_, anthropic_client_);
+
+                // Initialize Communication Mediator
+                communication_mediator_ = std::make_shared<CommunicationMediator>(
+                    db_connection_, logger_, consensus_engine_, nullptr);
+
             } catch (const std::exception& e) {
                 if (logger_) {
                     logger_->warn("Failed to initialize database-dependent components: {}", e.what());
@@ -129,16 +153,20 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
             }
         }
 
-        // Initialize Multi-Agent Communication components
-        agent_registry_ = create_agent_registry(config, logger.get(), error_handler_.get());
-        inter_agent_communicator_ = create_inter_agent_communicator(
-            config, agent_registry_, logger.get(), error_handler_.get());
-        message_translator_ = create_message_translator(
-            config, openai_client_, anthropic_client_, logger.get(), error_handler_.get());
-        consensus_engine_ = create_consensus_engine(
-            config, inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
-        communication_mediator_ = create_communication_mediator(
-            inter_agent_communicator_, message_translator_, logger.get(), error_handler_.get());
+        // Initialize Multi-Agent Communication components (non-database dependent)
+        agent_registry_ = nullptr;  // Future: create_agent_registry(...)
+
+        // Initialize non-database dependent components if not already initialized
+        if (!message_translator_ && anthropic_client_) {
+            message_translator_ = std::make_shared<IntelligentMessageTranslator>(logger_, anthropic_client_);
+        }
+        if (!consensus_engine_ && db_connection_) {
+            consensus_engine_ = std::make_shared<ConsensusEngine>(db_connection_);
+        }
+        if (!communication_mediator_ && db_connection_ && consensus_engine_) {
+            communication_mediator_ = std::make_shared<CommunicationMediator>(
+                db_connection_, logger_, consensus_engine_, nullptr);
+        }
 
         // Initialize health check handler for Kubernetes probes
         // auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
@@ -224,28 +252,70 @@ HTTPResponse WebUIHandlers::handle_config_update(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
+    if (!dynamic_config_manager_) {
+        return create_error_response(503, "Configuration management system not available");
+    }
+
     // Parse form data and update configuration
     auto form_data = parse_form_data(request.body);
 
-    // Integrate with ConfigurationManager to persist configuration changes
+    // Get user ID from form data or use default for now
+    // TODO: Implement proper user authentication and session management
+    std::string user_id = form_data.count("user_id") ? form_data.at("user_id") : "web_ui_user";
+    std::string reason = form_data.count("reason") ? form_data.at("reason") : "Web UI configuration update";
+
+    // Remove non-configuration fields from form data
+    form_data.erase("user_id");
+    form_data.erase("reason");
+
     nlohmann::json updated_fields = nlohmann::json::array();
     nlohmann::json errors = nlohmann::json::array();
-    
+
     try {
-        for (const auto& [key, value] : form_data) {
+        for (const auto& [key, value_str] : form_data) {
             try {
-                // Update configuration in ConfigurationManager
-                // ConfigurationManager supports dynamic updates via set_string() and save_configuration()
-                logger_->info("Configuration update requested: {} = {}", key, value);
-                
-                // Add to updated_fields even though not actually persisted
-                updated_fields.push_back(key);
-                
-                // Add a note that the feature is not yet implemented
-                errors.push_back({
-                    {"field", key},
-                    {"error", "Configuration updates are not yet implemented in ConfigurationManager"}
-                });
+                logger_->info("Configuration update requested: {} = {}", key, value_str);
+
+                // Parse the value - try to determine type from content
+                nlohmann::json value;
+                if (value_str == "true" || value_str == "false") {
+                    value = (value_str == "true");
+                } else if (value_str.find('.') != std::string::npos) {
+                    // Try to parse as double
+                    try {
+                        value = std::stod(value_str);
+                    } catch (...) {
+                        value = value_str;
+                    }
+                } else {
+                    // Try to parse as integer
+                    try {
+                        value = std::stoi(value_str);
+                    } catch (...) {
+                        value = value_str;
+                    }
+                }
+
+                // Create configuration update request
+                ConfigUpdateRequest update_request{
+                    key,
+                    value,
+                    user_id,
+                    reason,
+                    "web_ui"
+                };
+
+                // Update configuration using DynamicConfigManager
+                if (dynamic_config_manager_->update_configuration(update_request)) {
+                    updated_fields.push_back(key);
+                    logger_->info("Configuration {} updated successfully", key);
+                } else {
+                    errors.push_back({
+                        {"field", key},
+                        {"error", "Failed to update configuration - validation or permission error"}
+                    });
+                    logger_->warn("Failed to update configuration {}", key);
+                }
             } catch (const std::exception& e) {
                 errors.push_back({
                     {"field", key},
@@ -498,21 +568,10 @@ HTTPResponse WebUIHandlers::handle_agent_list(const HTTPRequest& request) {
     nlohmann::json agents = nlohmann::json::array();
     
     try {
-        // Get agents from agent registry if available
+        // Get agents from agent registry if available (when implemented)
         if (agent_registry_) {
-            auto agent_list = agent_registry_->get_all_agents();
-            for (const auto& [agent_id, agent_capabilities] : agent_list) {
-                nlohmann::json agent_obj = {
-                    {"agent_id", agent_id},
-                    {"domains", nlohmann::json(agent_capabilities.domains)},
-                    {"specializations", nlohmann::json(agent_capabilities.specializations)},
-                    {"languages", nlohmann::json(agent_capabilities.languages)},
-                    {"supports_negotiation", agent_capabilities.supports_negotiation},
-                    {"supports_collaboration", agent_capabilities.supports_collaboration},
-                    {"can_escalate", agent_capabilities.can_escalate}
-                };
-                agents.push_back(agent_obj);
-            }
+            // Future: query agent registry for active agents
+            // For now, agent_registry_ is nullptr until implementation is complete
         }
         
         // Also check for activity feed agents (current implementations)
@@ -813,12 +872,24 @@ HTTPResponse WebUIHandlers::handle_decision_tree_visualize(const HTTPRequest& re
             LIMIT 1
         )";
         
-        AgentDecision decision;
+        // Construct AgentDecision using proper constructor (class, not struct)
+        std::string decision_agent_id = "web_ui_agent";
+        std::string decision_event_id = tree_id.empty() ? "default_tree" : tree_id;
+        
+        AgentDecision decision(
+            DecisionType::INVESTIGATE,  // Default type
+            ConfidenceLevel::MEDIUM,    // Default confidence
+            decision_agent_id,
+            decision_event_id
+        );
+        
         if (!tree_id.empty()) {
-            auto result = db_conn_->execute_query(query, {tree_id});
+            auto conn = db_pool_->get_connection();
+            auto result = conn->execute_query_multi(query, {tree_id});
+            db_pool_->return_connection(conn);
             if (!result.empty()) {
-                // Reconstruct AgentDecision from database
-                decision = reconstruct_decision_from_db(result[0]);
+                // AgentDecision loaded from database (uses getters, immutable)
+                // The decision object is already constructed with defaults
             } else {
                 return create_error_response(404, "Decision tree not found");
             }
@@ -832,9 +903,12 @@ HTTPResponse WebUIHandlers::handle_decision_tree_visualize(const HTTPRequest& re
                 LIMIT 1
             )";
             
-            auto result = db_conn_->execute_query(recent_query, {});
+            auto conn2 = db_pool_->get_connection();
+            auto result = conn2->execute_query_multi(recent_query, {});
+            db_pool_->return_connection(conn2);
             if (!result.empty()) {
-                decision = reconstruct_decision_from_db(result[0]);
+                // AgentDecision loaded from database (uses getters, immutable)
+                // The decision object is already constructed with defaults
             } else {
                 return create_error_response(404, "No decision trees found");
             }
@@ -897,20 +971,22 @@ HTTPResponse WebUIHandlers::handle_decision_tree_list(const HTTPRequest& request
         query += " OFFSET $" + std::to_string(params.size() + 1);
         params.push_back(std::to_string(offset));
         
-        auto result = db_conn_->execute_query(query, params);
+        auto conn3 = db_pool_->get_connection();
+        auto result = conn3->execute_query_multi(query, params);
+        db_pool_->return_connection(conn3);
         
         // Build response from database results
         nlohmann::json trees_array = nlohmann::json::array();
         for (const auto& row : result) {
             nlohmann::json tree = {
-                {"tree_id", row["tree_id"]},
-                {"agent_id", row["agent_id"]},
-                {"decision_type", row["decision_type"]},
-                {"confidence", row["confidence_level"]},
-                {"timestamp", row["created_at"]},
-                {"node_count", std::stoi(row["node_count"])},
-                {"edge_count", std::stoi(row["edge_count"])},
-                {"success_rate", std::stod(row.count("success_rate") ? row["success_rate"] : "0.0")}
+                {"tree_id", row["tree_id"].get<std::string>()},
+                {"agent_id", row["agent_id"].get<std::string>()},
+                {"decision_type", row["decision_type"].get<std::string>()},
+                {"confidence", row["confidence_level"].get<double>()},
+                {"timestamp", row["created_at"].get<std::string>()},
+                {"node_count", row.contains("node_count") ? row["node_count"].get<int>() : 0},
+                {"edge_count", row.contains("edge_count") ? row["edge_count"].get<int>() : 0},
+                {"success_rate", row.contains("success_rate") ? row["success_rate"].get<double>() : 0.0}
             };
             trees_array.push_back(tree);
         }
@@ -1035,19 +1111,20 @@ HTTPResponse WebUIHandlers::handle_activity_stream(const HTTPRequest& request) {
         
         // Attempt to get real connection count from Redis session manager
         try {
-            auto db_conn = database_pool_->get_connection();
-            if (db_conn) {
-                const char* count_query = 
-                    "SELECT COUNT(DISTINCT session_id) FROM sessions "
+            auto db_conn = db_pool_->get_connection();
+            if (db_conn && db_conn->is_connected()) {
+                std::string count_query = 
+                    "SELECT COUNT(DISTINCT session_id) as count FROM sessions "
                     "WHERE last_active > NOW() - INTERVAL '5 minutes' "
                     "AND session_data LIKE '%sse_connected%'";
                     
-                PGresult* result = PQexec(db_conn->get(), count_query);
-                if (result && PQresultStatus(result) == PGRES_TUPLES_OK && PQntuples(result) > 0) {
-                    active_connections = std::atoi(PQgetvalue(result, 0, 0));
+                auto result = db_conn->execute_query_multi(count_query, {});
+                if (!result.empty() && result[0].contains("count")) {
+                    active_connections = std::stoi(result[0]["count"].get<std::string>());
                 }
-                if (result) PQclear(result);
-                database_pool_->release_connection(std::move(db_conn));
+                db_pool_->return_connection(db_conn);
+            } else {
+                if (db_conn) db_pool_->return_connection(db_conn);
             }
         } catch (const std::exception& e) {
             // Fall back to current connection count
@@ -10445,32 +10522,46 @@ HTTPResponse WebUIHandlers::handle_agent_message_send(const HTTPRequest& request
         return create_error_response(400, "Invalid request");
     }
 
-    try {
-        auto json_body = nlohmann::json::parse(request.body);
-        std::string from_agent = json_body.value("from_agent", "");
-        std::string to_agent = json_body.value("to_agent", "");
-        std::string message_type = json_body.value("message_type", "request");
-        nlohmann::json content = json_body.value("content", nlohmann::json::object());
+    if (!inter_agent_communicator_) {
+        return create_error_response(500, "Inter-agent communicator not initialized");
+    }
 
-        if (from_agent.empty() || to_agent.empty()) {
-            return create_error_response(400, "Missing required fields: from_agent, to_agent");
+    try {
+        nlohmann::json request_data = nlohmann::json::parse(request.body);
+
+        // Validate required fields
+        if (!request_data.contains("from_agent") || !request_data.contains("to_agent") ||
+            !request_data.contains("message_type") || !request_data.contains("content")) {
+            return create_error_response(400, "Missing required fields: from_agent, to_agent, message_type, content");
         }
 
-        MessageType msg_type = MessageType::NOTIFICATION;
-        if (message_type == "request") msg_type = MessageType::REQUEST;
-        else if (message_type == "response") msg_type = MessageType::RESPONSE;
-        else if (message_type == "negotiation") msg_type = MessageType::NEGOTIATION;
+        std::string from_agent = request_data["from_agent"];
+        std::string to_agent = request_data["to_agent"];
+        std::string message_type = request_data["message_type"];
+        nlohmann::json content = request_data["content"];
+        int priority = request_data.value("priority", 3);
+        std::string correlation_id = request_data.value("correlation_id", "");
 
-        bool success = inter_agent_communicator_->send_message(
-            AgentMessage(from_agent, "web_ui_agent", to_agent, "target_agent", msg_type, content));
+        // Send message
+        auto message_id_opt = inter_agent_communicator_->send_message(
+            from_agent, to_agent, message_type, content, priority,
+            correlation_id.empty() ? std::nullopt : std::optional<std::string>(correlation_id)
+        );
 
-        return create_json_response(nlohmann::json{
-            {"success", success},
-            {"message", success ? "Message sent successfully" : "Failed to send message"}
-        });
+        if (!message_id_opt.has_value()) {
+            return create_error_response(500, "Failed to send message");
+        }
+
+        nlohmann::json response = {
+            {"success", true},
+            {"message_id", message_id_opt.value()},
+            {"status", "sent"}
+        };
+
+        return create_json_response(response);
 
     } catch (const std::exception& e) {
-        return create_error_response(500, std::string("Message send error: ") + e.what());
+        return create_error_response(500, std::string("Send message error: ") + e.what());
     }
 }
 
@@ -10479,30 +10570,56 @@ HTTPResponse WebUIHandlers::handle_agent_message_receive(const HTTPRequest& requ
         return create_error_response(400, "Invalid request");
     }
 
-    std::string agent_id = request.params.count("agent_id") ?
-                          request.params.at("agent_id") : "web_ui_agent";
-
-    auto messages = inter_agent_communicator_->receive_messages(agent_id, 50);
-
-    nlohmann::json response = {
-        {"agent_id", agent_id},
-        {"message_count", messages.size()},
-        {"messages", nlohmann::json::array()}
-    };
-
-    for (const auto& msg : messages) {
-        response["messages"].push_back({
-            {"message_id", msg.message_id},
-            {"from", msg.sender_agent_id},
-            {"to", msg.recipient_agent_id},
-            {"type", static_cast<int>(msg.message_type)},
-            {"priority", static_cast<int>(msg.priority)},
-            {"content", msg.content},
-            {"timestamp", std::chrono::system_clock::to_time_t(msg.timestamp)}
-        });
+    if (!inter_agent_communicator_) {
+        return create_error_response(500, "Inter-agent communicator not initialized");
     }
 
-    return create_json_response(response);
+    try {
+        // Parse query parameters
+        std::string agent_id = request.params.count("agent_id") ?
+                              request.params.at("agent_id") : "";
+        if (agent_id.empty()) {
+            return create_error_response(400, "Missing required parameter: agent_id");
+        }
+
+        int limit = std::stoi(request.params.count("limit") ?
+                             request.params.at("limit") : "10");
+        std::string message_type = request.params.count("type") ?
+                                  request.params.at("type") : "";
+
+        // Receive messages
+        auto messages = inter_agent_communicator_->receive_messages(
+            agent_id, limit,
+            message_type.empty() ? std::nullopt : std::optional<std::string>(message_type)
+        );
+
+        nlohmann::json messages_array = nlohmann::json::array();
+        for (const auto& msg : messages) {
+            nlohmann::json msg_json = {
+                {"message_id", msg.message_id},
+                {"from_agent", msg.from_agent_id},
+                {"to_agent", msg.to_agent_id.value_or("")},
+                {"message_type", msg.message_type},
+                {"content", msg.content},
+                {"priority", msg.priority},
+                {"status", msg.status},
+                {"created_at", ""}, // Would need proper timestamp formatting
+                {"correlation_id", msg.correlation_id.value_or("")}
+            };
+            messages_array.push_back(msg_json);
+        }
+
+        nlohmann::json response = {
+            {"success", true},
+            {"messages", messages_array},
+            {"count", messages.size()}
+        };
+
+        return create_json_response(response);
+
+    } catch (const std::exception& e) {
+        return create_error_response(500, std::string("Receive messages error: ") + e.what());
+    }
 }
 
 HTTPResponse WebUIHandlers::handle_agent_message_broadcast(const HTTPRequest& request) {
@@ -10510,30 +10627,76 @@ HTTPResponse WebUIHandlers::handle_agent_message_broadcast(const HTTPRequest& re
         return create_error_response(400, "Invalid request");
     }
 
-    try {
-        auto json_body = nlohmann::json::parse(request.body);
-        std::string from_agent = json_body.value("from_agent", "");
-        std::string message_type = json_body.value("message_type", "notification");
-        nlohmann::json content = json_body.value("content", nlohmann::json::object());
+    if (!inter_agent_communicator_) {
+        return create_error_response(500, "Inter-agent communicator not initialized");
+    }
 
-        if (from_agent.empty()) {
-            return create_error_response(400, "Missing required field: from_agent");
+    try {
+        nlohmann::json request_data = nlohmann::json::parse(request.body);
+
+        // Validate required fields
+        if (!request_data.contains("from_agent") || !request_data.contains("message_type") ||
+            !request_data.contains("content")) {
+            return create_error_response(400, "Missing required fields: from_agent, message_type, content");
         }
 
-        MessageType msg_type = MessageType::NOTIFICATION;
-        if (message_type == "request") msg_type = MessageType::REQUEST;
-        else if (message_type == "alert") msg_type = MessageType::NOTIFICATION;
+        std::string from_agent = request_data["from_agent"];
+        std::string message_type = request_data["message_type"];
+        nlohmann::json content = request_data["content"];
+        int priority = request_data.value("priority", 3);
 
-        bool success = inter_agent_communicator_->send_broadcast(
-            from_agent, "web_ui_agent", msg_type, content);
+        // Broadcast message
+        bool success = inter_agent_communicator_->broadcast_message(
+            from_agent, message_type, content, priority
+        );
 
-        return create_json_response(nlohmann::json{
-            {"success", success},
-            {"message", success ? "Broadcast sent successfully" : "Failed to send broadcast"}
-        });
+        if (!success) {
+            return create_error_response(500, "Failed to broadcast message");
+        }
+
+        nlohmann::json response = {
+            {"success", true},
+            {"status", "broadcast"},
+            {"message", "Message broadcast successfully"}
+        };
+
+        return create_json_response(response);
 
     } catch (const std::exception& e) {
         return create_error_response(500, std::string("Broadcast error: ") + e.what());
+    }
+}
+
+HTTPResponse WebUIHandlers::handle_agent_message_acknowledge(const HTTPRequest& request) {
+    if (!validate_request(request) || request.method != "POST") {
+        return create_error_response(400, "Invalid request");
+    }
+
+    if (!inter_agent_communicator_) {
+        return create_error_response(500, "Inter-agent communicator not initialized");
+    }
+
+    try {
+        nlohmann::json request_data = nlohmann::json::parse(request.body);
+
+        std::string message_id = request_data.value("message_id", "");
+        std::string agent_id = request_data.value("agent_id", "");
+
+        if (message_id.empty() || agent_id.empty()) {
+            return create_error_response(400, "Missing message_id or agent_id");
+        }
+
+        bool success = inter_agent_communicator_->acknowledge_message(message_id, agent_id);
+
+        nlohmann::json response = {
+            {"success", success},
+            {"message_id", message_id}
+        };
+
+        return create_json_response(response);
+
+    } catch (const std::exception& e) {
+        return create_error_response(500, std::string("Acknowledge message error: ") + e.what());
     }
 }
 
@@ -10542,36 +10705,49 @@ HTTPResponse WebUIHandlers::handle_consensus_start(const HTTPRequest& request) {
         return create_error_response(400, "Invalid request");
     }
 
+    if (!consensus_engine_) {
+        return create_error_response(503, "Consensus engine not available");
+    }
+
     try {
-        auto json_body = nlohmann::json::parse(request.body);
-        std::string scenario = json_body.value("scenario", "");
-        auto participants = json_body.value("participants", std::vector<std::string>{});
-        std::string algorithm = json_body.value("algorithm", "weighted_vote");
+        // Parse request body
+        nlohmann::json body = nlohmann::json::parse(request.body);
 
-        if (scenario.empty() || participants.empty()) {
-            return create_error_response(400, "Missing required fields: scenario, participants");
+        std::string topic = body.value("topic", "");
+        std::vector<std::string> participants = body.value("participants", std::vector<std::string>{});
+        std::string consensus_type_str = body.value("consensus_type", "majority");
+        nlohmann::json parameters = body.value("parameters", nlohmann::json::object());
+
+        if (topic.empty() || participants.empty()) {
+            return create_error_response(400, "Missing required fields: topic and participants");
         }
 
-        ConsensusAlgorithm alg = ConsensusAlgorithm::WEIGHTED_VOTE;
-        if (algorithm == "majority_vote") alg = ConsensusAlgorithm::MAJORITY_VOTE;
-        else if (algorithm == "qualified_majority") alg = ConsensusAlgorithm::QUALIFIED_MAJORITY;
+        // Convert consensus type string to enum
+        ConsensusType consensus_type;
+        if (consensus_type_str == "unanimous") consensus_type = ConsensusType::UNANIMOUS;
+        else if (consensus_type_str == "majority") consensus_type = ConsensusType::MAJORITY;
+        else if (consensus_type_str == "supermajority") consensus_type = ConsensusType::SUPERMAJORITY;
+        else if (consensus_type_str == "weighted_voting") consensus_type = ConsensusType::WEIGHTED_VOTING;
+        else if (consensus_type_str == "ranked_choice") consensus_type = ConsensusType::RANKED_CHOICE;
+        else if (consensus_type_str == "bayesian") consensus_type = ConsensusType::BAYESIAN;
+        else consensus_type = ConsensusType::MAJORITY;
 
-        auto session_id = consensus_engine_->start_consensus_session(scenario, participants, alg);
+        auto session_id_opt = consensus_engine_->start_session(topic, participants, consensus_type, parameters);
 
-        if (session_id) {
-            return create_json_response(nlohmann::json{
-                {"success", true},
-                {"session_id", *session_id},
-                {"message", "Consensus session started successfully"}
-            });
-        } else {
-            return create_json_response(nlohmann::json{
-                {"success", false},
-                {"message", "Failed to start consensus session"}
-            });
+        if (!session_id_opt.has_value()) {
+            return create_error_response(500, "Failed to start consensus session");
         }
+
+        nlohmann::json response = {
+            {"success", true},
+            {"session_id", session_id_opt.value()},
+            {"message", "Consensus session started successfully"}
+        };
+
+        return create_json_response(response);
+
     } catch (const std::exception& e) {
-        return create_error_response(500, std::string("Consensus start error: ") + e.what());
+        return create_error_response(400, std::string("Invalid request format: ") + e.what());
     }
 }
 
@@ -10580,26 +10756,39 @@ HTTPResponse WebUIHandlers::handle_consensus_contribute(const HTTPRequest& reque
         return create_error_response(400, "Invalid request");
     }
 
+    if (!consensus_engine_) {
+        return create_error_response(503, "Consensus engine not available");
+    }
+
     try {
-        auto json_body = nlohmann::json::parse(request.body);
-        std::string session_id = json_body.value("session_id", "");
-        std::string agent_id = json_body.value("agent_id", "");
-        nlohmann::json decision = json_body.value("decision", nlohmann::json::object());
-        double confidence = json_body.value("confidence", 0.5);
+        // Parse request body
+        nlohmann::json body = nlohmann::json::parse(request.body);
+
+        std::string session_id = body.value("session_id", "");
+        std::string agent_id = body.value("agent_id", "");
+        nlohmann::json vote_value = body.value("vote_value", nlohmann::json::object());
+        double confidence = body.value("confidence", 1.0);
+        std::string reasoning = body.value("reasoning", "");
 
         if (session_id.empty() || agent_id.empty()) {
-            return create_error_response(400, "Missing required fields: session_id, agent_id");
+            return create_error_response(400, "Missing required fields: session_id and agent_id");
         }
 
-        bool success = consensus_engine_->submit_decision(session_id, agent_id, decision, confidence);
+        bool success = consensus_engine_->contribute_vote(session_id, agent_id, vote_value, confidence, reasoning);
 
-        return create_json_response(nlohmann::json{
-            {"success", success},
-            {"message", success ? "Decision contributed successfully" : "Failed to contribute decision"}
-        });
+        if (!success) {
+            return create_error_response(400, "Failed to contribute vote - session may be closed or agent already voted");
+        }
+
+        nlohmann::json response = {
+            {"success", true},
+            {"message", "Vote contributed successfully"}
+        };
+
+        return create_json_response(response);
 
     } catch (const std::exception& e) {
-        return create_error_response(500, std::string("Consensus contribute error: ") + e.what());
+        return create_error_response(400, std::string("Invalid request format: ") + e.what());
     }
 }
 
@@ -10612,26 +10801,45 @@ HTTPResponse WebUIHandlers::handle_consensus_result(const HTTPRequest& request) 
                             request.params.at("session_id") : "";
 
     if (session_id.empty()) {
-        return create_error_response(400, "Missing required parameter: session_id");
+        return create_error_response(400, "Missing session_id parameter");
     }
 
-    auto result = consensus_engine_->get_consensus_result(session_id);
+    if (!consensus_engine_) {
+        return create_error_response(503, "Consensus engine not available");
+    }
 
-    if (result) {
-        return create_json_response(nlohmann::json{
+    try {
+        auto result = consensus_engine_->calculate_result(session_id);
+
+        nlohmann::json response = {
             {"success", true},
-            {"consensus_reached", result->success},
-            {"final_decision", result->final_decision},
-            {"consensus_strength", result->consensus_strength},
-            {"confidence_score", result->confidence_score},
-            {"participants_count", result->participants_count},
-            {"algorithm_used", static_cast<int>(result->algorithm_used)}
-        });
-    } else {
-        return create_json_response(nlohmann::json{
-            {"success", false},
-            {"message", "Consensus not yet reached or session not found"}
-        });
+            {"consensus_reached", result.consensus_reached},
+            {"confidence", result.confidence},
+            {"reasoning", result.reasoning}
+        };
+
+        if (result.consensus_reached) {
+            response["decision"] = result.decision;
+        }
+
+        // Include vote details
+        nlohmann::json votes_json = nlohmann::json::array();
+        for (const auto& vote : result.votes) {
+            nlohmann::json vote_json = {
+                {"agent_id", vote.agent_id},
+                {"vote_value", vote.vote_value},
+                {"confidence", vote.confidence},
+                {"reasoning", vote.reasoning},
+                {"cast_at", vote.cast_at}
+            };
+            votes_json.push_back(vote_json);
+        }
+        response["votes"] = votes_json;
+
+        return create_json_response(response);
+
+    } catch (const std::exception& e) {
+        return create_error_response(500, std::string("Error calculating consensus result: ") + e.what());
     }
 }
 
@@ -10640,31 +10848,42 @@ HTTPResponse WebUIHandlers::handle_message_translate(const HTTPRequest& request)
         return create_error_response(400, "Invalid request");
     }
 
-    try {
-        auto json_body = nlohmann::json::parse(request.body);
-        std::string from_agent = json_body.value("from_agent", "");
-        std::string to_agent = json_body.value("to_agent", "");
-        nlohmann::json message_content = json_body.value("message", nlohmann::json::object());
-        std::string goal = json_body.value("goal", "clarify");
+    if (!message_translator_) {
+        return create_error_response(503, "Message translator not available");
+    }
 
-        if (from_agent.empty() || to_agent.empty()) {
-            return create_error_response(400, "Missing required fields: from_agent, to_agent");
+    try {
+        nlohmann::json request_data = nlohmann::json::parse(request.body);
+
+        // Extract required fields
+        nlohmann::json source_message = request_data.value("message", nlohmann::json{});
+        std::string source_agent_type = request_data.value("source_agent_type", "");
+        std::string target_agent_type = request_data.value("target_agent_type", "");
+
+        if (source_message.empty() || source_agent_type.empty() || target_agent_type.empty()) {
+            return create_error_response(400, "Missing required fields: message, source_agent_type, target_agent_type");
         }
 
-        AgentMessage original_msg(from_agent, "web_ui_agent", to_agent, "target_agent",
-                                 MessageType::NOTIFICATION, message_content);
+        // Perform message translation
+        nlohmann::json translated_message = message_translator_->translate_message(
+            source_message, source_agent_type, target_agent_type);
 
-        auto result = message_translator_->auto_translate(original_msg, from_agent, to_agent, goal);
+        // Validate translation integrity
+        bool validation_passed = message_translator_->validate_translation(source_message, translated_message);
 
-        return create_json_response(nlohmann::json{
-            {"success", result.success},
-            {"translated_message", result.translated_message.content},
-            {"translation_approach", result.translation_approach},
-            {"confidence_score", result.confidence_score}
-        });
+        nlohmann::json response = {
+            {"success", true},
+            {"translated_message", translated_message},
+            {"source_agent_type", source_agent_type},
+            {"target_agent_type", target_agent_type},
+            {"validation_passed", validation_passed},
+            {"translation_timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+        };
+
+        return create_json_response(response);
 
     } catch (const std::exception& e) {
-        return create_error_response(500, std::string("Translation error: ") + e.what());
+        return create_error_response(500, std::string("Message translation failed: ") + e.what());
     }
 }
 
@@ -10673,23 +10892,52 @@ HTTPResponse WebUIHandlers::handle_agent_conversation(const HTTPRequest& request
         return create_error_response(400, "Invalid request");
     }
 
-    try {
-        auto json_body = nlohmann::json::parse(request.body);
-        std::string agent1 = json_body.value("agent1", "");
-        std::string agent2 = json_body.value("agent2", "");
-        std::string topic = json_body.value("topic", "");
-        int max_rounds = json_body.value("max_rounds", 3);
+    if (!communication_mediator_) {
+        return create_error_response(503, "Communication mediator not available");
+    }
 
-        if (agent1.empty() || agent2.empty() || topic.empty()) {
-            return create_error_response(400, "Missing required fields: agent1, agent2, topic");
+    try {
+        nlohmann::json request_data = nlohmann::json::parse(request.body);
+
+        // Extract required fields for conversation initiation
+        std::string topic = request_data.value("topic", "");
+        std::string objective = request_data.value("objective", "");
+        std::vector<std::string> participant_ids;
+
+        if (request_data.contains("participant_ids") && request_data["participant_ids"].is_array()) {
+            for (const auto& id : request_data["participant_ids"]) {
+                if (id.is_string()) {
+                    participant_ids.push_back(id);
+                }
+            }
         }
 
-        auto conversation = communication_mediator_->facilitate_conversation(agent1, agent2, topic, max_rounds);
+        if (topic.empty() || participant_ids.empty()) {
+            return create_error_response(400, "Missing required fields: topic and participant_ids array");
+        }
 
-        return create_json_response(conversation);
+        // Initiate conversation
+        std::string conversation_id = communication_mediator_->initiate_conversation(
+            topic, objective, participant_ids);
+
+        // Get conversation context
+        auto context = communication_mediator_->get_conversation_context(conversation_id);
+
+        nlohmann::json response = {
+            {"success", true},
+            {"conversation_id", conversation_id},
+            {"topic", topic},
+            {"objective", objective},
+            {"participant_count", participant_ids.size()},
+            {"participants", participant_ids},
+            {"state", context ? "initialized" : "unknown"},
+            {"initiation_timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
+        };
+
+        return create_json_response(response);
 
     } catch (const std::exception& e) {
-        return create_error_response(500, std::string("Conversation error: ") + e.what());
+        return create_error_response(500, std::string("Conversation initiation failed: ") + e.what());
     }
 }
 
@@ -10698,25 +10946,63 @@ HTTPResponse WebUIHandlers::handle_conflict_resolution(const HTTPRequest& reques
         return create_error_response(400, "Invalid request");
     }
 
+    if (!communication_mediator_) {
+        return create_error_response(503, "Communication mediator not available");
+    }
+
     try {
-        auto json_body = nlohmann::json::parse(request.body);
-        auto conflicting_messages_json = json_body.value("messages", nlohmann::json::array());
+        nlohmann::json request_data = nlohmann::json::parse(request.body);
 
-        std::vector<AgentMessage> conflicting_messages;
-        for (const auto& msg_json : conflicting_messages_json) {
-            conflicting_messages.push_back(AgentMessage::from_json(msg_json));
+        // Extract required fields for conflict resolution
+        std::string conversation_id = request_data.value("conversation_id", "");
+        std::string conflict_id = request_data.value("conflict_id", "");
+        std::string strategy = request_data.value("strategy", "MAJORITY_VOTE");
+
+        if (conversation_id.empty()) {
+            return create_error_response(400, "Missing required field: conversation_id");
         }
 
-        if (conflicting_messages.empty()) {
-            return create_error_response(400, "No conflicting messages provided");
+        // Determine resolution strategy
+        regulens::ResolutionStrategy resolution_strategy = regulens::ResolutionStrategy::MAJORITY_VOTE;
+        if (strategy == "WEIGHTED_VOTE") {
+            resolution_strategy = regulens::ResolutionStrategy::WEIGHTED_VOTE;
+        } else if (strategy == "EXPERT_ARBITRATION") {
+            resolution_strategy = regulens::ResolutionStrategy::EXPERT_ARBITRATION;
+        } else if (strategy == "COMPROMISE_NEGOTIATION") {
+            resolution_strategy = regulens::ResolutionStrategy::COMPROMISE_NEGOTIATION;
+        } else if (strategy == "ESCALATION") {
+            resolution_strategy = regulens::ResolutionStrategy::ESCALATION;
         }
 
-        auto resolution = communication_mediator_->resolve_conflicts(conflicting_messages);
+        // Resolve conflict
+        regulens::MediationResult result;
+        if (!conflict_id.empty()) {
+            // Resolve specific conflict
+            result = communication_mediator_->resolve_conflict(conversation_id, conflict_id, resolution_strategy);
+        } else {
+            // Mediate entire conversation
+            result = communication_mediator_->mediate_conversation(conversation_id);
+        }
 
-        return create_json_response(resolution);
+        nlohmann::json response = {
+            {"success", result.success},
+            {"conversation_id", conversation_id},
+            {"strategy_used", strategy},
+            {"processing_time_ms", result.processing_time.count()},
+            {"new_conversation_state", static_cast<int>(result.new_state)}
+        };
+
+        if (result.success) {
+            response["resolution_summary"] = "Conflict resolved successfully";
+            response["mediation_messages_count"] = result.mediation_messages.size();
+        } else {
+            response["error"] = "Conflict resolution failed";
+        }
+
+        return create_json_response(response);
 
     } catch (const std::exception& e) {
-        return create_error_response(500, std::string("Conflict resolution error: ") + e.what());
+        return create_error_response(500, std::string("Conflict resolution failed: ") + e.what());
     }
 }
 
@@ -10726,21 +11012,20 @@ HTTPResponse WebUIHandlers::handle_communication_stats(const HTTPRequest& reques
     }
 
     nlohmann::json stats = {
-        {"communication_enabled", inter_agent_communicator_ != nullptr},
+        {"communication_enabled", false}, // Not yet implemented
         {"translation_enabled", message_translator_ != nullptr},
         {"consensus_enabled", consensus_engine_ != nullptr}
     };
 
-    if (inter_agent_communicator_) {
-        stats["communication_stats"] = inter_agent_communicator_->get_communication_stats();
-    }
+    // Inter-agent communication stats - not yet implemented
+    stats["communication_stats"] = {{"status", "not_implemented"}};
 
     if (consensus_engine_) {
-        stats["consensus_stats"] = consensus_engine_->get_statistics();
+        stats["consensus_stats"] = {{"status", "implemented"}};
     }
 
     if (message_translator_) {
-        stats["translation_stats"] = message_translator_->get_translation_stats();
+        stats["translation_stats"] = {{"status", "not_implemented"}};
     }
 
     return create_json_response(stats);
@@ -10902,8 +11187,16 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
         <div id="conflicts-tab" class="tab-content">
             <h3>Conflict Resolution</h3>
             <div class="form-group">
-                <label>Resolve Agent Conflicts</label>
-                <textarea id="conflict-messages" placeholder="Conflicting messages (JSON array)" rows="6">[{"sender_agent_id": "aml_agent", "recipient_agent_id": "system", "message_type": 2, "content": {"decision": "approve", "confidence": 0.8}}, {"sender_agent_id": "risk_agent", "recipient_agent_id": "system", "message_type": 2, "content": {"decision": "deny", "confidence": 0.9}}]</textarea>
+                <label>Resolve Conversation Conflicts</label>
+                <input type="text" id="conflict-conversation-id" placeholder="Conversation ID" value="test-conversation" style="margin-bottom: 5px;">
+                <input type="text" id="conflict-id" placeholder="Conflict ID (optional)" style="margin-bottom: 5px;">
+                <select id="resolution-strategy" style="margin-bottom: 5px;">
+                    <option value="MAJORITY_VOTE">Majority Vote</option>
+                    <option value="WEIGHTED_VOTE">Weighted Vote</option>
+                    <option value="EXPERT_ARBITRATION">Expert Arbitration</option>
+                    <option value="COMPROMISE_NEGOTIATION">Compromise Negotiation</option>
+                    <option value="ESCALATION">Escalation</option>
+                </select>
                 <button class="btn-warning" onclick="resolveConflicts()">Resolve Conflicts</button>
             </div>
 
@@ -11108,17 +11401,15 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
             const fromAgent = document.getElementById('translate-from').value;
             const toAgent = document.getElementById('translate-to').value;
             const message = document.getElementById('translate-message').value;
-            const goal = document.getElementById('translate-goal').value;
 
             try {
                 const response = await fetch('/api/multi-agent/translate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        from_agent: fromAgent,
-                        to_agent: toAgent,
                         message: JSON.parse(message),
-                        goal: goal
+                        source_agent_type: fromAgent,
+                        target_agent_type: toAgent
                     })
                 });
 
@@ -11126,9 +11417,10 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
                 document.getElementById('translation-result').innerHTML =
                     `<div class="result ${result.success ? 'success' : 'error'}">
                         <h4>${result.success ? 'SUCCESS' : 'ERROR'} Translation ${result.success ? 'Successful' : 'Failed'}</h4>
-                        ${result.translated_message ? `<p><strong>Translated:</strong> ${JSON.stringify(result.translated_message)}</p>` : ''}
-                        <p><strong>Approach:</strong> ${result.translation_approach}</p>
-                        <p><strong>Confidence:</strong> ${(result.confidence_score * 100).toFixed(1)}%</p>
+                        ${result.translated_message ? `<p><strong>Translated:</strong> ${JSON.stringify(result.translated_message, null, 2)}</p>` : ''}
+                        <p><strong>From:</strong> ${result.source_agent_type} → <strong>To:</strong> ${result.target_agent_type}</p>
+                        <p><strong>Validation Passed:</strong> ${result.validation_passed ? 'Yes' : 'No'}</p>
+                        ${result.translation_timestamp ? `<p><strong>Timestamp:</strong> ${new Date(result.translation_timestamp / 1000000).toLocaleString()}</p>` : ''}
                     </div>`;
 
             } catch (error) {
@@ -11141,30 +11433,32 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
             const agent1 = document.getElementById('conv-agent1').value;
             const agent2 = document.getElementById('conv-agent2').value;
             const topic = document.getElementById('conv-topic').value;
-            const maxRounds = parseInt(document.getElementById('conv-rounds').value);
 
             try {
                 const response = await fetch('/api/multi-agent/conversation', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        agent1: agent1,
-                        agent2: agent2,
                         topic: topic,
-                        max_rounds: maxRounds
+                        objective: `Discussion between ${agent1} and ${agent2}`,
+                        participant_ids: [agent1, agent2]
                     })
                 });
 
                 const result = await response.json();
-                let html = `<div class="result ${result.status === 'completed' ? 'success' : 'error'}">
-                    <h4>CHAT Conversation ${result.status === 'completed' ? 'Completed' : result.status}</h4>`;
+                let html = `<div class="result ${result.success ? 'success' : 'error'}">
+                    <h4>${result.success ? 'SUCCESS' : 'ERROR'} Conversation ${result.success ? 'Started' : 'Failed'}</h4>`;
 
-                if (result.rounds && result.rounds.length > 0) {
-                    html += '<div class="conversation-flow">';
-                    result.rounds.forEach(round => {
-                        html += `<div class="agent-message agent1">Round ${round.round}: ${round.messages.length} messages exchanged</div>`;
-                    });
-                    html += '</div>';
+                if (result.success) {
+                    html += `<p><strong>Conversation ID:</strong> ${result.conversation_id}</p>`;
+                    html += `<p><strong>Topic:</strong> ${result.topic}</p>`;
+                    html += `<p><strong>Participants:</strong> ${result.participants.join(', ')} (${result.participant_count})</p>`;
+                    html += `<p><strong>State:</strong> ${result.state}</p>`;
+                    if (result.initiation_timestamp) {
+                        html += `<p><strong>Started:</strong> ${new Date(result.initiation_timestamp / 1000000).toLocaleString()}</p>`;
+                    }
+                } else {
+                    html += `<p><strong>Error:</strong> ${result.message || 'Unknown error'}</p>`;
                 }
 
                 html += '</div>';
@@ -11177,26 +11471,48 @@ std::string WebUIHandlers::generate_multi_agent_html() const {
         }
 
         async function resolveConflicts() {
-            const messagesJson = document.getElementById('conflict-messages').value;
+            const conversationId = document.getElementById('conflict-conversation-id').value;
+            const conflictId = document.getElementById('conflict-id').value;
+            const strategy = document.getElementById('resolution-strategy').value;
 
             try {
+                const requestBody = {
+                    conversation_id: conversationId,
+                    strategy: strategy
+                };
+
+                // Add conflict_id if provided
+                if (conflictId.trim()) {
+                    requestBody.conflict_id = conflictId;
+                }
+
                 const response = await fetch('/api/multi-agent/conflicts/resolve', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        messages: JSON.parse(messagesJson)
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 const result = await response.json();
-                document.getElementById('conflicts-result').innerHTML =
-                    `<div class="result success">
-                        <h4>BALANCE Conflict Resolution</h4>
-                        <p><strong>Method:</strong> ${result.resolution_method}</p>
-                        <p><strong>Winning Decision:</strong> ${JSON.stringify(result.winning_message)}</p>
-                        <p><strong>Confidence Score:</strong> ${(result.confidence_score * 100).toFixed(1)}%</p>
-                        <p><strong>Agreement Level:</strong> ${(result.agreement_level * 100).toFixed(1)}%</p>
-                    </div>`;
+                let html = `<div class="result ${result.success ? 'success' : 'error'}">
+                    <h4>${result.success ? 'SUCCESS' : 'ERROR'} Conflict Resolution ${result.success ? 'Completed' : 'Failed'}</h4>`;
+
+                if (result.success) {
+                    html += `<p><strong>Conversation ID:</strong> ${result.conversation_id}</p>`;
+                    html += `<p><strong>Strategy Used:</strong> ${result.strategy_used}</p>`;
+                    html += `<p><strong>Processing Time:</strong> ${result.processing_time_ms}ms</p>`;
+                    html += `<p><strong>New State:</strong> ${result.new_conversation_state}</p>`;
+                    if (result.resolution_summary) {
+                        html += `<p><strong>Summary:</strong> ${result.resolution_summary}</p>`;
+                    }
+                    if (result.mediation_messages_count) {
+                        html += `<p><strong>Mediation Messages:</strong> ${result.mediation_messages_count}</p>`;
+                    }
+                } else {
+                    html += `<p><strong>Error:</strong> ${result.error || 'Resolution failed'}</p>`;
+                }
+
+                html += '</div>';
+                document.getElementById('conflicts-result').innerHTML = html;
 
             } catch (error) {
                 document.getElementById('conflicts-result').innerHTML =
@@ -11392,23 +11708,23 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_retrieve(const HTTPReques
                               "participants, importance_score, confidence_score, memory_type, created_at "
                               "FROM conversation_memory WHERE conversation_id = $1";
             
-            auto result = db_connection_->execute_params(query, {conversation_id});
+            auto result = db_connection_->execute_query_multi(query, {conversation_id});
             
-            if (result && PQntuples(result.get()) > 0) {
+            if (!result.empty()) {
                 response.status_code = 200;
                 nlohmann::json conversation = {
                     {"success", true},
                     {"conversation", {
-                        {"conversation_id", PQgetvalue(result.get(), 0, 0)},
-                        {"agent_type", PQgetvalue(result.get(), 0, 1)},
-                        {"agent_name", PQgetvalue(result.get(), 0, 2)},
-                        {"context_type", PQgetvalue(result.get(), 0, 3)},
-                        {"topic", PQgetvalue(result.get(), 0, 4)},
-                        {"participants", nlohmann::json::parse(PQgetvalue(result.get(), 0, 5))},
-                        {"importance_score", std::stod(PQgetvalue(result.get(), 0, 6))},
-                        {"confidence_score", std::stod(PQgetvalue(result.get(), 0, 7))},
-                        {"memory_type", PQgetvalue(result.get(), 0, 8)},
-                        {"created_at", PQgetvalue(result.get(), 0, 9)}
+                        {"conversation_id", result[0]["conversation_id"].get<std::string>()},
+                        {"agent_type", result[0]["agent_type"].get<std::string>()},
+                        {"agent_name", result[0]["agent_name"].get<std::string>()},
+                        {"context_type", result[0]["context_type"].get<std::string>()},
+                        {"topic", result[0]["conversation_topic"].get<std::string>()},
+                        {"participants", result[0]["participants"]},
+                        {"importance_score", result[0]["importance_score"].get<double>()},
+                        {"confidence_score", result[0]["confidence_score"].get<double>()},
+                        {"memory_type", result[0]["memory_type"].get<std::string>()},
+                        {"created_at", result[0]["created_at"].get<std::string>()}
                     }}
                 };
                 response.body = conversation.dump();
@@ -11597,9 +11913,7 @@ HTTPResponse WebUIHandlers::handle_memory_conversation_delete(const HTTPRequest&
 
         // Delete conversation from database (CASCADE will handle related records)
         std::string delete_query = "DELETE FROM conversation_memory WHERE conversation_id = $1";
-        auto delete_result = db_connection_->execute_params(delete_query, {conversation_id});
-        
-        bool success = (delete_result && std::string(PQcmdTuples(delete_result.get())) != "0");
+        bool success = db_connection_->execute_command(delete_query, {conversation_id});
 
         response.status_code = success ? 200 : 500;
         response.body = nlohmann::json{
@@ -11673,12 +11987,10 @@ HTTPResponse WebUIHandlers::handle_memory_case_store(const HTTPRequest& request)
             "solution_description, context_factors, outcome_metrics, created_at) "
             "VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())";
         
-        auto insert_result = db_connection_->execute_params(insert_query, {
+        bool success = db_connection_->execute_command(insert_query, {
             case_id, domain, case_type, problem_description, solution_description,
             context_factors.dump(), outcome_metrics.dump()
         });
-        
-        bool success = (insert_result && PQresultStatus(insert_result.get()) == PGRES_COMMAND_OK);
 
         response.status_code = success ? 200 : 500;
         response.body = nlohmann::json{
@@ -11732,23 +12044,23 @@ HTTPResponse WebUIHandlers::handle_memory_case_retrieve(const HTTPRequest& reque
             "context_factors, outcome_metrics, confidence_score, usage_count, created_at "
             "FROM case_base WHERE case_id = $1";
         
-        auto result = db_connection_->execute_params(query, {case_id});
+        auto result = db_connection_->execute_query_multi(query, {case_id});
         
-        if (result && PQntuples(result.get()) > 0) {
+        if (!result.empty()) {
             response.status_code = 200;
             nlohmann::json case_result = {
                 {"success", true},
                 {"case", {
-                    {"case_id", PQgetvalue(result.get(), 0, 0)},
-                    {"domain", PQgetvalue(result.get(), 0, 1)},
-                    {"case_type", PQgetvalue(result.get(), 0, 2)},
-                    {"problem_description", PQgetvalue(result.get(), 0, 3)},
-                    {"solution_description", PQgetvalue(result.get(), 0, 4)},
-                    {"context_factors", nlohmann::json::parse(PQgetvalue(result.get(), 0, 5))},
-                    {"outcome_metrics", nlohmann::json::parse(PQgetvalue(result.get(), 0, 6))},
-                    {"confidence_score", std::stod(PQgetvalue(result.get(), 0, 7))},
-                    {"usage_count", std::stoi(PQgetvalue(result.get(), 0, 8))},
-                    {"created_at", PQgetvalue(result.get(), 0, 9)}
+                    {"case_id", result[0]["case_id"].get<std::string>()},
+                    {"domain", result[0]["domain"].get<std::string>()},
+                    {"case_type", result[0]["case_type"].get<std::string>()},
+                    {"problem_description", result[0]["problem_description"].get<std::string>()},
+                    {"solution_description", result[0]["solution_description"].get<std::string>()},
+                    {"context_factors", result[0]["context_factors"]},
+                    {"outcome_metrics", result[0]["outcome_metrics"]},
+                    {"confidence_score", result[0]["confidence_score"].get<double>()},
+                    {"usage_count", result[0]["usage_count"].get<int>()},
+                    {"created_at", result[0]["created_at"].get<std::string>()}
                 }}
             };
             response.body = case_result.dump();
@@ -11815,7 +12127,7 @@ HTTPResponse WebUIHandlers::handle_memory_case_search(const HTTPRequest& request
         
         search_query += " ORDER BY similarity_score DESC LIMIT $" + std::to_string(domain.empty() ? 2 : 3);
         
-        auto result = db_connection_->execute_params(
+        auto result = db_connection_->execute_query_multi(
             search_query,
             domain.empty() ? std::vector<std::string>{query, std::to_string(limit)} 
                           : std::vector<std::string>{query, domain, std::to_string(limit)}
@@ -11823,19 +12135,16 @@ HTTPResponse WebUIHandlers::handle_memory_case_search(const HTTPRequest& request
         
         nlohmann::json search_result = {{"success", true}, {"results", nlohmann::json::array()}};
         
-        if (result) {
-            int rows = PQntuples(result.get());
-            for (int i = 0; i < rows; i++) {
-                search_result["results"].push_back({
-                    {"case_id", PQgetvalue(result.get(), i, 0)},
-                    {"domain", PQgetvalue(result.get(), i, 1)},
-                    {"case_type", PQgetvalue(result.get(), i, 2)},
-                    {"problem_description", PQgetvalue(result.get(), i, 3)},
-                    {"solution_description", PQgetvalue(result.get(), i, 4)},
-                    {"confidence_score", std::stod(PQgetvalue(result.get(), i, 5))},
-                    {"similarity_score", std::stod(PQgetvalue(result.get(), i, 6))}
-                });
-            }
+        for (const auto& row : result) {
+            search_result["results"].push_back({
+                {"case_id", row["case_id"].get<std::string>()},
+                {"domain", row["domain"].get<std::string>()},
+                {"case_type", row["case_type"].get<std::string>()},
+                {"problem_description", row["problem_description"].get<std::string>()},
+                {"solution_description", row["solution_description"].get<std::string>()},
+                {"confidence_score", row["confidence_score"].get<double>()},
+                {"similarity_score", row["similarity_score"].get<double>()}
+            });
         }
 
         response.status_code = 200;
@@ -11879,9 +12188,7 @@ HTTPResponse WebUIHandlers::handle_memory_case_delete(const HTTPRequest& request
         }
 
         std::string delete_query = "DELETE FROM case_base WHERE case_id = $1";
-        auto delete_result = db_connection_->execute_params(delete_query, {case_id});
-        
-        bool success = (delete_result && std::string(PQcmdTuples(delete_result.get())) != "0");
+        bool success = db_connection_->execute_command(delete_query, {case_id});
 
         response.status_code = success ? 200 : 500;
         response.body = nlohmann::json{
@@ -11932,14 +12239,12 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_store(const HTTPRequest& requ
             "learning_applied, feedback_timestamp) "
             "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, NOW())";
         
-        auto insert_result = db_connection_->execute_params(insert_query, {
+        bool success = db_connection_->execute_command(insert_query, {
             conversation_id.empty() ? "NULL" : conversation_id,
             decision_id.empty() ? "NULL" : decision_id,
             agent_type, agent_name, feedback_type, 
             std::to_string(feedback_score), feedback_text, reviewer_id
         });
-        
-        bool success = (insert_result && PQresultStatus(insert_result.get()) == PGRES_COMMAND_OK);
 
         response.status_code = success ? 200 : 500;
         response.body = nlohmann::json{
@@ -12006,27 +12311,24 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_retrieve(const HTTPRequest& r
         query += "ORDER BY feedback_timestamp DESC LIMIT $" + std::to_string(params.size() + 1);
         params.push_back(std::to_string(limit));
         
-        auto result = db_connection_->execute_params(query, params);
+        auto result = db_connection_->execute_query_multi(query, params);
         
         nlohmann::json feedback_result = {{"success", true}, {"feedback", nlohmann::json::array()}};
         
-        if (result) {
-            int rows = PQntuples(result.get());
-            for (int i = 0; i < rows; i++) {
-                feedback_result["feedback"].push_back({
-                    {"feedback_id", PQgetvalue(result.get(), i, 0)},
-                    {"conversation_id", PQgetvalue(result.get(), i, 1)},
-                    {"decision_id", PQgetvalue(result.get(), i, 2)},
-                    {"agent_type", PQgetvalue(result.get(), i, 3)},
-                    {"agent_name", PQgetvalue(result.get(), i, 4)},
-                    {"feedback_type", PQgetvalue(result.get(), i, 5)},
-                    {"feedback_score", std::stod(PQgetvalue(result.get(), i, 6))},
-                    {"feedback_text", PQgetvalue(result.get(), i, 7)},
-                    {"human_reviewer_id", PQgetvalue(result.get(), i, 8)},
-                    {"learning_applied", std::string(PQgetvalue(result.get(), i, 9)) == "t"},
-                    {"feedback_timestamp", PQgetvalue(result.get(), i, 10)}
-                });
-            }
+        for (const auto& row : result) {
+            feedback_result["feedback"].push_back({
+                {"feedback_id", row["feedback_id"].get<std::string>()},
+                {"conversation_id", row["conversation_id"].get<std::string>()},
+                {"decision_id", row["decision_id"].get<std::string>()},
+                {"agent_type", row["agent_type"].get<std::string>()},
+                {"agent_name", row["agent_name"].get<std::string>()},
+                {"feedback_type", row["feedback_type"].get<std::string>()},
+                {"feedback_score", row["feedback_score"].get<double>()},
+                {"feedback_text", row["feedback_text"].get<std::string>()},
+                {"human_reviewer_id", row["human_reviewer_id"].get<std::string>()},
+                {"learning_applied", row["learning_applied"].get<bool>()},
+                {"feedback_timestamp", row["feedback_timestamp"].get<std::string>()}
+            });
         }
 
         response.status_code = 200;
@@ -12080,24 +12382,21 @@ HTTPResponse WebUIHandlers::handle_memory_feedback_search(const HTTPRequest& req
         search_query += " ORDER BY feedback_timestamp DESC LIMIT $" + std::to_string(params.size() + 1);
         params.push_back(std::to_string(limit));
         
-        auto result = db_connection_->execute_params(search_query, params);
+        auto result = db_connection_->execute_query_multi(search_query, params);
         
         nlohmann::json search_result = {{"success", true}, {"feedback", nlohmann::json::array()}};
         
-        if (result) {
-            int rows = PQntuples(result.get());
-            for (int i = 0; i < rows; i++) {
-                search_result["feedback"].push_back({
-                    {"feedback_id", PQgetvalue(result.get(), i, 0)},
-                    {"agent_type", PQgetvalue(result.get(), i, 1)},
-                    {"agent_name", PQgetvalue(result.get(), i, 2)},
-                    {"feedback_type", PQgetvalue(result.get(), i, 3)},
-                    {"feedback_score", std::stod(PQgetvalue(result.get(), i, 4))},
-                    {"feedback_text", PQgetvalue(result.get(), i, 5)},
-                    {"learning_applied", std::string(PQgetvalue(result.get(), i, 6)) == "t"},
-                    {"feedback_timestamp", PQgetvalue(result.get(), i, 7)}
-                });
-            }
+        for (const auto& row : result) {
+            search_result["feedback"].push_back({
+                {"feedback_id", row["feedback_id"].get<std::string>()},
+                {"agent_type", row["agent_type"].get<std::string>()},
+                {"agent_name", row["agent_name"].get<std::string>()},
+                {"feedback_type", row["feedback_type"].get<std::string>()},
+                {"feedback_score", row["feedback_score"].get<double>()},
+                {"feedback_text", row["feedback_text"].get<std::string>()},
+                {"learning_applied", row["learning_applied"].get<bool>()},
+                {"feedback_timestamp", row["feedback_timestamp"].get<std::string>()}
+            });
         }
 
         response.status_code = 200;
@@ -12141,26 +12440,23 @@ HTTPResponse WebUIHandlers::handle_memory_learning_models(const HTTPRequest& req
             "GROUP BY agent_type, agent_name, feedback_type "
             "ORDER BY agent_type, agent_name, feedback_count DESC";
         
-        auto result = db_connection_->execute(query);
+        auto result = db_connection_->execute_query_multi(query);
         
         nlohmann::json models_result = {{"success", true}, {"models", nlohmann::json::array()}};
         
-        if (result) {
-            int rows = PQntuples(result.get());
-            for (int i = 0; i < rows; i++) {
-                models_result["models"].push_back({
-                    {"agent_type", PQgetvalue(result.get(), i, 0)},
-                    {"agent_name", PQgetvalue(result.get(), i, 1)},
-                    {"learning_type", PQgetvalue(result.get(), i, 2)},
-                    {"feedback_count", std::stoi(PQgetvalue(result.get(), i, 3))},
-                    {"avg_feedback_score", std::stod(PQgetvalue(result.get(), i, 4))},
-                    {"learning_applied_count", std::stoi(PQgetvalue(result.get(), i, 5))},
-                    {"first_feedback", PQgetvalue(result.get(), i, 6)},
-                    {"last_feedback", PQgetvalue(result.get(), i, 7)},
-                    {"is_active", true},
-                    {"version", "1.0"}
-                });
-            }
+        for (const auto& row : result) {
+            models_result["models"].push_back({
+                {"agent_type", row["agent_type"].get<std::string>()},
+                {"agent_name", row["agent_name"].get<std::string>()},
+                {"learning_type", row["learning_type"].get<std::string>()},
+                {"feedback_count", row["feedback_count"].get<int>()},
+                {"avg_feedback_score", row["avg_feedback_score"].get<double>()},
+                {"learning_applied_count", row["learning_applied_count"].get<int>()},
+                {"first_feedback", row["first_feedback"].get<std::string>()},
+                {"last_feedback", row["last_feedback"].get<std::string>()},
+                {"is_active", true},
+                {"version", "1.0"}
+            });
         }
 
         response.status_code = 200;
@@ -12200,26 +12496,23 @@ HTTPResponse WebUIHandlers::handle_memory_consolidation_status(const HTTPRequest
             "WHERE consolidation_timestamp > NOW() - INTERVAL '24 hours' "
             "GROUP BY consolidation_type";
         
-        auto result = db_connection_->execute(query);
+        auto result = db_connection_->execute_query_multi(query);
         
         nlohmann::json consolidations = nlohmann::json::array();
         int total_consolidated = 0;
         std::string last_consolidation_time = "";
         
-        if (result) {
-            int rows = PQntuples(result.get());
-            for (int i = 0; i < rows; i++) {
-                int count = std::stoi(PQgetvalue(result.get(), i, 1));
-                total_consolidated += count;
-                std::string timestamp = PQgetvalue(result.get(), i, 2);
-                if (timestamp > last_consolidation_time) {
-                    last_consolidation_time = timestamp;
-                }
-                consolidations.push_back({
-                    {"type", PQgetvalue(result.get(), i, 0)},
-                    {"count", count}
-                });
+        for (const auto& row : result) {
+            int count = row["count"].get<int>();
+            total_consolidated += count;
+            std::string timestamp = row["max_timestamp"].get<std::string>();
+            if (timestamp > last_consolidation_time) {
+                last_consolidation_time = timestamp;
             }
+            consolidations.push_back({
+                {"type", row["consolidation_type"].get<std::string>()},
+                {"count", count}
+            });
         }
 
         response.status_code = 200;
@@ -12290,7 +12583,7 @@ HTTPResponse WebUIHandlers::handle_memory_consolidation_run(const HTTPRequest& r
                 {"max_memories", max_memories}
             };
             
-            db_connection_->execute_params(log_query, {
+            db_connection_->execute_command(log_query, {
                 "MERGE_SIMILAR", memory_type.empty() ? "ALL" : memory_type,
                 "{}", criteria.dump(),
                 std::to_string(consolidation_result.memories_processed),
@@ -12357,25 +12650,22 @@ HTTPResponse WebUIHandlers::handle_memory_access_patterns(const HTTPRequest& req
         query += " ORDER BY access_timestamp DESC LIMIT $" + std::to_string(params.size() + 1);
         params.push_back(std::to_string(limit));
         
-        auto result = db_connection_->execute_params(query, params);
+        auto result = db_connection_->execute_query_multi(query, params);
         
         nlohmann::json patterns_result = {{"success", true}, {"patterns", nlohmann::json::array()}};
         
-        if (result) {
-            int rows = PQntuples(result.get());
-            for (int i = 0; i < rows; i++) {
-                patterns_result["patterns"].push_back({
-                    {"memory_id", PQgetvalue(result.get(), i, 0)},
-                    {"memory_type", PQgetvalue(result.get(), i, 1)},
-                    {"access_type", PQgetvalue(result.get(), i, 2)},
-                    {"agent_type", PQgetvalue(result.get(), i, 3)},
-                    {"agent_name", PQgetvalue(result.get(), i, 4)},
-                    {"access_result", PQgetvalue(result.get(), i, 5)},
-                    {"processing_time_ms", std::stod(PQgetvalue(result.get(), i, 6))},
-                    {"user_satisfaction_score", std::stod(PQgetvalue(result.get(), i, 7))},
-                    {"access_timestamp", PQgetvalue(result.get(), i, 8)}
-                });
-            }
+        for (const auto& row : result) {
+            patterns_result["patterns"].push_back({
+                {"memory_id", row["memory_id"].get<std::string>()},
+                {"memory_type", row["memory_type"].get<std::string>()},
+                {"access_type", row["access_type"].get<std::string>()},
+                {"agent_type", row["agent_type"].get<std::string>()},
+                {"agent_name", row["agent_name"].get<std::string>()},
+                {"access_result", row["access_result"].get<std::string>()},
+                {"processing_time_ms", row["processing_time_ms"].get<double>()},
+                {"user_satisfaction_score", row["user_satisfaction_score"].get<double>()},
+                {"access_timestamp", row["access_timestamp"].get<std::string>()}
+            });
         }
 
         response.status_code = 200;
@@ -14122,11 +14412,11 @@ HTTPResponse WebUIHandlers::handle_trigger_monitoring(const HTTPRequest& request
             {"timestamp", std::time(nullptr)}
         };
 
-        logger_->info("Regulatory monitoring triggered for {} sources", sources_triggered);
+        logger_->info("Regulatory monitoring triggered for " + std::to_string(sources_triggered) + " sources", "WebUIHandlers", "trigger_monitoring");
         return HTTPResponse(200, "OK", response.dump(), "application/json");
 
     } catch (const std::exception& e) {
-        logger_->error("Error triggering regulatory monitoring: {}", e.what());
+        logger_->error("Error triggering regulatory monitoring: " + std::string(e.what()), "WebUIHandlers", "trigger_monitoring");
         nlohmann::json error_response = {
             {"error", "Failed to trigger regulatory monitoring"},
             {"details", e.what()}

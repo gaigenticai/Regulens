@@ -213,6 +213,11 @@ private:
     std::shared_ptr<StructuredLogger> logger_;
 
     CollaborationConfig config_;
+    
+    // Optional integrations for production features
+    void* agent_orchestrator_;  // AgentOrchestrator* - forward declaration issue, using void*
+    void* db_connection_;        // DatabaseConnection* - forward declaration issue, using void*
+    void* metrics_;              // MetricsCollector* - forward declaration issue, using void*
 
     // Thread-safe storage
     std::mutex sessions_mutex_;

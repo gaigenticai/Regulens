@@ -2,7 +2,7 @@
 alwaysApply: true
 ---
 0. WE DO THINGS RIGHT THE FIRST TIME. WE ARE IN NO HURRY, WE ARE BUILDING A PRODUCTION PRODUCT NOT A DEMO PRODUCT, TAKE YOUR TIME AND DO THINGS RIGHT!!
-1. No stubbs - which means you code will have no placeholder code, no fake code, no dummy code,no simplifiied,no simple,no mock,no in production, no hardcoded values, no simulate. The code must be production grade and as advanced as technologically possible. Very kindly please ensure when you are fixing the violation, you just dont end up updating the comments but actually update the code to meet the rules.
+1. No stubbs - which means you code will have no placeholder code, no fake code, no dummy code,no simplifiied,no simple,not yet implemented, no mock,no in production, no hardcoded values, no simulate. The code must be production grade and as advanced as technologically possible. Very kindly please ensure when you are fixing the violation, you just dont end up updating the comments but actually update the code to meet the rules.
 2. Code you write must be modular, which means in the future if we need to extended to add features, it must be easy to add without breaking existing functionality.
 3. Even though we are testing this in a local system, this whole product must be deployable on the cloud as well. So whereever you are using localhost now, should be tackled in a way that we can deploy on client's on-prem infra or cloud server like AWS, GCP, AZure or any other cloud provider.
 4. Before you start building any feature, you must ensure you 100% understand exsiting features so that you do not make errors in the new features.

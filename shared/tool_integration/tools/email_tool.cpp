@@ -122,36 +122,42 @@ bool EmailTool::authenticate() {
     }
     
     try {
-        // Test SMTP connection and authentication
-        SMTPClient smtp_client;
-        smtp_client.set_server(email_config_.smtp_server, email_config_.smtp_port);
-        smtp_client.set_timeout(std::chrono::seconds(10));
-        
-        // Enable TLS/SSL if configured
-        if (email_config_.use_tls) {
-            smtp_client.enable_tls();
-        }
-        
-        // Connect to SMTP server
-        if (!smtp_client.connect()) {
-            logger_->log(LogLevel::ERROR, "Failed to connect to SMTP server: " + 
-                        email_config_.smtp_server + ":" + std::to_string(email_config_.smtp_port));
+        // Production-grade SMTP connection test using libcurl
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            logger_->log(LogLevel::ERROR, "Failed to initialize curl for SMTP");
             return false;
         }
         
-        // Authenticate if credentials provided
-        if (!email_config_.smtp_username.empty()) {
-            if (!smtp_client.authenticate(email_config_.smtp_username, email_config_.smtp_password)) {
-                logger_->log(LogLevel::ERROR, "SMTP authentication failed for user: " + 
-                            email_config_.smtp_username);
-                smtp_client.disconnect();
-                return false;
-            }
+        // Build SMTP URL
+        std::string smtp_url = (email_config_.use_ssl ? "smtps://" : "smtp://") + 
+                              email_config_.smtp_server + ":" + std::to_string(email_config_.smtp_port);
+        
+        curl_easy_setopt(curl, CURLOPT_URL, smtp_url.c_str());
+        curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, email_config_.connection_timeout);
+        
+        // Enable TLS/SSL if configured
+        if (email_config_.use_tls) {
+            curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
         }
         
-        // Successful authentication - disconnect test connection
-        smtp_client.disconnect();
+        // Set authentication credentials if provided
+        if (!email_config_.username.empty()) {
+            curl_easy_setopt(curl, CURLOPT_USERNAME, email_config_.username.c_str());
+            curl_easy_setopt(curl, CURLOPT_PASSWORD, email_config_.password.c_str());
+        }
         
+        // Attempt connection
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+        
+        if (res != CURLE_OK) {
+            logger_->log(LogLevel::ERROR, "SMTP connection test failed: " + std::string(curl_easy_strerror(res)));
+            return false;
+        }
+        
+        // Successful SMTP connection test
         authenticated_ = true;
         logger_->log(LogLevel::INFO, "Email tool SMTP authentication successful");
         return true;

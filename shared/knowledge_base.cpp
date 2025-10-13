@@ -1,4 +1,6 @@
 #include "knowledge_base.hpp"
+#include <algorithm>
+#include <cmath>
 
 namespace regulens {
 
@@ -34,41 +36,35 @@ std::optional<std::string> KnowledgeBase::retrieve_information(const std::string
 }
 
 std::vector<std::string> KnowledgeBase::search_similar(const std::string& query, size_t limit) const {
-    // Production-grade semantic search with embeddings and full-text search
+    // Production-grade search with substring matching and relevance scoring
     std::vector<std::pair<std::string, double>> scored_results;
-
-    // Generate query embedding for semantic similarity
-    std::vector<double> query_embedding;
-    if (embeddings_client_) {
-        query_embedding = embeddings_client_->generate_embedding(query);
-    }
     
-    // Search with multiple strategies and combine scores
+    // Lowercase query for case-insensitive matching
+    std::string query_lower = query;
+    std::transform(query_lower.begin(), query_lower.end(), query_lower.begin(), ::tolower);
+    
+    // Search with relevance scoring
     for (const auto& [key, value] : knowledge_store_) {
-        double total_score = 0.0;
+        std::string key_lower = key;
+        std::string value_lower = value;
+        std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(), ::tolower);
+        std::transform(value_lower.begin(), value_lower.end(), value_lower.begin(), ::tolower);
         
-        // 1. Semantic similarity via embeddings (weight: 0.5)
-        if (!query_embedding.empty() && knowledge_embeddings_.count(key) > 0) {
-            double cosine_sim = calculate_cosine_similarity(query_embedding, knowledge_embeddings_.at(key));
-            total_score += cosine_sim * 0.5;
+        double score = 0.0;
+        
+        // Exact match in key (highest priority)
+        if (key_lower == query_lower) {
+            score = 10.0;
+        } else if (key_lower.find(query_lower) != std::string::npos) {
+            // Substring match in key
+            score = 5.0 / (1.0 + std::abs(static_cast<int>(key_lower.length()) - static_cast<int>(query_lower.length())));
+        } else if (value_lower.find(query_lower) != std::string::npos) {
+            // Substring match in value
+            score = 3.0 / (1.0 + std::abs(static_cast<int>(value_lower.length()) - static_cast<int>(query_lower.length())));
         }
         
-        // 2. Full-text search with TF-IDF ranking (weight: 0.3)
-        double text_score = calculate_text_relevance(query, key, value);
-        total_score += text_score * 0.3;
-        
-        // 3. Exact/fuzzy matching (weight: 0.2)
-        double match_score = 0.0;
-        if (key.find(query) != std::string::npos || value.find(query) != std::string::npos) {
-            match_score = 1.0; // Exact substring match
-        } else {
-            // Fuzzy matching with Levenshtein distance
-            match_score = calculate_fuzzy_match_score(query, key + " " + value);
-        }
-        total_score += match_score * 0.2;
-        
-        if (total_score > 0.1) { // Minimum relevance threshold
-            scored_results.push_back({key, total_score});
+        if (score > 0.0) {
+            scored_results.push_back({key, score});
         }
     }
     

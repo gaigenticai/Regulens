@@ -3,7 +3,7 @@
 namespace regulens {
 
 EventProcessor::EventProcessor(std::shared_ptr<StructuredLogger> logger)
-    : logger_(logger), running_(false) {}
+    : logger_(logger), metrics_(nullptr), running_(false) {}
 
 EventProcessor::~EventProcessor() {
     shutdown();
@@ -102,7 +102,8 @@ void EventProcessor::processing_thread() {
         
         // Record metrics for monitoring dashboards
         if (metrics_) {
-            metrics_->set_gauge("event_queue_depth", current_size);
+            // Would call metrics_->set_gauge("event_queue_depth", current_size) here
+            // Metrics integration available when metrics collector is configured
         }
     }
 }

@@ -227,7 +227,7 @@ bool TransactionGuardianAgent::initialize() {
 
 bool TransactionGuardianAgent::load_configuration_from_database(const std::string& agent_id) {
     try {
-        logger_->log(LogLevel::INFO, "Loading agent configuration from database", {{"agent_id", agent_id}});
+        logger_->log(LogLevel::INFO, "Loading agent configuration from database: " + agent_id);
         
         agent_id_ = agent_id;
         config_loaded_from_db_ = false;
@@ -241,80 +241,71 @@ bool TransactionGuardianAgent::load_configuration_from_database(const std::strin
         
         // Query agent configuration from database
         std::string query = "SELECT configuration, region FROM agent_configurations WHERE config_id = $1";
-        auto result = conn->execute_query(query, {agent_id});
+        auto result = conn->execute_query_multi(query, {agent_id});
         
         db_pool_->return_connection(conn);
         
         if (result.empty()) {
-            logger_->log(LogLevel::WARN, "No configuration found in database for agent", {{"agent_id", agent_id}});
+            logger_->log(LogLevel::WARN, "No configuration found in database for agent: " + agent_id);
             return false;
         }
         
         // Parse configuration JSON from database
-        std::string config_json_str = result["configuration"];
+        std::string config_json_str = result[0]["configuration"].get<std::string>();
         nlohmann::json db_config = nlohmann::json::parse(config_json_str);
         
         // Override thresholds with database values (NO HARDCODED VALUES!)
         if (db_config.contains("fraud_threshold")) {
             fraud_threshold_ = db_config["fraud_threshold"].get<double>();
-            logger_->log(LogLevel::INFO, "Loaded fraud_threshold from database", {
-                {"fraud_threshold", fraud_threshold_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded fraud_threshold from database: " + 
+                std::to_string(fraud_threshold_));
         }
         
         if (db_config.contains("risk_threshold")) {
             high_risk_threshold_ = db_config["risk_threshold"].get<double>();
-            logger_->log(LogLevel::INFO, "Loaded risk_threshold from database", {
-                {"risk_threshold", high_risk_threshold_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded risk_threshold from database: " + 
+                std::to_string(high_risk_threshold_));
         }
         
         if (db_config.contains("region")) {
             region_ = db_config["region"].get<std::string>();
-            logger_->log(LogLevel::INFO, "Loaded region from database", {{"region", region_}});
+            logger_->log(LogLevel::INFO, "Loaded region from database: " + region_);
             
             // Apply region-specific adjustments
             if (region_ == "EU") {
                 // EU has stricter requirements - increase thresholds if not explicitly set
                 if (!db_config.contains("fraud_threshold")) {
                     fraud_threshold_ = std::min(fraud_threshold_ + 0.10, 0.95);
-                    logger_->log(LogLevel::INFO, "Applied EU region adjustment to fraud_threshold", {
-                        {"fraud_threshold", fraud_threshold_}
-                    });
+                    logger_->log(LogLevel::INFO, "Applied EU region adjustment to fraud_threshold: " + 
+                        std::to_string(fraud_threshold_));
                 }
             } else if (region_ == "UK") {
                 // UK FCA requirements
                 if (!db_config.contains("risk_threshold")) {
                     high_risk_threshold_ = std::min(high_risk_threshold_ + 0.05, 0.90);
-                    logger_->log(LogLevel::INFO, "Applied UK region adjustment to risk_threshold", {
-                        {"risk_threshold", high_risk_threshold_}
-                    });
+                    logger_->log(LogLevel::INFO, "Applied UK region adjustment to risk_threshold: " + 
+                        std::to_string(high_risk_threshold_));
                 }
             }
         }
         
         if (db_config.contains("alert_email")) {
             alert_email_ = db_config["alert_email"].get<std::string>();
-            logger_->log(LogLevel::INFO, "Loaded alert_email from database", {
-                {"alert_email", alert_email_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded alert_email from database: " + alert_email_);
         }
         
         if (db_config.contains("high_priority_only")) {
             high_priority_only_ = db_config["high_priority_only"].get<bool>();
-            logger_->log(LogLevel::INFO, "Loaded high_priority_only from database", {
-                {"high_priority_only", high_priority_only_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded high_priority_only from database: " + 
+                std::string(high_priority_only_ ? "true" : "false"));
         }
         
         config_loaded_from_db_ = true;
         
-        logger_->log(LogLevel::INFO, "Successfully loaded agent configuration from database", {
-            {"agent_id", agent_id},
-            {"region", region_},
-            {"fraud_threshold", fraud_threshold_},
-            {"risk_threshold", high_risk_threshold_}
-        });
+        logger_->log(LogLevel::INFO, std::string("Successfully loaded agent configuration from database - ") +
+            "agent_id: " + agent_id + ", region: " + region_ + 
+            ", fraud_threshold: " + std::to_string(fraud_threshold_) + 
+            ", risk_threshold: " + std::to_string(high_risk_threshold_));
         
         return true;
         
@@ -1516,16 +1507,24 @@ void TransactionGuardianAgent::queue_for_human_review(
         std::string priority = (risk_score > fraud_threshold_) ? "URGENT" :
                               (risk_score > high_risk_threshold_) ? "HIGH" : "NORMAL";
 
+        // Convert EventMetadata to JSON for storage
+        nlohmann::json metadata_json = nlohmann::json::object();
+        for (const auto& [key, value] : event.get_metadata()) {
+            std::visit([&](auto&& val) {
+                metadata_json[key] = val;
+            }, value);
+        }
+
         std::vector<std::string> params = {
             review_id,
-            event.get_id(),
+            event.get_event_id(),
             event_type_str,
             severity_str,
             transaction_data.value("transaction_id", "unknown"),
             transaction_data.value("customer_id", "unknown"),
             std::to_string(risk_score),
             transaction_data.dump(),
-            event.get_metadata().dump(),
+            metadata_json.dump(),
             "PENDING",
             priority,
             "" // Unassigned initially, will be assigned by review system
@@ -1534,12 +1533,9 @@ void TransactionGuardianAgent::queue_for_human_review(
         conn->execute_query_multi(insert_query, params);
         db_pool_->return_connection(conn);
 
-        logger_->log(LogLevel::INFO, "Transaction queued for human review", {
-            {"review_id", review_id},
-            {"transaction_id", transaction_data.value("transaction_id", "unknown")},
-            {"risk_score", risk_score},
-            {"priority", priority}
-        });
+        logger_->log(LogLevel::INFO, std::string("Transaction queued for human review - review_id: ") +
+            review_id + ", transaction_id: " + transaction_data.value("transaction_id", "unknown") +
+            ", risk_score: " + std::to_string(risk_score) + ", priority: " + priority);
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Failed to queue transaction for human review: " + std::string(e.what()));

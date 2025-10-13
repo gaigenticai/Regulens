@@ -155,6 +155,15 @@ private:
     // Metrics
     std::atomic<size_t> total_probes_{0};
     std::atomic<size_t> failed_probes_{0};
+    
+    // Production-grade probe tracking (per probe type)
+    std::unordered_map<HealthProbeType, std::chrono::system_clock::time_point> last_probe_time_;
+    
+    // Database connection for health checks (void* to avoid circular dependencies)
+    void* db_connection_{nullptr};
+    
+    // Instance identifier for distributed deployments
+    std::string instance_id_;
 
     /**
      * @brief Execute health checks for specific probe type

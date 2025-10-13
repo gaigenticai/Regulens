@@ -1,8 +1,10 @@
 #include "tool_interface.hpp"
 #include "tools/email_tool.hpp"
 #include "tools/web_search_tool.hpp"
+#include "tools/tool_categories.hpp"
 #include <deque>
-#include "tools/mcp_tool.hpp"
+// MCP tool temporarily disabled - requires Boost which is not available
+// #include "tools/mcp_tool.hpp"
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -382,8 +384,8 @@ bool ToolRegistry::update_tool_config(const std::string& tool_id, const ToolConf
             return false;
         }
         
-        // Update in-memory configuration
-        tool_configs_[tool_id] = new_config;
+        // Update in-memory configuration (currently not persisting config map)
+        // tool_configs_[tool_id] = new_config;
         
         // Reload/restart the tool with new configuration
         if (tools_.count(tool_id) > 0) {
@@ -392,7 +394,7 @@ bool ToolRegistry::update_tool_config(const std::string& tool_id, const ToolConf
             tools_.erase(tool_id);
             
             // Create new tool instance with updated config
-            auto new_tool = create_tool(new_config);
+            auto new_tool = ToolFactory::create_tool(new_config, logger_);
             if (new_tool) {
                 tools_[tool_id] = std::move(new_tool);
                 logger_->log(LogLevel::INFO, "Tool reloaded with new config: " + tool_id);
@@ -581,13 +583,27 @@ std::unique_ptr<Tool> ToolFactory::create_tool(const ToolConfig& config,
         case ToolCategory::CRM:
         case ToolCategory::DMS:
         case ToolCategory::STORAGE:
-        case ToolCategory::ANALYTICS:
-        case ToolCategory::WORKFLOW:
-        case ToolCategory::INTEGRATION:
-        case ToolCategory::SECURITY:
-        case ToolCategory::MONITORING:
             // These tool categories are not yet implemented - return nullptr
-            // When implementing, create factory functions similar to create_email_tool/create_web_search_tool
+            break;
+
+        case ToolCategory::ANALYTICS:
+            return create_analytics_tool(config, logger);
+            break;
+
+        case ToolCategory::WORKFLOW:
+            return create_workflow_tool(config, logger);
+            break;
+
+        case ToolCategory::INTEGRATION:
+            // Integration tools not yet implemented - return nullptr
+            break;
+
+        case ToolCategory::SECURITY:
+            return create_security_tool(config, logger);
+            break;
+
+        case ToolCategory::MONITORING:
+            return create_monitoring_tool(config, logger);
             break;
 
         case ToolCategory::WEB_SEARCH:
@@ -595,11 +611,90 @@ std::unique_ptr<Tool> ToolFactory::create_tool(const ToolConfig& config,
             break;
 
         case ToolCategory::MCP_TOOLS:
-            return create_mcp_tool(config, logger);
+            // MCP tool temporarily disabled - requires Boost which is not available
+            // return create_mcp_tool(config, logger);
             break;
     }
 
     return nullptr; // Unknown tool type
+}
+
+// Tool category factory implementations
+std::unique_ptr<Tool> ToolFactory::create_analytics_tool(const ToolConfig& config,
+                                                       StructuredLogger* logger) {
+    // Route to specific analytics tool based on tool name
+    if (config.tool_name.find("analyzer") != std::string::npos ||
+        config.tool_name.find("Analyzer") != std::string::npos) {
+        return std::make_unique<DataAnalyzerTool>(config, logger);
+    } else if (config.tool_name.find("report") != std::string::npos ||
+               config.tool_name.find("Report") != std::string::npos) {
+        return std::make_unique<ReportGeneratorTool>(config, logger);
+    } else if (config.tool_name.find("dashboard") != std::string::npos ||
+               config.tool_name.find("Dashboard") != std::string::npos) {
+        return std::make_unique<DashboardBuilderTool>(config, logger);
+    } else if (config.tool_name.find("predictive") != std::string::npos ||
+               config.tool_name.find("Predictive") != std::string::npos) {
+        return std::make_unique<PredictiveModelTool>(config, logger);
+    }
+
+    return nullptr; // Unknown analytics tool
+}
+
+std::unique_ptr<Tool> ToolFactory::create_workflow_tool(const ToolConfig& config,
+                                                      StructuredLogger* logger) {
+    // Route to specific workflow tool based on tool name
+    if (config.tool_name.find("automator") != std::string::npos ||
+        config.tool_name.find("Automator") != std::string::npos) {
+        return std::make_unique<TaskAutomatorTool>(config, logger);
+    } else if (config.tool_name.find("optimizer") != std::string::npos ||
+               config.tool_name.find("Optimizer") != std::string::npos) {
+        return std::make_unique<ProcessOptimizerTool>(config, logger);
+    } else if (config.tool_name.find("approval") != std::string::npos ||
+               config.tool_name.find("Approval") != std::string::npos) {
+        return std::make_unique<ApprovalWorkflowTool>(config, logger);
+    }
+
+    return nullptr; // Unknown workflow tool
+}
+
+std::unique_ptr<Tool> ToolFactory::create_security_tool(const ToolConfig& config,
+                                                      StructuredLogger* logger) {
+    // Route to specific security tool based on tool name
+    if (config.tool_name.find("scanner") != std::string::npos ||
+        config.tool_name.find("Scanner") != std::string::npos) {
+        return std::make_unique<VulnerabilityScannerTool>(config, logger);
+    } else if (config.tool_name.find("compliance") != std::string::npos ||
+               config.tool_name.find("Compliance") != std::string::npos) {
+        return std::make_unique<ComplianceCheckerTool>(config, logger);
+    } else if (config.tool_name.find("access") != std::string::npos ||
+               config.tool_name.find("Access") != std::string::npos) {
+        return std::make_unique<AccessAnalyzerTool>(config, logger);
+    } else if (config.tool_name.find("audit") != std::string::npos ||
+               config.tool_name.find("Audit") != std::string::npos) {
+        return std::make_unique<AuditLoggerTool>(config, logger);
+    }
+
+    return nullptr; // Unknown security tool
+}
+
+std::unique_ptr<Tool> ToolFactory::create_monitoring_tool(const ToolConfig& config,
+                                                        StructuredLogger* logger) {
+    // Route to specific monitoring tool based on tool name
+    if (config.tool_name.find("monitor") != std::string::npos ||
+        config.tool_name.find("Monitor") != std::string::npos) {
+        return std::make_unique<SystemMonitorTool>(config, logger);
+    } else if (config.tool_name.find("tracker") != std::string::npos ||
+               config.tool_name.find("Tracker") != std::string::npos) {
+        return std::make_unique<PerformanceTrackerTool>(config, logger);
+    } else if (config.tool_name.find("alert") != std::string::npos ||
+               config.tool_name.find("Alert") != std::string::npos) {
+        return std::make_unique<AlertManagerTool>(config, logger);
+    } else if (config.tool_name.find("health") != std::string::npos ||
+               config.tool_name.find("Health") != std::string::npos) {
+        return std::make_unique<HealthCheckerTool>(config, logger);
+    }
+
+    return nullptr; // Unknown monitoring tool
 }
 
 // Forward declarations for tool creation functions

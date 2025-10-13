@@ -49,7 +49,7 @@ bool RedisConnectionWrapper::connect() {
         // Set connection timeout
         struct timeval timeout = {
             static_cast<long>(config_.connect_timeout.count() / 1000),
-            static_cast<long>((config_.connect_timeout.count() % 1000) * 1000)
+            static_cast<int>((config_.connect_timeout.count() % 1000) * 1000)
         };
         redisSetTimeout(redis_context, timeout);
 
@@ -451,7 +451,7 @@ bool RedisClient::initialize() {
         load_config();
 
         // Initialize connection pool with production hiredis connections
-        connection_pool_ = std::make_shared<RedisConnectionPool>(redis_config_, logger_);
+        connection_pool_ = std::make_unique<RedisConnectionPool>(redis_config_, logger_);
 
         if (!connection_pool_->initialize()) {
             if (logger_) {

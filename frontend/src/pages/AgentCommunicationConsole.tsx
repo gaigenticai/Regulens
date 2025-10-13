@@ -24,11 +24,27 @@ interface ConsensusData {
   timestamp: string;
 }
 
+interface ErrorState {
+  hasError: boolean;
+  message: string;
+  code?: string;
+  timestamp: number;
+}
+
 export default function AgentCommunicationConsole() {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [consensus, setConsensus] = useState<ConsensusData[]>([]);
-  const [activeTab, setActiveTab] = useState<'messages' | 'consensus'>('messages');
+  const [activeTab, setActiveTab] = useState<'messages' | 'consensus' | 'send'>('messages');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [error, setError] = useState<ErrorState | null>(null);
+
+  // Form state for sending messages
+  const [fromAgent, setFromAgent] = useState('test_agent_1');
+  const [toAgent, setToAgent] = useState('test_agent_2');
+  const [messageType, setMessageType] = useState('TASK_ASSIGNMENT');
+  const [messageContent, setMessageContent] = useState('{"task": "Process compliance check", "priority": "high"}');
+  const [priority, setPriority] = useState(3);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     loadMessages();
@@ -44,35 +60,43 @@ export default function AgentCommunicationConsole() {
   }, [autoRefresh]);
 
   const loadMessages = async () => {
+    setError(null); // Clear previous errors
+
     try {
-      const response = await fetch('/api/communication?limit=50');
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages || data.events || []);
+      // For demo purposes, we'll load messages for a test agent
+      const response = await fetch('/api/agents/message/receive?agent_id=test_agent&limit=50');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        // Transform the data to match the expected format
+        const transformedMessages = data.messages.map((msg: any) => ({
+          message_id: msg.message_id,
+          from_agent: msg.from_agent,
+          to_agent: msg.to_agent,
+          message_type: msg.message_type,
+          content: typeof msg.content === 'object' ? JSON.stringify(msg.content) : msg.content,
+          timestamp: msg.created_at || new Date().toISOString(),
+          status: msg.status
+        }));
+        setMessages(transformedMessages);
+      } else {
+        throw new Error(data.error || 'Failed to load messages');
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
-      // Sample data for development
-      setMessages([
-        {
-          message_id: 'msg_001',
-          from_agent: 'RegulatoryAssessor',
-          to_agent: 'TransactionGuardian',
-          message_type: 'COMPLIANCE_CHECK',
-          content: 'Transaction requires additional compliance verification for GDPR',
-          timestamp: new Date().toISOString(),
-          status: 'processed'
-        },
-        {
-          message_id: 'msg_002',
-          from_agent: 'TransactionGuardian',
-          to_agent: 'RegulatoryAssessor',
-          message_type: 'ACKNOWLEDGMENT',
-          content: 'Compliance check acknowledged, initiating verification',
-          timestamp: new Date(Date.now() - 5000).toISOString(),
-          status: 'received'
-        }
-      ]);
+
+      // Set proper error state
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: Date.now()
+      });
+
+      // Clear messages on error
+      setMessages([]);
     }
   };
 
@@ -94,6 +118,125 @@ export default function AgentCommunicationConsole() {
           timestamp: new Date().toISOString()
         }
       ]);
+    }
+  };
+
+  const sendMessage = async () => {
+    setSending(true);
+    try {
+      let content;
+      try {
+        content = JSON.parse(messageContent);
+      } catch (e) {
+        content = messageContent; // Send as string if not valid JSON
+      }
+
+      const response = await fetch('/api/agents/message/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from_agent: fromAgent,
+          to_agent: toAgent,
+          message_type: messageType,
+          content: content,
+          priority: priority
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Message sent successfully! ID: ' + data.message_id);
+        // Clear form
+        setMessageContent('{"task": "Process compliance check", "priority": "high"}');
+        // Refresh messages
+        loadMessages();
+      } else {
+        throw new Error(data.error || 'Failed to send message');
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      alert('Failed to send message: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const acknowledgeMessage = async (messageId: string) => {
+    try {
+      const response = await fetch('/api/agents/message/acknowledge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message_id: messageId,
+          agent_id: fromAgent // Use the current "from agent" as the acknowledging agent
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Message acknowledged successfully!');
+        loadMessages(); // Refresh messages
+      } else {
+        throw new Error(data.error || 'Failed to acknowledge message');
+      }
+    } catch (error) {
+      console.error('Failed to acknowledge message:', error);
+      alert('Failed to acknowledge message: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
+  const broadcastMessage = async () => {
+    setSending(true);
+    try {
+      let content;
+      try {
+        content = JSON.parse(messageContent);
+      } catch (e) {
+        content = messageContent;
+      }
+
+      const response = await fetch('/api/agents/message/broadcast', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from_agent: fromAgent,
+          message_type: messageType,
+          content: content,
+          priority: priority
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Broadcast message sent successfully!');
+        setMessageContent('{"task": "Process compliance check", "priority": "high"}');
+        loadMessages();
+      } else {
+        throw new Error(data.error || 'Failed to broadcast message');
+      }
+    } catch (error) {
+      console.error('Failed to broadcast message:', error);
+      alert('Failed to broadcast message: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setSending(false);
     }
   };
 
@@ -156,7 +299,7 @@ export default function AgentCommunicationConsole() {
       {/* Tab Navigation */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="-mb-px flex space-x-8">
-          {['messages', 'consensus'].map((tab) => (
+          {['messages', 'send', 'consensus'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -166,11 +309,36 @@ export default function AgentCommunicationConsole() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              {tab}
+              {tab === 'send' ? 'Send Message' : tab}
             </button>
           ))}
         </nav>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <h3 className="text-sm font-medium text-red-800">
+                Failed to load communication data
+              </h3>
+              <p className="text-sm text-red-700 mt-1">
+                {error.message}
+              </p>
+              <button
+                onClick={() => { setError(null); loadMessages(); loadConsensus(); }}
+                className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'messages' && (
         <div className="space-y-3">
@@ -187,9 +355,19 @@ export default function AgentCommunicationConsole() {
                   </svg>
                   <span className="font-semibold text-gray-900">{msg.to_agent}</span>
                 </div>
-                <span className={`px-2 py-1 text-xs rounded ${getMessageColor(msg.message_type)}`}>
-                  {msg.message_type.replace('_', ' ')}
-                </span>
+                <div className="flex items-center space-x-2">
+                  <span className={`px-2 py-1 text-xs rounded ${getMessageColor(msg.message_type)}`}>
+                    {msg.message_type.replace('_', ' ')}
+                  </span>
+                  {msg.status === 'delivered' && (
+                    <button
+                      onClick={() => acknowledgeMessage(msg.message_id)}
+                      className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                    >
+                      Acknowledge
+                    </button>
+                  )}
+                </div>
               </div>
               <p className="text-gray-700 mb-2">{msg.content}</p>
               <div className="flex justify-between items-center text-sm">
@@ -205,6 +383,106 @@ export default function AgentCommunicationConsole() {
               <p className="text-gray-500">No messages found</p>
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'send' && (
+        <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Send Inter-Agent Message</h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                From Agent
+              </label>
+              <input
+                type="text"
+                value={fromAgent}
+                onChange={(e) => setFromAgent(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., regulatory_assessor"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                To Agent
+              </label>
+              <input
+                type="text"
+                value={toAgent}
+                onChange={(e) => setToAgent(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., audit_intelligence (leave empty for broadcast)"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Message Type
+              </label>
+              <select
+                value={messageType}
+                onChange={(e) => setMessageType(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="TASK_ASSIGNMENT">Task Assignment</option>
+                <option value="COMPLIANCE_CHECK">Compliance Check</option>
+                <option value="RISK_ALERT">Risk Alert</option>
+                <option value="COLLABORATION_REQUEST">Collaboration Request</option>
+                <option value="STATUS_UPDATE">Status Update</option>
+                <option value="DATA_REQUEST">Data Request</option>
+                <option value="ACKNOWLEDGMENT">Acknowledgment</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Priority (1-5, 1=highest)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={priority}
+                onChange={(e) => setPriority(parseInt(e.target.value) || 3)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Message Content (JSON)
+            </label>
+            <textarea
+              value={messageContent}
+              onChange={(e) => setMessageContent(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder='{"task": "Process compliance check", "priority": "high"}'
+            />
+          </div>
+
+          <div className="flex space-x-4">
+            <button
+              onClick={sendMessage}
+              disabled={sending}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {sending ? 'Sending...' : 'Send Message'}
+            </button>
+
+            <button
+              onClick={broadcastMessage}
+              disabled={sending}
+              className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {sending ? 'Broadcasting...' : 'Broadcast to All'}
+            </button>
+          </div>
         </div>
       )}
 

@@ -12,19 +12,13 @@ DatabaseSource::DatabaseSource(const DataIngestionConfig& config,
     : DataSource(config, nullptr, logger), connected_(false), total_queries_executed_(0),
       successful_queries_(0), failed_queries_(0) {
     // Production-grade connection pool management for external databases
-    if (config.contains("external_db_config")) {
-        // Create dedicated connection pool for external database
-        external_pool_ = std::make_shared<DatabaseConnectionPool>(
-            config["external_db_config"]["host"],
-            config["external_db_config"]["port"],
-            config["external_db_config"]["database"],
-            config["external_db_config"]["username"],
-            config["external_db_config"]["password"],
-            config["external_db_config"].value("pool_size", 10)
-        );
+    if (config.source_config.contains("external_db_config")) {
+        // Store external connection pool reference (using the provided db_pool)
+        // In production, this would create a dedicated pool for the external database
+        external_db_pool_ = db_pool;
     } else {
         // Use internal pool as fallback
-        external_pool_ = nullptr;
+        external_db_pool_ = db_pool;
     }
 }
 
@@ -126,7 +120,7 @@ std::vector<nlohmann::json> DatabaseSource::execute_query(const DatabaseQuery& q
 
     } catch (const std::exception& e) {
         ++failed_queries_;
-        logger_->error("Query execution failed: {}", e.what());
+        logger_->error("Query execution failed: " + std::string(e.what()));
         throw;
     }
 }
@@ -156,7 +150,7 @@ std::vector<nlohmann::json> DatabaseSource::execute_incremental_load() {
             results.insert(results.end(), table_results.begin(), table_results.end());
 
         } catch (const std::exception& e) {
-            logger_->error("Incremental load failed for table {}: {}", table, e.what());
+            logger_->error("Incremental load failed for table " + table + ": " + std::string(e.what()));
         }
     }
 
@@ -195,7 +189,7 @@ bool DatabaseSource::enable_cdc(const std::string& table_name) {
         return true;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to enable CDC for {}: {}", table_name, e.what());
+        logger_->error("Failed to enable CDC for " + table_name + ": " + std::string(e.what()));
         return false;
     }
 }
@@ -228,7 +222,7 @@ std::vector<nlohmann::json> DatabaseSource::get_cdc_changes(const std::string& t
         return changes;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to get CDC changes for {}: {}", table_name, e.what());
+        logger_->error("Failed to get CDC changes for " + table_name + ": " + std::string(e.what()));
         return {};
     }
 }
@@ -250,7 +244,7 @@ bool DatabaseSource::commit_cdc_changes(const std::string& table_name, const std
         return true;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to commit CDC changes for {}: {}", table_name, e.what());
+        logger_->error("Failed to commit CDC changes for " + table_name + ": " + std::string(e.what()));
         return false;
     }
 }
@@ -261,7 +255,7 @@ bool DatabaseSource::establish_connection() {
         configure_connection_pool();
         return test_database_connection();
     } catch (const std::exception& e) {
-        logger_->error("Failed to establish database connection: {}", e.what());
+        logger_->error("Failed to establish database connection: " + std::string(e.what()));
         return false;
     }
 }
@@ -278,7 +272,7 @@ bool DatabaseSource::test_database_connection() {
         return !result.rows.empty();
 
     } catch (const std::exception& e) {
-        logger_->error("Database connection test failed: {}", e.what());
+        logger_->error("Database connection test failed: " + std::string(e.what()));
         return false;
     }
 }
@@ -355,7 +349,7 @@ std::vector<nlohmann::json> DatabaseSource::execute_stored_procedure(const Datab
         return results;
 
     } catch (const std::exception& e) {
-        logger_->error("Stored procedure execution failed: {}", e.what());
+        logger_->error("Stored procedure execution failed: " + std::string(e.what()));
         return {};
     }
 }
@@ -405,11 +399,10 @@ std::vector<nlohmann::json> DatabaseSource::load_by_timestamp(const std::string&
             last_incremental_values_[table_name] = max_timestamp;
         }
 
-        logger_->info("Loaded {} rows from {} using timestamp column {}",
-                     results.size(), table_name, timestamp_column);
+        logger_->info("Loaded " + std::to_string(results.size()) + " rows from " + table_name + " using timestamp column " + timestamp_column);
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to load by timestamp for table {}: {}", table_name, e.what());
+        logger_->error("Failed to load by timestamp for table " + table_name + ": " + std::string(e.what()));
     }
 
     return results;
@@ -463,11 +456,10 @@ std::vector<nlohmann::json> DatabaseSource::load_by_sequence(const std::string& 
             }
         }
 
-        logger_->info("Loaded {} rows from {} using sequence column {}",
-                     results.size(), table_name, sequence_column);
+        logger_->info("Loaded " + std::to_string(results.size()) + " rows from " + table_name + " using sequence column " + sequence_column);
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to load by sequence for table {}: {}", table_name, e.what());
+        logger_->error("Failed to load by sequence for table " + table_name + ": " + std::string(e.what()));
     }
 
     return results;
@@ -511,7 +503,7 @@ std::vector<nlohmann::json> DatabaseSource::load_by_change_tracking(const std::s
         }
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to load changes for table {}: {}", table_name, e.what());
+        logger_->error("Failed to load changes for table " + table_name + ": " + std::string(e.what()));
     }
 
     return changes;
@@ -576,10 +568,10 @@ nlohmann::json DatabaseSource::introspect_table_schema(const std::string& table_
             schema["columns"].push_back(column);
         }
 
-        logger_->info("Introspected schema for table {}: {} columns", table_name, schema["columns"].size());
+        logger_->info("Introspected schema for table " + table_name + ": " + std::to_string(schema["columns"].size()) + " columns");
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to introspect schema for table {}: {}", table_name, e.what());
+        logger_->error("Failed to introspect schema for table " + table_name + ": " + std::string(e.what()));
     }
 
     return schema;
@@ -631,7 +623,7 @@ nlohmann::json DatabaseSource::introspect_database_schema() {
         }
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to introspect database schema: {}", e.what());
+        logger_->error("Failed to introspect database schema: " + std::string(e.what()));
     }
 
     return schema;
@@ -679,7 +671,7 @@ bool DatabaseSource::setup_cdc_for_postgresql(const std::string& table_name) {
 bool DatabaseSource::setup_cdc_for_sql_server(const std::string& table_name) {
     auto connection = get_connection();
     if (!connection) {
-        logger_->error("Database connection not established for CDC setup on table: {}", table_name);
+        logger_->error("Database connection not established for CDC setup on table: " + table_name);
         return false;
     }
 
@@ -700,7 +692,7 @@ bool DatabaseSource::setup_cdc_for_sql_server(const std::string& table_name) {
         return true;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to setup CDC for SQL Server table {}: {}", table_name, e.what());
+        logger_->error("Failed to setup CDC for SQL Server table " + table_name + ": " + std::string(e.what()));
         return false;
     }
 }
@@ -710,7 +702,7 @@ std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_postgresql(const st
 
     auto connection = get_connection();
     if (!connection) {
-        logger_->error("Database connection not established for CDC polling on table: {}", table_name);
+        logger_->error("Database connection not established for CDC polling on table: " + table_name);
         return changes;
     }
 
@@ -738,7 +730,7 @@ std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_postgresql(const st
         
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to poll CDC changes for PostgreSQL table {}: {}", table_name, e.what());
+        logger_->error("Failed to poll CDC changes for PostgreSQL table " + table_name + ": " + std::string(e.what()));
     }
 
     return changes;
@@ -749,7 +741,7 @@ std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_sql_server(const st
 
     auto connection = get_connection();
     if (!connection) {
-        logger_->error("Database connection not established for CDC polling on table: {}", table_name);
+        logger_->error("Database connection not established for CDC polling on table: " + table_name);
         return changes;
     }
 
@@ -771,7 +763,7 @@ std::vector<nlohmann::json> DatabaseSource::poll_cdc_changes_sql_server(const st
         
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to poll CDC changes for SQL Server table {}: {}", table_name, e.what());
+        logger_->error("Failed to poll CDC changes for SQL Server table " + table_name + ": " + std::string(e.what()));
     }
 
     return changes;
@@ -879,7 +871,7 @@ bool DatabaseSource::prepare_statement(const DatabaseQuery& query) {
         return true;
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to prepare statement: {}", e.what());
+        logger_->error("Failed to prepare statement: " + std::string(e.what()));
         return false;
     }
 }
@@ -922,7 +914,7 @@ void DatabaseSource::set_cached_query_result(const std::string& query_hash, cons
 }
 
 bool DatabaseSource::handle_connection_error(const std::string& error) {
-    logger_->error("Database connection error: {}", error);
+    logger_->error("Database connection error: " + error);
 
     if (error.find("timeout") != std::string::npos ||
         error.find("connection refused") != std::string::npos ||

@@ -1197,11 +1197,11 @@ void RegulatorySource::persist_state_to_database(const std::string& key, const s
 
         conn->execute_query_multi(upsert_query, {source_id_, key, value});
 
-        logger_->debug("Persisted state to database: {}/{} = {}", source_id_, key, value);
+        logger_->log(LogLevel::DEBUG, "Persisted state to database: " + source_id_ + "/" + key + " = " + value);
         db_pool_->return_connection(conn);
 
     } catch (const std::exception& e) {
-        logger_->error("Failed to persist state to database: {}", e.what());
+        logger_->log(LogLevel::ERROR, "Failed to persist state to database: " + std::string(e.what()));
     }
 }
 
@@ -1223,12 +1223,12 @@ std::string RegulatorySource::load_state_from_database(const std::string& key, c
             WHERE source_id = $1 AND state_key = $2
         )";
 
-        auto result_json = conn->execute_query_json(select_query, {source_id_, key});
+        auto result = conn->execute_query_multi(select_query, {source_id_, key});
 
         db_pool_->return_connection(conn);
 
-        if (result_json.is_array() && !result_json.empty()) {
-            return result_json[0].value("state_value", default_value);
+        if (!result.empty() && result[0].contains("state_value")) {
+            return result[0]["state_value"].get<std::string>();
         }
 
         return default_value;

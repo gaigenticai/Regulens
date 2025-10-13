@@ -70,6 +70,7 @@ enum class DataQuality {
 enum class IngestionStatus {
     PENDING,
     PROCESSING,
+    PAUSED,
     COMPLETED,
     FAILED,
     RETRYING,
@@ -201,6 +202,23 @@ private:
     std::unordered_map<std::string, DataIngestionConfig> source_configs_;
     std::unordered_map<std::string, std::unique_ptr<DataSource>> active_sources_;
     std::unordered_map<std::string, std::unique_ptr<IngestionPipeline>> active_pipelines_;
+    
+    // Production-grade source state tracking for pause/resume functionality
+    struct SourceState {
+        IngestionStatus status;
+        std::chrono::system_clock::time_point pause_timestamp;
+        std::chrono::system_clock::time_point last_activity;
+        int retry_count = 0;
+        std::chrono::system_clock::time_point last_retry_attempt;
+    };
+    std::unordered_map<std::string, SourceState> source_states_;
+    mutable std::mutex sources_mutex_;
+    
+    // Retry tracking helper methods
+    int get_retry_count(const std::string& source_id);
+    std::chrono::system_clock::time_point get_last_retry_attempt(const std::string& source_id);
+    void reset_retry_count(const std::string& source_id);
+    void increment_retry_count(const std::string& source_id);
 
     std::queue<IngestionBatch> batch_queue_;
     mutable std::mutex queue_mutex_;

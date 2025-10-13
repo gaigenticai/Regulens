@@ -50,7 +50,7 @@ bool AuditIntelligenceAgent::initialize() {
 
 bool AuditIntelligenceAgent::load_configuration_from_database(const std::string& agent_id) {
     try {
-        logger_->log(LogLevel::INFO, "Loading Audit Intelligence agent configuration from database", {{"agent_id", agent_id}});
+        logger_->log(LogLevel::INFO, "Loading Audit Intelligence agent configuration from database: " + agent_id);
         
         agent_id_ = agent_id;
         config_loaded_from_db_ = false;
@@ -64,63 +64,56 @@ bool AuditIntelligenceAgent::load_configuration_from_database(const std::string&
         
         // Query agent configuration from database
         std::string query = "SELECT configuration FROM agent_configurations WHERE config_id = $1";
-        auto result = conn->execute_query(query, {agent_id});
+        auto result = conn->execute_query_multi(query, {agent_id});
         
         db_pool_->return_connection(conn);
         
         if (result.empty()) {
-            logger_->log(LogLevel::WARN, "No configuration found in database for agent", {{"agent_id", agent_id}});
+            logger_->log(LogLevel::WARN, "No configuration found in database for agent: " + agent_id);
             return false;
         }
         
         // Parse configuration JSON from database
-        std::string config_json_str = result["configuration"];
+        std::string config_json_str = result[0]["configuration"].get<std::string>();
         nlohmann::json db_config = nlohmann::json::parse(config_json_str);
         
         // Override anomaly threshold with database value (NO HARDCODED VALUES!)
         if (db_config.contains("anomaly_threshold")) {
             anomaly_threshold_ = db_config["anomaly_threshold"].get<double>();
-            logger_->log(LogLevel::INFO, "Loaded anomaly_threshold from database", {
-                {"anomaly_threshold", anomaly_threshold_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded anomaly_threshold from database: " + 
+                std::to_string(anomaly_threshold_));
         } else if (db_config.contains("risk_threshold")) {
             // User might have set risk_threshold in UI for Audit Intelligence
             anomaly_threshold_ = db_config["risk_threshold"].get<double>();
-            logger_->log(LogLevel::INFO, "Loaded anomaly_threshold from risk_threshold field", {
-                {"anomaly_threshold", anomaly_threshold_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded anomaly_threshold from risk_threshold field: " + 
+                std::to_string(anomaly_threshold_));
         }
         
         if (db_config.contains("region")) {
             region_ = db_config["region"].get<std::string>();
-            logger_->log(LogLevel::INFO, "Loaded region from database", {{"region", region_}});
+            logger_->log(LogLevel::INFO, "Loaded region from database: " + region_);
             
             // Apply region-specific adjustments for audit sensitivity
             if (region_ == "EU") {
                 // EU GDPR requires more thorough auditing
                 if (!db_config.contains("anomaly_threshold")) {
                     anomaly_threshold_ = std::min(anomaly_threshold_ + 0.05, 0.95);
-                    logger_->log(LogLevel::INFO, "Applied EU GDPR adjustment to anomaly_threshold", {
-                        {"anomaly_threshold", anomaly_threshold_}
-                    });
+                    logger_->log(LogLevel::INFO, "Applied EU GDPR adjustment to anomaly_threshold: " + 
+                        std::to_string(anomaly_threshold_));
                 }
             }
         }
         
         if (db_config.contains("alert_email")) {
             alert_email_ = db_config["alert_email"].get<std::string>();
-            logger_->log(LogLevel::INFO, "Loaded alert_email from database", {
-                {"alert_email", alert_email_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded alert_email from database: " + alert_email_);
         }
         
         config_loaded_from_db_ = true;
         
-        logger_->log(LogLevel::INFO, "Successfully loaded Audit Intelligence agent configuration from database", {
-            {"agent_id", agent_id},
-            {"region", region_},
-            {"anomaly_threshold", anomaly_threshold_}
-        });
+        logger_->log(LogLevel::INFO, std::string("Successfully loaded Audit Intelligence agent configuration from database - ") +
+            "agent_id: " + agent_id + ", region: " + region_ + 
+            ", anomaly_threshold: " + std::to_string(anomaly_threshold_));
         
         return true;
         

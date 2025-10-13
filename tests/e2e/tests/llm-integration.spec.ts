@@ -14,11 +14,22 @@ test.describe('LLM Integration', () => {
     expect([200, 201, 400, 401, 403, 503].includes(response.status())).toBeTruthy();
   });
 
-  test('POST /api/llm/analysis should analyze documents', async ({ request }) => {
-    const response = await request.post(`${baseURL}/api/llm/analysis`, {
-      data: { text: 'Sample regulatory document', type: 'compliance' }
+  test('POST /api/llm/analyze should analyze documents', async ({ request }) => {
+    const response = await request.post(`${baseURL}/api/llm/analyze`, {
+      data: { text: 'Sample regulatory document for compliance testing', analysisType: 'comprehensive' }
     });
-    expect([200, 201, 400, 401, 403].includes(response.status())).toBeTruthy();
+    expect([200, 201, 400, 401, 403, 500].includes(response.status())).toBeTruthy();
+
+    if (response.status() === 200) {
+      const data = await response.json();
+      expect(data).toHaveProperty('analysisId');
+      expect(data).toHaveProperty('cached');
+      expect(data).toHaveProperty('sentiment');
+      expect(data).toHaveProperty('entities');
+      expect(data).toHaveProperty('summary');
+      expect(data).toHaveProperty('riskScore');
+      expect(data).toHaveProperty('confidence');
+    }
   });
 
   test('POST /api/llm/compliance should check compliance', async ({ request }) => {

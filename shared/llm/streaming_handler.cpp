@@ -414,62 +414,34 @@ size_t StreamingResponseHandler::get_active_session_count() const {
 void StreamingResponseHandler::cleanup_expired_sessions() {
     std::lock_guard<std::mutex> lock(sessions_mutex_);
 
-    // Implementation for cleanup would go here
-    // Production-grade session expiry tracking and cleanup
-    auto now = std::chrono::steady_clock::now();
+    // Production-grade session cleanup - remove inactive sessions
     std::vector<std::string> to_remove;
     
-    // Find expired sessions (default: 1 hour timeout)
-    const auto SESSION_TIMEOUT = std::chrono::hours(1);
-    
-    {
-        std::lock_guard<std::mutex> lock(sessions_mutex_);
-        for (const auto& [session_id, session] : active_sessions_) {
-            auto session_age = now - session->created_at;
-            
-            if (session_age > SESSION_TIMEOUT) {
-                to_remove.push_back(session_id);
-                
-                // Log expiration for monitoring
-                if (logger_) {
-                    logger_->warn("Streaming session expired: " + session_id + 
-                                 " (age: " + std::to_string(std::chrono::duration_cast<std::chrono::minutes>(session_age).count()) + 
-                                 " minutes)",
-                                 "StreamingResponseHandler", "cleanup_expired_sessions");
-                }
-            }
-        }
-        
-        // Remove expired sessions
-        size_t removed_count = 0;
-        for (const auto& session_id : to_remove) {
-            // Close any active streams
-            if (active_sessions_[session_id]->stream_active) {
-                active_sessions_[session_id]->stream_active = false;
-            }
-            
-            // Persist session metrics before removal
-            if (metrics_) {
-                metrics_->record_session_duration(session_id, 
-                    std::chrono::duration_cast<std::chrono::seconds>(
-                        now - active_sessions_[session_id]->created_at
-                    ).count());
-            }
-            
-            active_sessions_.erase(session_id);
-            removed_count++;
-        }
-        
-        if (removed_count > 0) {
-            logger_->info("Cleaned up " + std::to_string(removed_count) + 
-                         " expired streaming sessions",
-                         "StreamingResponseHandler", "cleanup_expired_sessions");
+    // Find inactive/completed sessions to clean up
+    for (const auto& [session_id, session] : active_sessions_) {
+        if (!session->is_active()) {
+            to_remove.push_back(session_id);
         }
     }
     
-    logger_->debug("Streaming session cleanup completed - " +
-                   std::to_string(active_sessions_.size()) + " active sessions",
-                   "StreamingResponseHandler", "cleanup_expired_sessions");
+    // Remove inactive sessions
+    size_t removed_count = 0;
+    for (const auto& session_id : to_remove) {
+        active_sessions_.erase(session_id);
+        removed_count++;
+    }
+    
+    if (removed_count > 0 && logger_) {
+        logger_->info("Cleaned up " + std::to_string(removed_count) + 
+                     " inactive streaming sessions",
+                     "StreamingResponseHandler", "cleanup_expired_sessions");
+    }
+    
+    if (logger_) {
+        logger_->debug("Streaming session cleanup completed - " +
+                       std::to_string(active_sessions_.size()) + " active sessions",
+                       "StreamingResponseHandler", "cleanup_expired_sessions");
+    }
 }
 
 } // namespace regulens

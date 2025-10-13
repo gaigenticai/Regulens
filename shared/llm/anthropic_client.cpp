@@ -1040,7 +1040,7 @@ bool AnthropicClient::is_healthy() const {
         // Make lightweight API call to test Anthropic connectivity
         // Use a minimal message request to verify API accessibility
         nlohmann::json test_payload = {
-            {"model", anthropic_model_},
+            {"model", default_model_},
             {"max_tokens", 1},
             {"messages", nlohmann::json::array({
                 {{"role", "user"}, {"content", "ping"}}
@@ -1049,7 +1049,7 @@ bool AnthropicClient::is_healthy() const {
         
         nlohmann::json headers = {
             {"x-api-key", api_key_},
-            {"anthropic-version", api_version_},
+            {"anthropic-version", "2023-06-01"},  // Anthropic API version
             {"Content-Type", "application/json"}
         };
         

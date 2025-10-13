@@ -119,13 +119,23 @@ struct MemoryOptimizationPlan {
     ForgettingStrategy forgetting_strategy;
     std::unordered_map<MemoryTier, size_t> target_sizes; // Target size per tier
     std::chrono::hours optimization_interval;
+    std::chrono::hours consolidation_interval; // Interval for memory consolidation
     double memory_pressure_threshold; // When to trigger optimization
+    double importance_threshold; // Minimum importance score to retain memories
+    size_t max_working_memory_size; // Maximum working memory entries
+    size_t max_episodic_memory_size; // Maximum episodic memory entries
+    std::string eviction_policy; // Policy for evicting memories (e.g., "LRU", "LFU", "ADAPTIVE")
     bool enable_automatic_optimization;
 
     MemoryOptimizationPlan()
         : forgetting_strategy(ForgettingStrategy::ADAPTIVE),
           optimization_interval(std::chrono::hours(24)),
+          consolidation_interval(std::chrono::hours(24)),
           memory_pressure_threshold(0.8),
+          importance_threshold(0.3),
+          max_working_memory_size(1000),
+          max_episodic_memory_size(10000),
+          eviction_policy("ADAPTIVE"),
           enable_automatic_optimization(true) {}
 };
 
@@ -249,6 +259,11 @@ private:
     std::atomic<size_t> forgettings_performed_{0};
     std::atomic<size_t> optimizations_performed_{0};
     std::atomic<size_t> emergency_cleanups_{0};
+
+    // Scheduling for automatic optimization
+    std::shared_ptr<std::thread> optimization_timer_thread_;
+    std::atomic<bool> cancel_scheduled_optimization_{false};
+    std::chrono::system_clock::time_point next_scheduled_optimization_;
 
     /**
      * @brief Update memory health metrics

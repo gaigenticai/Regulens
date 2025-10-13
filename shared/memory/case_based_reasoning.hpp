@@ -225,6 +225,10 @@ private:
     StructuredLogger* logger_;
     ErrorHandler* error_handler_;
 
+    // Database connection for production-grade persistence
+    // Using void* to avoid circular dependencies with pqxx
+    void* db_connection_;
+
     // Case storage
     std::unordered_map<std::string, ComplianceCase> case_base_;
     mutable std::mutex case_mutex_;

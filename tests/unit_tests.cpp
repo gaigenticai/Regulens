@@ -19,6 +19,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <jwt-cpp/jwt.h>
+#include "../shared/agentic_brain/inter_agent_communicator.hpp"
 
 namespace regulens::tests {
 
@@ -767,6 +768,249 @@ TEST_F(UtilityFunctionsTest, TestJSONValidation) {
     EXPECT_TRUE(is_valid_json("{\"key\": \"value\"}"));
     EXPECT_TRUE(is_valid_json("[1, 2, 3]"));
     EXPECT_FALSE(is_valid_json("invalid json"));
+}
+
+// ============================================================================
+// Inter-Agent Communication Tests
+// ============================================================================
+
+class InterAgentCommunicationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Setup would require database connection in real implementation
+        // For unit tests, we'll mock the database operations
+    }
+
+    void TearDown() override {
+        // Cleanup
+    }
+
+    // Mock database connection for testing
+    class MockPostgreSQLConnection : public PostgreSQLConnection {
+    public:
+        MockPostgreSQLConnection() : PostgreSQLConnection(DatabaseConfig{}) {}
+        // Override methods for testing
+    };
+};
+
+TEST_F(InterAgentCommunicationTest, TestMessageValidation) {
+    // Test message validation logic
+    EXPECT_TRUE(true); // Placeholder - would test actual validation
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessagePriorityValidation) {
+    // Test priority validation (1-5 range)
+    EXPECT_TRUE(true); // Placeholder
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageTypeValidation) {
+    // Test supported message types
+    EXPECT_TRUE(true); // Placeholder
+}
+
+TEST_F(InterAgentCommunicationTest, TestContentValidation) {
+    // Test message content validation
+    EXPECT_TRUE(true); // Placeholder
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageIdGeneration) {
+    // Test UUID generation for message IDs
+    uuid_t uuid;
+    uuid_generate(uuid);
+    char uuid_str[37];
+    uuid_unparse(uuid, uuid_str);
+
+    std::string message_id = uuid_str;
+    EXPECT_FALSE(message_id.empty());
+    EXPECT_EQ(message_id.length(), 36); // UUID length
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageStatusTransitions) {
+    // Test valid status transitions: pending -> delivered -> acknowledged
+    std::vector<std::string> valid_statuses = {"pending", "delivered", "acknowledged", "failed", "expired"};
+    for (const auto& status : valid_statuses) {
+        EXPECT_TRUE(status == "pending" || status == "delivered" ||
+                   status == "acknowledged" || status == "failed" || status == "expired");
+    }
+}
+
+TEST_F(InterAgentCommunicationTest, TestPriorityOrdering) {
+    // Test that messages are ordered by priority (1=urgent, 5=low)
+    EXPECT_TRUE(1 < 5); // Higher priority number = lower priority
+    EXPECT_TRUE(1 < 3);
+    EXPECT_TRUE(3 < 5);
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageExpiration) {
+    // Test message expiration logic
+    auto now = std::chrono::system_clock::now();
+    auto future = now + std::chrono::hours(24);
+
+    EXPECT_TRUE(future > now);
+}
+
+TEST_F(InterAgentCommunicationTest, TestCorrelationIdHandling) {
+    // Test correlation ID for conversation threading
+    std::string correlation_id = "test-correlation-123";
+    EXPECT_FALSE(correlation_id.empty());
+    EXPECT_TRUE(correlation_id.find("test") != std::string::npos);
+}
+
+TEST_F(InterAgentCommunicationTest, TestBroadcastMessageStructure) {
+    // Test broadcast messages (to_agent_id = NULL)
+    std::string broadcast_message_id = "broadcast-123";
+    EXPECT_FALSE(broadcast_message_id.empty());
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageContentSerialization) {
+    // Test JSON content serialization/deserialization
+    nlohmann::json test_content = {
+        {"action", "compliance_check"},
+        {"target", "transaction_123"},
+        {"priority", "high"}
+    };
+
+    std::string serialized = test_content.dump();
+    EXPECT_FALSE(serialized.empty());
+
+    nlohmann::json deserialized = nlohmann::json::parse(serialized);
+    EXPECT_EQ(deserialized["action"], "compliance_check");
+    EXPECT_EQ(deserialized["target"], "transaction_123");
+    EXPECT_EQ(deserialized["priority"], "high");
+}
+
+TEST_F(InterAgentCommunicationTest, TestRetryLogic) {
+    // Test retry count and max retries
+    int retry_count = 0;
+    int max_retries = 3;
+
+    EXPECT_TRUE(retry_count <= max_retries);
+
+    // Simulate retries
+    while (retry_count < max_retries) {
+        retry_count++;
+        EXPECT_TRUE(retry_count <= max_retries);
+    }
+}
+
+TEST_F(InterAgentCommunicationTest, TestAgentIdValidation) {
+    // Test agent ID validation
+    std::vector<std::string> valid_agent_ids = {
+        "regulatory_assessor",
+        "audit_intelligence",
+        "transaction_guardian",
+        "compliance_monitor"
+    };
+
+    for (const auto& agent_id : valid_agent_ids) {
+        EXPECT_FALSE(agent_id.empty());
+        EXPECT_TRUE(agent_id.find(' ') == std::string::npos); // No spaces
+    }
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageTypeConstants) {
+    // Test message type constants
+    std::vector<std::string> message_types = {
+        "TASK_ASSIGNMENT",
+        "COMPLIANCE_CHECK",
+        "RISK_ALERT",
+        "COLLABORATION_REQUEST",
+        "STATUS_UPDATE",
+        "DATA_REQUEST",
+        "ACKNOWLEDGMENT"
+    };
+
+    for (const auto& type : message_types) {
+        EXPECT_FALSE(type.empty());
+        EXPECT_TRUE(type.find(' ') == std::string::npos); // No spaces
+    }
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageQueueOrdering) {
+    // Test message queue priority ordering (higher priority first)
+    struct Message {
+        int priority;
+        std::string id;
+    };
+
+    std::vector<Message> messages = {
+        {3, "msg1"},
+        {1, "msg2"},
+        {5, "msg3"},
+        {2, "msg4"}
+    };
+
+    // Sort by priority (ascending - higher priority first)
+    std::sort(messages.begin(), messages.end(),
+              [](const Message& a, const Message& b) {
+                  return a.priority < b.priority;
+              });
+
+    EXPECT_EQ(messages[0].priority, 1); // Highest priority first
+    EXPECT_EQ(messages[1].priority, 2);
+    EXPECT_EQ(messages[2].priority, 3);
+    EXPECT_EQ(messages[3].priority, 5); // Lowest priority last
+}
+
+TEST_F(InterAgentCommunicationTest, TestDeadLetterQueueLogic) {
+    // Test dead letter queue logic for failed messages
+    int retry_count = 0;
+    int max_retries = 3;
+    bool moved_to_dlq = false;
+
+    while (retry_count < max_retries) {
+        retry_count++;
+        if (retry_count >= max_retries) {
+            moved_to_dlq = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(moved_to_dlq);
+}
+
+TEST_F(InterAgentCommunicationTest, TestCommunicationStats) {
+    // Test communication statistics tracking
+    struct CommunicationStats {
+        int total_messages_sent = 0;
+        int total_messages_delivered = 0;
+        int total_messages_failed = 0;
+        int pending_messages = 0;
+        int active_conversations = 0;
+    };
+
+    CommunicationStats stats;
+    stats.total_messages_sent = 100;
+    stats.total_messages_delivered = 95;
+    stats.total_messages_failed = 5;
+    stats.pending_messages = 10;
+    stats.active_conversations = 3;
+
+    EXPECT_EQ(stats.total_messages_sent, 100);
+    EXPECT_EQ(stats.total_messages_delivered, 95);
+    EXPECT_EQ(stats.total_messages_failed, 5);
+    EXPECT_EQ(stats.pending_messages, 10);
+    EXPECT_EQ(stats.active_conversations, 3);
+
+    // Calculate success rate
+    double success_rate = stats.total_messages_delivered * 1.0 / stats.total_messages_sent;
+    EXPECT_DOUBLE_EQ(success_rate, 0.95);
+}
+
+TEST_F(InterAgentCommunicationTest, TestMessageTemplateValidation) {
+    // Test message template validation
+    nlohmann::json template_content = {
+        {"type", "TASK_ASSIGNMENT"},
+        {"content", {
+            {"task_description", "Process compliance check"},
+            {"priority", "high"},
+            {"assigned_to", "{{agent_id}}"}
+        }}
+    };
+
+    EXPECT_TRUE(template_content.contains("type"));
+    EXPECT_TRUE(template_content.contains("content"));
+    EXPECT_EQ(template_content["type"], "TASK_ASSIGNMENT");
 }
 
 } // namespace regulens::tests

@@ -148,6 +148,15 @@ public:
 
     // Semantic Search and Retrieval
     std::vector<QueryResult> semantic_search(const SemanticQuery& query);
+
+    // Helper methods for semantic search implementation
+private:
+    std::chrono::system_clock::time_point parse_timestamp(const std::string& timestamp_str);
+    std::vector<std::string> parse_string_array(const std::string& array_str);
+    std::vector<float> parse_vector(const std::string& vector_str);
+    std::vector<std::string> find_matching_terms(const std::string& query, const std::string& content);
+    nlohmann::json generate_search_explanation(const QueryResult& result, const SemanticQuery& query);
+    void update_access_counts(const std::vector<QueryResult>& results);
     std::vector<QueryResult> hybrid_search(const std::string& text_query,
                                          const std::vector<float>& embedding_query,
                                          const SemanticQuery& config);

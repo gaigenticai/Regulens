@@ -585,28 +585,29 @@ double WebSearchTool::calculate_domain_authority(const std::string& domain) cons
     }
     
     // Production: Verify SSL certificate validity for HTTPS URLs
-    if (url.find("https://") == 0) {
-        try {
-            // Check if URL has valid SSL certificate using libcurl SSL verification
-            CURL* curl = curl_easy_init();
-            if (curl) {
-                curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-                curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-                curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-                curl_easy_setopt(curl, CURLOPT_NOBODY, 1L); // HEAD request only
-                curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-                
-                CURLcode res = curl_easy_perform(curl);
-                curl_easy_cleanup(curl);
-                
-                // Bonus for valid SSL certificates
-                if (res == CURLE_OK) {
-                    authority *= 1.2; // 20% bonus for valid SSL
-                }
+    // Construct URL from domain for SSL verification
+    std::string url = "https://" + domain;
+    
+    try {
+        // Check if URL has valid SSL certificate using libcurl SSL verification
+        CURL* curl = curl_easy_init();
+        if (curl) {
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+            curl_easy_setopt(curl, CURLOPT_NOBODY, 1L); // HEAD request only
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+            
+            CURLcode res = curl_easy_perform(curl);
+            curl_easy_cleanup(curl);
+            
+            // Bonus for valid SSL certificates
+            if (res == CURLE_OK) {
+                authority *= 1.2; // 20% bonus for valid SSL
             }
-        } catch (const std::exception& e) {
-            // SSL verification failed, no bonus
         }
+    } catch (const std::exception& e) {
+        // SSL verification failed, no bonus
     }
     
     return std::min(authority, 1.0);

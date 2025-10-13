@@ -53,7 +53,7 @@ bool RegulatoryAssessorAgent::initialize() {
 
 bool RegulatoryAssessorAgent::load_configuration_from_database(const std::string& agent_id) {
     try {
-        logger_->log(LogLevel::INFO, "Loading Regulatory Assessor agent configuration from database", {{"agent_id", agent_id}});
+        logger_->log(LogLevel::INFO, "Loading Regulatory Assessor agent configuration from database: " + agent_id);
         
         agent_id_ = agent_id;
         config_loaded_from_db_ = false;
@@ -67,36 +67,34 @@ bool RegulatoryAssessorAgent::load_configuration_from_database(const std::string
         
         // Query agent configuration from database
         std::string query = "SELECT configuration FROM agent_configurations WHERE config_id = $1";
-        auto result = conn->execute_query(query, {agent_id});
+        auto result = conn->execute_query_multi(query, {agent_id});
         
         db_pool_->return_connection(conn);
         
         if (result.empty()) {
-            logger_->log(LogLevel::WARN, "No configuration found in database for agent", {{"agent_id", agent_id}});
+            logger_->log(LogLevel::WARN, "No configuration found in database for agent: " + agent_id);
             return false;
         }
         
         // Parse configuration JSON from database
-        std::string config_json_str = result["configuration"];
+        std::string config_json_str = result[0]["configuration"].get<std::string>();
         nlohmann::json db_config = nlohmann::json::parse(config_json_str);
         
         // Override impact threshold with database value (NO HARDCODED VALUES!)
         if (db_config.contains("impact_threshold")) {
             high_impact_threshold_ = db_config["impact_threshold"].get<double>();
-            logger_->log(LogLevel::INFO, "Loaded impact_threshold from database", {
-                {"impact_threshold", high_impact_threshold_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded impact_threshold from database: " + 
+                std::to_string(high_impact_threshold_));
         } else if (db_config.contains("risk_threshold")) {
             // User might have set risk_threshold in UI
             high_impact_threshold_ = db_config["risk_threshold"].get<double>();
-            logger_->log(LogLevel::INFO, "Loaded impact_threshold from risk_threshold field", {
-                {"impact_threshold", high_impact_threshold_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded impact_threshold from risk_threshold field: " + 
+                std::to_string(high_impact_threshold_));
         }
         
         if (db_config.contains("region")) {
             region_ = db_config["region"].get<std::string>();
-            logger_->log(LogLevel::INFO, "Loaded region from database", {{"region", region_}});
+            logger_->log(LogLevel::INFO, "Loaded region from database: " + region_);
             
             // Apply region-specific adjustments for regulatory assessment
             if (region_ == "US") {
@@ -120,27 +118,22 @@ bool RegulatoryAssessorAgent::load_configuration_from_database(const std::string
                         regulatory_sources_.push_back(source.get<std::string>());
                     }
                 }
-                logger_->log(LogLevel::INFO, "Loaded regulatory_sources from database", {
-                    {"count", regulatory_sources_.size()}
-                });
+                logger_->log(LogLevel::INFO, "Loaded regulatory_sources from database: " + 
+                    std::to_string(regulatory_sources_.size()) + " sources");
             }
         }
         
         if (db_config.contains("alert_email")) {
             alert_email_ = db_config["alert_email"].get<std::string>();
-            logger_->log(LogLevel::INFO, "Loaded alert_email from database", {
-                {"alert_email", alert_email_}
-            });
+            logger_->log(LogLevel::INFO, "Loaded alert_email from database: " + alert_email_);
         }
         
         config_loaded_from_db_ = true;
         
-        logger_->log(LogLevel::INFO, "Successfully loaded Regulatory Assessor agent configuration from database", {
-            {"agent_id", agent_id},
-            {"region", region_},
-            {"impact_threshold", high_impact_threshold_},
-            {"regulatory_sources_count", regulatory_sources_.size()}
-        });
+        logger_->log(LogLevel::INFO, std::string("Successfully loaded Regulatory Assessor agent configuration from database - ") +
+            "agent_id: " + agent_id + ", region: " + region_ + 
+            ", impact_threshold: " + std::to_string(high_impact_threshold_) + 
+            ", regulatory_sources: " + std::to_string(regulatory_sources_.size()));
         
         return true;
         

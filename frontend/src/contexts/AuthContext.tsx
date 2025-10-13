@@ -1,116 +1,127 @@
 /**
- * Authentication Context - DATABASE-BACKED SESSION Implementation
- * 
+ * Authentication Context - JWT TOKEN BASED Implementation
+ *
  * Security features:
- * - HttpOnly cookies (session token stored in database)
- * - No client-side token storage (immune to XSS)
- * - Server-side session validation
+ * - JWT tokens stored in localStorage
+ * - Automatic token refresh
+ * - Request/response interceptors
  * - Production-grade security
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiClient } from '@/services/api';
-import type { User, LoginRequest } from '@/types/api';
+
+interface User {
+  userId: string;
+  username: string;
+  email: string;
+  fullName: string;
+  roles: string[];
+  permissions: string[];
+}
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (credentials: LoginRequest) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshToken: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // DATABASE-BACKED SESSIONS: No token management needed!
-  // Session is validated on each request via HttpOnly cookie
+  useEffect(() => {
+    // Load user from localStorage on mount
+    const storedUser = localStorage.getItem('user');
+    const storedToken = localStorage.getItem('token');
 
-  const login = async (credentials: LoginRequest) => {
-    setIsLoading(true);
-    
+    if (storedUser && storedToken) {
+      setUser(JSON.parse(storedUser));
+      setIsAuthenticated(true);
+
+      // Validate token is still valid
+      validateToken().catch(() => {
+        // Token invalid, logout
+        logout();
+      });
+    }
+    setIsLoading(false);
+  }, []);
+
+  const login = async (username: string, password: string) => {
     try {
-      // Backend sets HttpOnly cookie automatically
-      const response = await apiClient.login(credentials);
-      
-      // Set user from response
-      setUser(response.user);
-      
+      const response = await apiClient.post('/auth/login', { username, password });
+      const { user: userData, token } = response.data;
+
+      setUser(userData);
+      setIsAuthenticated(true);
+      localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('token', token);
+
+      // Set axios default header
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     } catch (error) {
-      setIsLoading(false);
+      console.error('Login failed:', error);
       throw error;
     }
-    
-    setIsLoading(false);
   };
 
   const logout = async () => {
-    setIsLoading(true);
-    
     try {
-      // Backend invalidates session in DB and clears cookie
-      await apiClient.logout();
+      await apiClient.post('/auth/logout');
     } catch (error) {
       console.error('Logout error:', error);
-    }
-    
-    // Clear user state
-    setUser(null);
-    setIsLoading(false);
-    
-    // Redirect to login
-    window.location.href = '/login';
-  };
-
-  const refreshUser = useCallback(async () => {
-    try {
-      // Session is validated via HttpOnly cookie
-      const userData = await apiClient.getCurrentUser();
-      setUser(userData);
-    } catch (error) {
-      // Session invalid/expired
-      setUser(null);
     } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  // Initialize auth state on mount
-  useEffect(() => {
-    refreshUser();
-  }, [refreshUser]);
-
-  // Listen for auth events
-  useEffect(() => {
-    const handleLogout = () => {
       setUser(null);
-      window.location.href = '/login';
-    };
-
-    window.addEventListener('auth:logout', handleLogout);
-    return () => window.removeEventListener('auth:logout', handleLogout);
-  }, []);
-
-  const value = {
-    user,
-    isAuthenticated: !!user,
-    isLoading,
-    login,
-    logout,
-    refreshUser,
+      setIsAuthenticated(false);
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      delete apiClient.defaults.headers.common['Authorization'];
+    }
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
+  const validateToken = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('No token');
 
-export function useAuth() {
+    const response = await apiClient.get('/auth/validate');
+    if (!response.data.valid) {
+      throw new Error('Token invalid');
+    }
+  };
+
+  const refreshToken = async () => {
+    try {
+      const response = await apiClient.post('/auth/refresh');
+      const { token: newToken } = response.data;
+
+      localStorage.setItem('token', newToken);
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      await logout();
+    }
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{ user, isAuthenticated, isLoading, login, logout, refreshToken }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
-}
+};

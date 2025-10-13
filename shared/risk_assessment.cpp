@@ -1371,8 +1371,12 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     // Factor 1: Number of ownership layers (depth of ownership chain)
     // Research shows >3 layers significantly increases AML risk
     int ownership_layers = 0;
-    if (entity.additional_data.contains("ownership_layers")) {
-        ownership_layers = entity.additional_data["ownership_layers"].get<int>();
+    if (entity.metadata.contains("ownership_layers")) {
+        try {
+            ownership_layers = std::stoi(entity.metadata.at("ownership_layers"));
+        } catch (...) {
+            ownership_layers = 0;
+        }
     }
     
     double layer_risk = 0.0;
@@ -1392,8 +1396,12 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 2: Number of beneficial owners and concentration
     int num_beneficial_owners = 0;
-    if (entity.additional_data.contains("num_beneficial_owners")) {
-        num_beneficial_owners = entity.additional_data["num_beneficial_owners"].get<int>();
+    if (entity.metadata.contains("num_beneficial_owners")) {
+        try {
+            num_beneficial_owners = std::stoi(entity.metadata.at("num_beneficial_owners"));
+        } catch (...) {
+            num_beneficial_owners = 0;
+        }
     }
     
     double ownership_concentration_risk = 0.0;
@@ -1413,8 +1421,12 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 3: Use of offshore entities in ownership structure
     int offshore_entities_count = 0;
-    if (entity.additional_data.contains("offshore_entities_in_structure")) {
-        offshore_entities_count = entity.additional_data["offshore_entities_in_structure"].get<int>();
+    if (entity.metadata.contains("offshore_entities_in_structure")) {
+        try {
+            offshore_entities_count = std::stoi(entity.metadata.at("offshore_entities_in_structure"));
+        } catch (...) {
+            offshore_entities_count = 0;
+        }
     }
     
     double offshore_risk = 0.0;
@@ -1432,8 +1444,9 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 4: Use of nominee directors/shareholders
     bool has_nominee_directors = false;
-    if (entity.additional_data.contains("has_nominee_directors")) {
-        has_nominee_directors = entity.additional_data["has_nominee_directors"].get<bool>();
+    if (entity.metadata.contains("has_nominee_directors")) {
+        const auto& value = entity.metadata.at("has_nominee_directors");
+        has_nominee_directors = (value == "true" || value == "1" || value == "yes");
     }
     
     double nominee_risk = has_nominee_directors ? 0.75 : 0.15;
@@ -1441,8 +1454,12 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 5: Cross-border ownership complexity
     int num_jurisdictions = 0;
-    if (entity.additional_data.contains("num_jurisdictions_in_structure")) {
-        num_jurisdictions = entity.additional_data["num_jurisdictions_in_structure"].get<int>();
+    if (entity.metadata.contains("num_jurisdictions_in_structure")) {
+        try {
+            num_jurisdictions = std::stoi(entity.metadata.at("num_jurisdictions_in_structure"));
+        } catch (...) {
+            num_jurisdictions = 0;
+        }
     }
     
     double jurisdiction_risk = 0.0;

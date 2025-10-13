@@ -244,11 +244,17 @@ private:
     ErrorHandler* error_handler_;
 
     EmbeddingModelConfig model_config_;
+    
+    // Optional HTTP client for API-based embeddings
+    void* openai_client_;  // OpenAIClient* - using void* to avoid circular dependency
 
 #ifdef USE_FASTEMBED
     // FastEmbed model instances (one per model for thread safety)
     std::unordered_map<std::string, std::unique_ptr<fastembed::EmbeddingModel>> models_;
     std::unordered_map<std::string, std::unique_ptr<fastembed::Tokenizer>> tokenizers_;
+#else
+    // Stub map for non-FastEmbed builds
+    std::unordered_map<std::string, void*> models_;
 #endif
 
     mutable std::mutex models_mutex_;

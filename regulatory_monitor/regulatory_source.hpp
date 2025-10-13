@@ -10,7 +10,7 @@
 #include "../shared/config/configuration_manager.hpp"
 #include "../shared/logging/structured_logger.hpp"
 #include "../shared/models/regulatory_change.hpp"
-#include "../shared/database/connection_pool.hpp"
+#include "../shared/database/postgresql_connection.hpp"
 
 namespace regulens {
 

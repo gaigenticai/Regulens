@@ -22,11 +22,14 @@ import {
   useRecordHumanOverride,
 } from '@/hooks/useCollaborationSessions';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'react-hot-toast';
 
 const CollaborationSessionDetail: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [selectedStep, setSelectedStep] = useState<any>(null);
+  const { user } = useAuth();
 
   const { data: session, isLoading: sessionLoading, refetch: refetchSession } = useCollaborationSession(sessionId!);
   const { data: steps = [], isLoading: stepsLoading, refetch: refetchSteps } = useSessionReasoningSteps(sessionId!);
@@ -34,13 +37,19 @@ const CollaborationSessionDetail: React.FC = () => {
 
   const handleOverride = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (!user) {
+      toast.error('You must be logged in to create overrides');
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
 
     await recordOverride.mutateAsync({
       session_id: sessionId,
       decision_id: selectedStep?.stream_id,
-      user_id: 'current_user', // TODO: Get from auth context
-      user_name: 'Current User',
+      user_id: user.userId,
+      user_name: user.fullName,
       original_decision: selectedStep?.reasoning_step || '',
       override_decision: formData.get('override_decision') as string,
       reason: formData.get('reason') as string,

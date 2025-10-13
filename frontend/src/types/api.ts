@@ -1224,3 +1224,44 @@ export interface TrainingLeaderboardEntry {
   courses_completed: number;
   rank: number | null;
 }
+
+// Customer Profile Management
+export interface CustomerProfile {
+  customerId: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  dateOfBirth?: string;
+  nationality?: string;
+  residencyCountry?: string;
+  occupation?: string;
+  kycStatus: string;
+  kycCompletedDate?: string;
+  kycExpiryDate?: string;
+  pepStatus: boolean;
+  pepDetails?: string;
+  watchlistFlags: string[];
+  sanctionsScreeningDate?: string;
+  sanctionsMatch: boolean;
+  riskRating: string;
+  riskScore: number;
+  lastRiskAssessment?: string;
+  accountOpenedDate?: string;
+  accountStatus: string;
+  accountType?: string;
+  totalTransactions: number;
+  totalVolumeUsd: number;
+  lastTransactionDate?: string;
+  flaggedTransactions: number;
+}
+
+export interface CustomerRiskEvent {
+  eventId: string;
+  eventType: string;
+  description: string;
+  severity: string;
+  riskScoreImpact: number;
+  detectedAt: string;
+  resolved: boolean;
+  resolutionNotes?: string;
+}

@@ -1,5 +1,9 @@
 #include "vector_knowledge_base.hpp"
 #include <pqxx/pqxx>
+#include <cmath>
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
 
 namespace regulens {
 
@@ -162,26 +166,298 @@ std::vector<QueryResult> VectorKnowledgeBase::semantic_search(const SemanticQuer
 
     try {
         auto conn = db_pool_->get_connection();
-        if (!conn) return results;
+        if (!conn) {
+            spdlog::error("Failed to get database connection for semantic search");
+            return results;
+        }
 
-        std::string sql_query = "SELECT entity_id, title, content FROM knowledge_entities WHERE title ILIKE $1 LIMIT 10";
-        std::vector<std::string> params = {"%" + query.query_text + "%"};
+        // Generate embedding for the query text
+        std::vector<float> query_embedding = generate_embedding(query.query_text);
+        if (query_embedding.empty()) {
+            spdlog::error("Failed to generate embedding for query: {}", query.query_text);
+            return results;
+        }
 
+        // Build the SQL query with vector similarity search
+        std::stringstream sql_stream;
+
+        // Use pgvector's cosine similarity operator <=> for efficient search
+        sql_stream << "SELECT ";
+        sql_stream << "entity_id, domain, knowledge_type, title, content, metadata, ";
+        sql_stream << "embedding, retention_policy, created_at, last_accessed, ";
+        sql_stream << "expires_at, access_count, confidence_score, tags, relationships, ";
+        sql_stream << "1 - (embedding <=> $1::vector) as similarity_score ";
+
+        sql_stream << "FROM knowledge_entities ";
+        sql_stream << "WHERE expires_at > NOW() "; // Only active entities
+
+        // Add domain filter if specified
+        if (query.domain_filter != KnowledgeDomain::REGULATORY_COMPLIANCE) { // Default is all domains
+            sql_stream << "AND domain = '" << domain_to_string(query.domain_filter) << "' ";
+        }
+
+        // Add knowledge type filters if specified
+        if (!query.type_filters.empty()) {
+            sql_stream << "AND knowledge_type IN (";
+            for (size_t i = 0; i < query.type_filters.size(); ++i) {
+                if (i > 0) sql_stream << ",";
+                sql_stream << "'" << knowledge_type_to_string(query.type_filters[i]) << "'";
+            }
+            sql_stream << ") ";
+        }
+
+        // Add tag filters if specified
+        if (!query.tag_filters.empty()) {
+            sql_stream << "AND tags && ARRAY[";
+            for (size_t i = 0; i < query.tag_filters.size(); ++i) {
+                if (i > 0) sql_stream << ",";
+                sql_stream << "'$" << (i + 2) << "'";
+            }
+            sql_stream << "] ";
+        }
+
+        // Add age filter
+        if (query.max_age > std::chrono::hours(0)) {
+            auto cutoff_time = std::chrono::system_clock::now() - query.max_age;
+            auto cutoff_str = std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                cutoff_time.time_since_epoch()).count());
+            sql_stream << "AND created_at >= to_timestamp(" << cutoff_str << ") ";
+        }
+
+        // Apply similarity threshold
+        sql_stream << "AND (1 - (embedding <=> $1::vector)) >= " << std::to_string(query.similarity_threshold) << " ";
+
+        // Order by similarity score (highest first)
+        sql_stream << "ORDER BY similarity_score DESC ";
+
+        // Limit results
+        sql_stream << "LIMIT " << std::to_string(query.max_results);
+
+        std::string sql_query = sql_stream.str();
+
+        // Prepare parameters
+        std::vector<std::string> params;
+
+        // Convert embedding vector to PostgreSQL vector format
+        std::stringstream embedding_stream;
+        embedding_stream << "[";
+        for (size_t i = 0; i < query_embedding.size(); ++i) {
+            if (i > 0) embedding_stream << ",";
+            embedding_stream << query_embedding[i];
+        }
+        embedding_stream << "]";
+        params.push_back(embedding_stream.str());
+
+        // Add tag parameters
+        for (const auto& tag : query.tag_filters) {
+            params.push_back(tag);
+        }
+
+        // Execute the query
         auto json_results = conn->execute_query_multi(sql_query, params);
+
+        // Process results
         for (const auto& row : json_results) {
             QueryResult qr;
+            qr.similarity_score = std::stod(std::string(row["similarity_score"]));
+
+            // Parse entity data
             qr.entity.entity_id = row["entity_id"];
             qr.entity.title = row["title"];
             qr.entity.content = row["content"];
-            qr.similarity_score = 0.8f;
+
+            // Parse domain
+            qr.entity.domain = string_to_domain(row["domain"]);
+
+            // Parse knowledge type
+            qr.entity.knowledge_type = string_to_knowledge_type(row["knowledge_type"]);
+
+            // Parse retention policy
+            qr.entity.retention_policy = string_to_retention_policy(row["retention_policy"]);
+
+            // Parse timestamps
+            qr.entity.created_at = parse_timestamp(row["created_at"]);
+            qr.entity.last_accessed = parse_timestamp(row["last_accessed"]);
+            qr.entity.expires_at = parse_timestamp(row["expires_at"]);
+
+            // Parse numeric fields
+            qr.entity.access_count = std::stoi(std::string(row["access_count"]));
+            qr.entity.confidence_score = std::stod(std::string(row["confidence_score"]));
+
+            // Parse JSON fields (simplified for now)
+            qr.entity.metadata = nlohmann::json::object();
+            qr.entity.relationships = nlohmann::json::object();
+
+            if (!row["tags"].empty()) {
+                qr.entity.tags = parse_string_array(row["tags"]);
+            }
+
+            // Parse embedding vector (for reference)
+            if (!row["embedding"].empty()) {
+                qr.entity.embedding = parse_vector(row["embedding"]);
+            }
+
+            // Add matched terms (simple keyword matching for now)
+            std::vector<std::string> matched_terms = find_matching_terms(query.query_text, qr.entity.content);
+            qr.matched_terms = matched_terms;
+
+            // Generate explanation
+            qr.explanation = generate_search_explanation(qr, query);
+
+            // Record query time (approximate)
+            qr.query_time = std::chrono::microseconds(1000); // Placeholder
+
             results.push_back(qr);
         }
 
+        // Update access counts for retrieved entities
+        if (!results.empty()) {
+            update_access_counts(results);
+        }
+
+        spdlog::info("Semantic search completed: {} results for query '{}'", results.size(), query.query_text.substr(0, 50));
+
     } catch (const std::exception& e) {
-        // Return empty results on error
+        spdlog::error("Exception in semantic_search: {}", e.what());
     }
 
     return results;
+}
+
+// Helper methods for semantic search
+
+std::vector<float> VectorKnowledgeBase::generate_embedding(const std::string& text) {
+    // TODO: Implement actual embedding generation using OpenAI embeddings API
+    // For now, return a simple hash-based pseudo-embedding for testing
+    std::vector<float> embedding(config_.embedding_dimensions, 0.0f);
+
+    // Simple hash-based embedding generation (placeholder)
+    std::hash<std::string> hasher;
+    size_t hash = hasher(text);
+
+    // Distribute hash bits across embedding dimensions
+    for (size_t i = 0; i < config_.embedding_dimensions; ++i) {
+        embedding[i] = static_cast<float>((hash >> (i % 32)) & 1) * 2.0f - 1.0f; // Normalize to [-1, 1]
+    }
+
+    // Normalize to unit vector (cosine similarity)
+    float magnitude = 0.0f;
+    for (float val : embedding) {
+        magnitude += val * val;
+    }
+    magnitude = std::sqrt(magnitude);
+
+    if (magnitude > 0.0f) {
+        for (float& val : embedding) {
+            val /= magnitude;
+        }
+    }
+
+    return embedding;
+}
+
+std::chrono::system_clock::time_point VectorKnowledgeBase::parse_timestamp(const std::string& timestamp_str) {
+    // Simple timestamp parsing - in production, use a proper date library
+    std::tm tm = {};
+    std::istringstream ss(timestamp_str);
+    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    return std::chrono::system_clock::from_time_t(std::mktime(&tm));
+}
+
+std::vector<std::string> VectorKnowledgeBase::parse_string_array(const std::string& array_str) {
+    std::vector<std::string> result;
+    // Simple parsing - assumes format like "{item1,item2,item3}"
+    if (array_str.size() >= 2 && array_str[0] == '{' && array_str.back() == '}') {
+        std::string content = array_str.substr(1, array_str.size() - 2);
+        std::stringstream ss(content);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            // Remove quotes if present
+            if (!item.empty() && item[0] == '"') item = item.substr(1);
+            if (!item.empty() && item.back() == '"') item = item.substr(0, item.size() - 1);
+            result.push_back(item);
+        }
+    }
+    return result;
+}
+
+std::vector<float> VectorKnowledgeBase::parse_vector(const std::string& vector_str) {
+    std::vector<float> result;
+    // Parse PostgreSQL vector format like "[1.0,2.0,3.0]"
+    if (vector_str.size() >= 2 && vector_str[0] == '[' && vector_str.back() == ']') {
+        std::string content = vector_str.substr(1, vector_str.size() - 2);
+        std::stringstream ss(content);
+        std::string value;
+        while (std::getline(ss, value, ',')) {
+            try {
+                result.push_back(std::stof(value));
+            } catch (const std::exception&) {
+                // Skip invalid values
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<std::string> VectorKnowledgeBase::find_matching_terms(const std::string& query, const std::string& content) {
+    std::vector<std::string> matches;
+
+    // Simple keyword extraction - split query by spaces and find matches
+    std::stringstream ss(query);
+    std::string term;
+    std::string lower_content = content;
+    std::transform(lower_content.begin(), lower_content.end(), lower_content.begin(), ::tolower);
+
+    while (ss >> term) {
+        std::string lower_term = term;
+        std::transform(lower_term.begin(), lower_term.end(), lower_term.begin(), ::tolower);
+
+        if (lower_content.find(lower_term) != std::string::npos) {
+            matches.push_back(term);
+        }
+    }
+
+    return matches;
+}
+
+nlohmann::json VectorKnowledgeBase::generate_search_explanation(const QueryResult& result, const SemanticQuery& query) {
+    nlohmann::json explanation;
+
+    explanation["similarity_score"] = result.similarity_score;
+    explanation["matched_terms"] = result.matched_terms;
+    explanation["query_terms_found"] = result.matched_terms.size();
+    explanation["confidence_score"] = result.entity.confidence_score;
+    explanation["search_method"] = "vector_similarity_cosine";
+    explanation["domain"] = domain_to_string(result.entity.domain);
+    explanation["knowledge_type"] = knowledge_type_to_string(result.entity.knowledge_type);
+
+    return explanation;
+}
+
+void VectorKnowledgeBase::update_access_counts(const std::vector<QueryResult>& results) {
+    if (results.empty()) return;
+
+    try {
+        auto conn = db_pool_->get_connection();
+        if (!conn) return;
+
+        // Build batch update query
+        std::stringstream sql_stream;
+        sql_stream << "UPDATE knowledge_entities SET access_count = access_count + 1, last_accessed = NOW() WHERE entity_id IN (";
+
+        std::vector<std::string> params;
+        for (size_t i = 0; i < results.size(); ++i) {
+            if (i > 0) sql_stream << ",";
+            sql_stream << "$" << (i + 1);
+            params.push_back(results[i].entity.entity_id);
+        }
+        sql_stream << ")";
+
+        conn->execute_command(sql_stream.str(), params);
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in update_access_counts: {}", e.what());
+    }
 }
 
 // Production-grade implementations

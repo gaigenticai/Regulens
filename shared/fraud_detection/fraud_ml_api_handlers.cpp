@@ -349,13 +349,53 @@ std::string run_batch_fraud_scan(PGconn* db_conn, const std::string& request_bod
 
         PQclear(result);
 
-        // In production, this would trigger background processing
-        // For now, update status to "running" and simulate processing
+        // Production-grade: Submit to job queue for background processing
+        // Create filters JSON for the job queue
+        json job_filters;
+        if (!start_date.empty()) {
+            job_filters["date_from"] = start_date;
+            job_filters["date_to"] = end_date;
+        }
+        if (!transaction_ids.empty()) {
+            job_filters["transaction_ids"] = transaction_ids;
+        }
+        if (req.contains("amountRange")) {
+            if (req["amountRange"].contains("min")) {
+                job_filters["amount_min"] = req["amountRange"]["min"];
+            }
+            if (req["amountRange"].contains("max")) {
+                job_filters["amount_max"] = req["amountRange"]["max"];
+            }
+        }
+        if (req.contains("status")) {
+            job_filters["status"] = req["status"];
+        }
 
-        std::string update_query = "UPDATE fraud_batch_scan_jobs SET status = 'running', "
-                                  "started_at = CURRENT_TIMESTAMP WHERE job_id = $1";
-        const char* job_param[1] = {job_id.c_str()};
-        PQexecParams(db_conn, update_query.c_str(), 1, NULL, job_param, NULL, NULL, 0);
+        // Submit to fraud_scan_job_queue
+        std::string queue_insert =
+            "INSERT INTO fraud_scan_job_queue (filters, priority, created_by) "
+            "VALUES ($1::jsonb, $2, $3) "
+            "RETURNING job_id";
+
+        std::string filters_json = job_filters.dump();
+        std::string priority_str = std::to_string(priority);
+
+        const char* queue_params[3] = {
+            filters_json.c_str(),
+            priority_str.c_str(),
+            user_id.c_str()
+        };
+
+        PGresult* queue_result = PQexecParams(db_conn, queue_insert.c_str(), 3, NULL, queue_params, NULL, NULL, 0);
+
+        if (PQresultStatus(queue_result) != PGRES_TUPLES_OK) {
+            std::string error = PQerrorMessage(db_conn);
+            PQclear(queue_result);
+            return "{\"error\":\"Failed to submit fraud scan job: " + error + "\"}";
+        }
+
+        std::string queue_job_id = PQgetvalue(queue_result, 0, 0);
+        PQclear(queue_result);
 
         // Count transactions to scan
         std::string count_query;
@@ -375,19 +415,19 @@ std::string run_batch_fraud_scan(PGconn* db_conn, const std::string& request_bod
         }
         PQclear(count_result);
 
-        // Update total count
+        // Update job queue with estimated transaction count
         std::string count_str = std::to_string(txn_count);
-        std::string update_count = "UPDATE fraud_batch_scan_jobs SET transactions_total = $1 WHERE job_id = $2";
-        const char* count_params[2] = {count_str.c_str(), job_id.c_str()};
+        std::string update_count = "UPDATE fraud_scan_job_queue SET transactions_total = $1 WHERE job_id = $2";
+        const char* count_params[2] = {count_str.c_str(), queue_job_id.c_str()};
         PQexecParams(db_conn, update_count.c_str(), 2, NULL, count_params, NULL, NULL, 0);
 
         json response;
-        response["jobId"] = job_id;
+        response["jobId"] = queue_job_id;
         response["jobName"] = job_name;
-        response["status"] = "running";
+        response["status"] = "queued";
         response["scanType"] = scan_type;
         response["transactionsToScan"] = txn_count;
-        response["message"] = "Batch fraud scan initiated. Use job ID to check progress.";
+        response["message"] = "Batch fraud scan queued for processing. Use GET /api/fraud/scan/jobs/" + queue_job_id + " to check progress.";
         response["createdAt"] = created_at;
 
         if (txn_count > 0) {
@@ -537,6 +577,53 @@ std::string export_fraud_report(PGconn* db_conn, const std::string& request_body
     } catch (const json::exception& e) {
         return "{\"error\":\"Invalid JSON: " + std::string(e.what()) + "\"}";
     }
+}
+
+/**
+ * GET /fraud/scan/jobs/{jobId}
+ * Get status of a fraud scan job
+ * Production: Queries fraud_scan_job_queue table
+ */
+std::string get_fraud_scan_job_status(PGconn* db_conn, const std::string& job_id) {
+    const char* params[1] = {job_id.c_str()};
+
+    PGresult* result = PQexecParams(db_conn,
+        "SELECT job_id, status, progress, transactions_total, transactions_processed, "
+        "       transactions_flagged, error_message, created_at, started_at, completed_at, "
+        "       priority, worker_id "
+        "FROM fraud_scan_job_queue "
+        "WHERE job_id = $1",
+        1, NULL, params, NULL, NULL, 0);
+
+    if (PQresultStatus(result) != PGRES_TUPLES_OK || PQntuples(result) == 0) {
+        PQclear(result);
+        return "{\"error\":\"Job not found\",\"job_id\":\"" + job_id + "\"}";
+    }
+
+    json job;
+    job["jobId"] = PQgetvalue(result, 0, 0);
+    job["status"] = PQgetvalue(result, 0, 1);
+    job["progress"] = std::stoi(PQgetvalue(result, 0, 2));
+
+    if (!PQgetisnull(result, 0, 3)) job["transactionsTotal"] = std::stoi(PQgetvalue(result, 0, 3));
+    if (!PQgetisnull(result, 0, 4)) job["transactionsProcessed"] = std::stoi(PQgetvalue(result, 0, 4));
+    if (!PQgetisnull(result, 0, 5)) job["transactionsFlagged"] = std::stoi(PQgetvalue(result, 0, 6));
+    if (!PQgetisnull(result, 0, 6)) job["errorMessage"] = PQgetvalue(result, 0, 6);
+
+    job["createdAt"] = PQgetvalue(result, 0, 7);
+    if (!PQgetisnull(result, 0, 8)) job["startedAt"] = PQgetvalue(result, 0, 8);
+    if (!PQgetisnull(result, 0, 9)) job["completedAt"] = PQgetvalue(result, 0, 9);
+
+    job["priority"] = std::stoi(PQgetvalue(result, 0, 10));
+    if (!PQgetisnull(result, 0, 11)) job["workerId"] = PQgetvalue(result, 0, 11);
+
+    PQclear(result);
+
+    json response;
+    response["success"] = true;
+    response["job"] = job;
+
+    return response.dump();
 }
 
 } // namespace fraud

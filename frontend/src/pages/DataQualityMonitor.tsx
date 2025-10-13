@@ -23,10 +23,18 @@ interface PipelineMetrics {
   data_sources: number;
 }
 
+interface ErrorState {
+  hasError: boolean;
+  message: string;
+  code?: string;
+  timestamp: number;
+}
+
 export default function DataQualityMonitor() {
   const [qualityChecks, setQualityChecks] = useState<QualityCheck[]>([]);
   const [metrics, setMetrics] = useState<PipelineMetrics | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<ErrorState | null>(null);
 
   useEffect(() => {
     loadQualityChecks();
@@ -42,49 +50,28 @@ export default function DataQualityMonitor() {
 
   const loadQualityChecks = async () => {
     setLoading(true);
+    setError(null); // Clear previous errors
+
     try {
       const response = await fetch('/api/ingestion/quality-checks');
-      if (response.ok) {
-        const data = await response.json();
-        setQualityChecks(data.checks || []);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+
+      const data = await response.json();
+      setQualityChecks(data.checks || []);
     } catch (error) {
       console.error('Failed to load quality checks:', error);
-      // Sample data for development
-      setQualityChecks([
-        {
-          check_id: 'qc_001',
-          check_name: 'Schema Validation',
-          status: 'passed',
-          score: 0.98,
-          details: '1,234 records validated successfully',
-          timestamp: new Date().toISOString()
-        },
-        {
-          check_id: 'qc_002',
-          check_name: 'Data Completeness',
-          status: 'warning',
-          score: 0.87,
-          details: '156 records with missing fields',
-          timestamp: new Date().toISOString()
-        },
-        {
-          check_id: 'qc_003',
-          check_name: 'Duplicate Detection',
-          status: 'passed',
-          score: 0.99,
-          details: '12 duplicates removed',
-          timestamp: new Date().toISOString()
-        },
-        {
-          check_id: 'qc_004',
-          check_name: 'Data Freshness',
-          status: 'failed',
-          score: 0.45,
-          details: 'Source data older than 24 hours',
-          timestamp: new Date().toISOString()
-        }
-      ]);
+
+      // Set proper error state instead of mock data
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: Date.now()
+      });
+
+      // Clear quality checks on error
+      setQualityChecks([]);
     } finally {
       setLoading(false);
     }
@@ -145,6 +132,31 @@ export default function DataQualityMonitor() {
           {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <h3 className="text-sm font-medium text-red-800">
+                Failed to load quality data
+              </h3>
+              <p className="text-sm text-red-700 mt-1">
+                {error.message}
+              </p>
+              <button
+                onClick={() => { setError(null); loadQualityChecks(); loadMetrics(); }}
+                className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pipeline Metrics */}
       {metrics && (

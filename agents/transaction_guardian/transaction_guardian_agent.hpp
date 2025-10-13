@@ -133,6 +133,16 @@ private:
                                       const nlohmann::json& customer_profile);
 
     /**
+     * @brief Queue suspicious transaction for human review
+     * @param event Compliance event detected
+     * @param transaction_data Transaction data
+     * @param risk_score Calculated risk score
+     */
+    void queue_for_human_review(const ComplianceEvent& event,
+                                const nlohmann::json& transaction_data,
+                                double risk_score);
+
+    /**
      * @brief Validate transaction against business rules
      * @param transaction_data Transaction to validate
      * @return Validation results

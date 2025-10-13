@@ -22,11 +22,41 @@ export DB_HOST=${DB_HOST:-localhost}
 export DB_PORT=${DB_PORT:-5432}
 export DB_NAME=${DB_NAME:-regulens_compliance}
 export DB_USER=${DB_USER:-regulens_user}
-export DB_PASSWORD=${DB_PASSWORD:-dev_password}
+# SECURITY: No default passwords - must be set via environment variables
+if [ -z "${DB_PASSWORD}" ]; then
+    echo "FATAL ERROR: DB_PASSWORD environment variable is not set"
+    echo "Please set DB_PASSWORD before running the application"
+    echo "Example: export DB_PASSWORD='$(openssl rand -base64 32)'"
+    exit 1
+fi
+
 export REDIS_HOST=${REDIS_HOST:-localhost}
 export REDIS_PORT=${REDIS_PORT:-6379}
-export REDIS_PASSWORD=${REDIS_PASSWORD:-dev_redis_password}
-export JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_change_in_production_min_32_chars_required_for_security}
+# SECURITY: No default passwords - must be set via environment variables
+if [ -z "${REDIS_PASSWORD}" ]; then
+    echo "FATAL ERROR: REDIS_PASSWORD environment variable is not set"
+    echo "Please set REDIS_PASSWORD before running the application"
+    echo "Example: export REDIS_PASSWORD='$(openssl rand -base64 32)'"
+    exit 1
+fi
+
+# SECURITY: No default JWT secret - must be set via environment variables
+if [ -z "${JWT_SECRET}" ]; then
+    echo "FATAL ERROR: JWT_SECRET environment variable is not set"
+    echo "Please set JWT_SECRET before running the application"
+    echo "Example: export JWT_SECRET='$(openssl rand -hex 32)'"
+    echo "JWT_SECRET must be at least 32 characters for security"
+    exit 1
+fi
+
+# Validate JWT_SECRET length (must be at least 32 characters)
+if [ ${#JWT_SECRET} -lt 32 ]; then
+    echo "FATAL ERROR: JWT_SECRET must be at least 32 characters"
+    echo "Current length: ${#JWT_SECRET}"
+    echo "Generate a secure secret with: openssl rand -hex 32"
+    exit 1
+fi
+
 export JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS:-1600}
 export SESSION_EXPIRY_HOURS=${SESSION_EXPIRY_HOURS:-24}
 export WEB_SERVER_HOST=${WEB_SERVER_HOST:-0.0.0.0}

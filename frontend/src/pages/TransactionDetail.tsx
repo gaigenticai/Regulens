@@ -14,16 +14,8 @@ import {
 import { apiClient } from '@/services/api';
 import type * as API from '@/types/api';
 
-interface CustomerProfile {
-  customer_id: string;
-  full_name: string;
-  risk_rating: string;
-  kyc_status: string;
-  pep_status: boolean;
-  watchlist_flags: string[];
-  nationality: string;
-  residency_country: string;
-}
+// Use API types instead of local interface
+type CustomerProfile = API.CustomerProfile;
 
 interface BehaviorPattern {
   pattern_type: string;
@@ -76,17 +68,29 @@ const TransactionDetail: React.FC = () => {
         }
       }
 
-      // Set mock customer profile (since we don't have customer endpoint yet)
-      setCustomerProfile({
-        customer_id: transaction.from || 'unknown',
-        full_name: transaction.from || 'Unknown Customer',
-        risk_rating: 'MEDIUM',
-        kyc_status: 'VERIFIED',
-        pep_status: false,
-        watchlist_flags: [],
-        nationality: 'USA',
-        residency_country: 'USA'
-      });
+      // Load real customer profile from API
+      if (transaction.from) {
+        try {
+          const customerProfile = await apiClient.getCustomerProfile(transaction.from);
+          setCustomerProfile(customerProfile);
+        } catch (error) {
+          console.error('Failed to load customer profile:', error);
+          // Set error state instead of mock data
+          setCustomerProfile({
+            customer_id: transaction.from,
+            full_name: 'Error Loading Customer',
+            risk_rating: 'ERROR',
+            kyc_status: 'ERROR',
+            pep_status: false,
+            watchlist_flags: [],
+            nationality: '',
+            residency_country: '',
+            account_status: 'error',
+            total_transactions: 0,
+            flagged_transactions: 0
+          });
+        }
+      }
 
     } catch (err) {
       setError('Failed to load transaction details');
@@ -339,7 +343,18 @@ const TransactionDetail: React.FC = () => {
       {activeTab === 'customer' && customerProfile && (
         <div className="space-y-6">
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Customer Profile</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Customer Profile</h2>
+              {customerProfile.customer_id && (
+                <Link
+                  to={`/customers/${customerProfile.customer_id}`}
+                  className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <Eye className="mr-1.5 h-4 w-4" />
+                  View Full Profile
+                </Link>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
                 <div>

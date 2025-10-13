@@ -4798,3 +4798,1245 @@ COMMENT ON COLUMN pattern_anomalies.z_score IS 'Statistical z-score showing devi
 -- ============================================================================
 -- END OF PATTERN ANALYSIS TABLES
 -- ============================================================================
+
+-- ============================================================================
+-- AGENT COMMUNICATION SYSTEM
+-- ============================================================================
+
+-- Agent messages table for inter-agent communication
+CREATE TABLE IF NOT EXISTS agent_messages (
+    message_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    from_agent_id UUID NOT NULL,
+    to_agent_id UUID,  -- NULL for broadcasts
+    message_type VARCHAR(50) NOT NULL,
+    content JSONB NOT NULL,
+    priority INTEGER DEFAULT 3 CHECK (priority BETWEEN 1 AND 5), -- 1=urgent, 5=low
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'acknowledged', 'failed', 'expired')),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    acknowledged_at TIMESTAMP WITH TIME ZONE,
+    read_at TIMESTAMP WITH TIME ZONE,
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    correlation_id UUID, -- For request/response correlation
+    parent_message_id UUID REFERENCES agent_messages(message_id), -- For threading
+    created_by UUID, -- User who initiated the message (if applicable)
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for efficient message retrieval
+CREATE INDEX IF NOT EXISTS idx_agent_messages_recipient ON agent_messages(to_agent_id, status) WHERE to_agent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_messages_sender ON agent_messages(from_agent_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_created ON agent_messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_type ON agent_messages(message_type);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_priority ON agent_messages(priority, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_correlation ON agent_messages(correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_messages_parent ON agent_messages(parent_message_id) WHERE parent_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_messages_expires ON agent_messages(expires_at) WHERE expires_at IS NOT NULL;
+
+-- Dead letter queue for failed messages
+CREATE TABLE IF NOT EXISTS agent_messages_failed (
+    message_id UUID PRIMARY KEY,
+    original_message JSONB NOT NULL,
+    failure_reason TEXT,
+    failed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    retry_after TIMESTAMP WITH TIME ZONE
+);
+
+-- Agent conversation threads (for multi-agent discussions)
+CREATE TABLE IF NOT EXISTS agent_conversations (
+    conversation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    topic VARCHAR(500) NOT NULL,
+    participant_agents UUID[] NOT NULL, -- Array of agent IDs
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'completed', 'archived')),
+    priority VARCHAR(20) DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_activity TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    message_count INTEGER DEFAULT 0,
+    created_by UUID,
+    metadata JSONB, -- Additional conversation metadata
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Link messages to conversations
+ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS conversation_id UUID REFERENCES agent_conversations(conversation_id);
+
+-- Indexes for conversations
+CREATE INDEX IF NOT EXISTS idx_agent_conversations_participants ON agent_conversations USING GIN(participant_agents);
+CREATE INDEX IF NOT EXISTS idx_agent_conversations_status ON agent_conversations(status, last_activity DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_conversations_topic ON agent_conversations(topic);
+
+-- Message delivery attempts (for failed deliveries)
+CREATE TABLE IF NOT EXISTS message_delivery_attempts (
+    attempt_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id UUID NOT NULL REFERENCES agent_messages(message_id) ON DELETE CASCADE,
+    attempt_number INTEGER NOT NULL,
+    attempted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    error_code VARCHAR(100),
+    error_message TEXT,
+    next_retry_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for delivery attempts
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_message ON message_delivery_attempts(message_id, attempt_number);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_retry ON message_delivery_attempts(next_retry_at) WHERE next_retry_at IS NOT NULL;
+
+-- Message templates for common agent communications
+CREATE TABLE IF NOT EXISTS message_templates (
+    template_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    template_name VARCHAR(100) NOT NULL UNIQUE,
+    message_type VARCHAR(50) NOT NULL,
+    template_content JSONB NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_by UUID,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Message type definitions
+CREATE TABLE IF NOT EXISTS message_types (
+    message_type VARCHAR(50) PRIMARY KEY,
+    description TEXT NOT NULL,
+    schema_definition JSONB, -- JSON schema for message validation
+    requires_response BOOLEAN DEFAULT false,
+    default_priority INTEGER DEFAULT 3,
+    default_expiry_hours INTEGER DEFAULT 24,
+    is_system_type BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Insert standard message types
+INSERT INTO message_types (message_type, description, requires_response, default_priority, default_expiry_hours, is_system_type) VALUES
+('TASK_ASSIGNMENT', 'Assign a task to another agent', true, 2, 168, false),
+('STATUS_UPDATE', 'Report agent status or progress', false, 4, 24, false),
+('DATA_REQUEST', 'Request data from another agent', true, 2, 72, false),
+('DATA_RESPONSE', 'Respond with requested data', false, 3, 168, false),
+('COLLABORATION_INVITE', 'Invite to collaborative session', true, 3, 24, false),
+('CONSENSUS_REQUEST', 'Request consensus input', true, 2, 72, false),
+('CONSENSUS_VOTE', 'Submit consensus vote', false, 3, 168, false),
+('ALERT', 'Urgent notification or alert', false, 1, 24, true),
+('HEARTBEAT', 'Agent health check', false, 5, 1, true),
+('ERROR_REPORT', 'Report an error or failure', false, 1, 168, true),
+('CONFIGURATION_UPDATE', 'Notify of configuration changes', false, 2, 168, true),
+('RESOURCE_REQUEST', 'Request system resources', true, 3, 24, false)
+ON CONFLICT (message_type) DO NOTHING;
+
+-- Comments for agent communication tables
+COMMENT ON TABLE agent_messages IS 'Inter-agent communication messages with delivery tracking and retry logic';
+COMMENT ON TABLE agent_conversations IS 'Multi-agent conversation threads for collaborative discussions';
+COMMENT ON TABLE message_delivery_attempts IS 'Audit trail of message delivery attempts and failures';
+COMMENT ON TABLE message_templates IS 'Reusable message templates for common communications';
+COMMENT ON TABLE message_types IS 'Definitions of supported message types with validation schemas';
+
+COMMENT ON COLUMN agent_messages.priority IS '1=urgent, 2=high, 3=normal, 4=low, 5=bulk';
+COMMENT ON COLUMN agent_messages.correlation_id IS 'Links request/response message pairs';
+COMMENT ON COLUMN agent_messages.parent_message_id IS 'For message threading in conversations';
+COMMENT ON COLUMN agent_conversations.participant_agents IS 'Array of agent IDs participating in conversation';
+
+-- ============================================================================
+-- END OF AGENT COMMUNICATION SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- GPT-4 CHATBOT INTEGRATION SYSTEM
+-- ============================================================================
+
+-- Chatbot conversations table
+CREATE TABLE IF NOT EXISTS chatbot_conversations (
+    conversation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL,
+    platform VARCHAR(50) DEFAULT 'web', -- web, api, slack, discord, etc.
+    title VARCHAR(255), -- Auto-generated or user-provided
+    message_count INTEGER DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    total_cost DECIMAL(10,6) DEFAULT 0, -- Cost in USD
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_message_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT true,
+    metadata JSONB, -- Conversation metadata (model used, settings, etc.)
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Chatbot messages table
+CREATE TABLE IF NOT EXISTS chatbot_messages (
+    message_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    conversation_id UUID NOT NULL REFERENCES chatbot_conversations(conversation_id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    content TEXT NOT NULL,
+    token_count INTEGER,
+    model_used VARCHAR(100), -- gpt-4, gpt-3.5-turbo, etc.
+    message_cost DECIMAL(8,6), -- Cost for this specific message
+    confidence_score DECIMAL(3,2), -- AI confidence in response (0-1)
+    sources_used JSONB, -- Knowledge base sources referenced
+    processing_time_ms INTEGER, -- How long it took to generate response
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Chatbot knowledge retrieval cache (for RAG)
+CREATE TABLE IF NOT EXISTS chatbot_knowledge_cache (
+    cache_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    query_hash VARCHAR(64) NOT NULL UNIQUE, -- SHA256 hash of query
+    query_text TEXT NOT NULL,
+    retrieved_context JSONB NOT NULL, -- Retrieved knowledge base entries
+    relevance_scores JSONB, -- Scores for each retrieved item
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
+);
+
+-- Chatbot rate limiting and usage tracking
+CREATE TABLE IF NOT EXISTS chatbot_usage_stats (
+    stat_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID,
+    api_key_hash VARCHAR(64), -- For API key rate limiting
+    request_count INTEGER DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    cost_accumulated DECIMAL(10,4) DEFAULT 0,
+    time_window_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    time_window_end TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for chatbot system
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_user ON chatbot_conversations(user_id, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_active ON chatbot_conversations(is_active, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chatbot_messages_conversation ON chatbot_messages(conversation_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_chatbot_knowledge_cache_hash ON chatbot_knowledge_cache(query_hash);
+CREATE INDEX IF NOT EXISTS idx_chatbot_knowledge_cache_expires ON chatbot_knowledge_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_chatbot_usage_user_window ON chatbot_usage_stats(user_id, time_window_start, time_window_end);
+CREATE INDEX IF NOT EXISTS idx_chatbot_usage_api_window ON chatbot_usage_stats(api_key_hash, time_window_start, time_window_end);
+
+-- ============================================================================
+-- END OF GPT-4 CHATBOT INTEGRATION SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- LLM TEXT ANALYSIS SYSTEM
+-- ============================================================================
+
+-- Text analysis cache table
+CREATE TABLE IF NOT EXISTS text_analysis_cache (
+    cache_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    text_hash VARCHAR(128) NOT NULL,
+    tasks_hash VARCHAR(128) NOT NULL,
+    analysis_result JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+    access_count INTEGER DEFAULT 0,
+    last_accessed TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(text_hash, tasks_hash)
+);
+
+-- Text analysis results table (for analytics and history)
+CREATE TABLE IF NOT EXISTS text_analysis_results (
+    result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    request_id VARCHAR(64) NOT NULL UNIQUE,
+    text_hash VARCHAR(128) NOT NULL,
+    user_id UUID,
+    source VARCHAR(50) DEFAULT 'api',
+    text_length INTEGER NOT NULL,
+    tasks_performed JSONB NOT NULL, -- Array of analysis tasks
+    processing_time_ms INTEGER NOT NULL,
+    total_tokens INTEGER NOT NULL,
+    total_cost DECIMAL(8,6) NOT NULL,
+    success BOOLEAN NOT NULL DEFAULT true,
+    error_message TEXT,
+    sentiment_result JSONB,
+    entity_results JSONB,
+    summary_result JSONB,
+    classification_result JSONB,
+    language_result JSONB,
+    keywords_result JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Text analysis usage statistics
+CREATE TABLE IF NOT EXISTS text_analysis_usage (
+    usage_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID,
+    task_type VARCHAR(50) NOT NULL, -- sentiment, entities, summary, etc.
+    request_count INTEGER DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    cost_accumulated DECIMAL(10,6) DEFAULT 0,
+    time_window_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    time_window_end TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for text analysis system
+CREATE INDEX IF NOT EXISTS idx_text_analysis_cache_hash ON text_analysis_cache(text_hash, tasks_hash);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_cache_expires ON text_analysis_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_results_user ON text_analysis_results(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_results_hash ON text_analysis_results(text_hash);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_usage_user_window ON text_analysis_usage(user_id, time_window_start, time_window_end);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_usage_task_window ON text_analysis_usage(task_type, time_window_start, time_window_end);
+
+-- ============================================================================
+-- END OF LLM TEXT ANALYSIS SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- NATURAL LANGUAGE POLICY GENERATION SYSTEM
+-- ============================================================================
+
+-- Policy generation results table
+CREATE TABLE IF NOT EXISTS policy_generation_results (
+    policy_id VARCHAR(64) PRIMARY KEY,
+    request_id VARCHAR(64) NOT NULL UNIQUE,
+    primary_rule_id VARCHAR(64),
+    alternative_rules JSONB, -- Array of alternative rule IDs
+    validation_result VARCHAR(50) DEFAULT 'pending', -- 'valid', 'invalid', 'pending'
+    processing_time_ms INTEGER NOT NULL,
+    tokens_used INTEGER NOT NULL,
+    cost DECIMAL(8,6) NOT NULL,
+    success BOOLEAN NOT NULL DEFAULT true,
+    error_message TEXT,
+    version VARCHAR(20) DEFAULT '1.0.0',
+    parent_version VARCHAR(20),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Generated rules table
+CREATE TABLE IF NOT EXISTS generated_rules (
+    rule_id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    natural_language_input TEXT NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    domain VARCHAR(50) NOT NULL,
+    format VARCHAR(20) NOT NULL,
+    generated_code TEXT NOT NULL,
+    rule_metadata JSONB,
+    validation_tests JSONB,
+    documentation TEXT,
+    confidence_score DECIMAL(3,2) DEFAULT 0.0,
+    suggested_improvements JSONB,
+    generated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Rule deployments table
+CREATE TABLE IF NOT EXISTS rule_deployments (
+    deployment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    rule_id VARCHAR(64) NOT NULL REFERENCES generated_rules(rule_id),
+    target_environment VARCHAR(50) NOT NULL, -- 'development', 'staging', 'production'
+    deployed_by VARCHAR(100) NOT NULL,
+    review_comments TEXT,
+    status VARCHAR(50) DEFAULT 'pending_approval', -- 'pending_approval', 'deployed', 'failed', 'rejected'
+    deployed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Rule templates table (pre-defined templates for common scenarios)
+CREATE TABLE IF NOT EXISTS rule_templates (
+    template_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    domain VARCHAR(50) NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    template_data JSONB NOT NULL,
+    usage_count INTEGER DEFAULT 0,
+    created_by VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Rule generation analytics
+CREATE TABLE IF NOT EXISTS policy_generation_analytics (
+    analytic_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id VARCHAR(100),
+    operation VARCHAR(50) NOT NULL, -- 'generate', 'validate', 'deploy', etc.
+    domain VARCHAR(50),
+    rule_type VARCHAR(50),
+    format VARCHAR(20),
+    tokens_used INTEGER,
+    cost DECIMAL(8,6),
+    success BOOLEAN NOT NULL DEFAULT true,
+    processing_time_ms INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for policy generation system
+CREATE INDEX IF NOT EXISTS idx_policy_generation_results_user ON policy_generation_results(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generated_rules_domain ON generated_rules(domain, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generated_rules_type ON generated_rules(rule_type, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rule_deployments_rule ON rule_deployments(rule_id, deployed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rule_deployments_status ON rule_deployments(status, deployed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rule_templates_domain ON rule_templates(domain, usage_count DESC);
+CREATE INDEX IF NOT EXISTS idx_policy_analytics_user ON policy_generation_analytics(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_policy_analytics_operation ON policy_generation_analytics(operation, created_at DESC);
+
+-- ============================================================================
+-- END OF NATURAL LANGUAGE POLICY GENERATION SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- DYNAMIC CONFIGURATION MANAGEMENT SYSTEM
+-- ============================================================================
+
+-- Configuration values table
+CREATE TABLE IF NOT EXISTS configuration_values (
+    key VARCHAR(255) NOT NULL,
+    value TEXT NOT NULL,
+    data_type VARCHAR(20) NOT NULL DEFAULT 'STRING',
+    scope VARCHAR(20) NOT NULL DEFAULT 'GLOBAL',
+    module_name VARCHAR(100) DEFAULT '',
+    description TEXT,
+    validation_regex VARCHAR(500),
+    allowed_values JSONB,
+    is_encrypted BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_by VARCHAR(100),
+    version INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (key, scope)
+);
+
+-- Configuration changes audit table
+CREATE TABLE IF NOT EXISTS configuration_changes (
+    change_id VARCHAR(64) PRIMARY KEY,
+    config_key VARCHAR(255) NOT NULL,
+    old_value TEXT,
+    new_value TEXT NOT NULL,
+    changed_by VARCHAR(100) NOT NULL,
+    change_reason TEXT,
+    changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    change_type VARCHAR(20) NOT NULL -- 'CREATE', 'UPDATE', 'DELETE'
+);
+
+-- Configuration backups table
+CREATE TABLE IF NOT EXISTS configuration_backups (
+    backup_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    backup_name VARCHAR(255) NOT NULL,
+    scope VARCHAR(20) NOT NULL,
+    config_data JSONB NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    restored_at TIMESTAMP WITH TIME ZONE,
+    restored_by VARCHAR(100),
+    UNIQUE(backup_name, scope)
+);
+
+-- Configuration access logs
+CREATE TABLE IF NOT EXISTS configuration_access_logs (
+    log_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    config_key VARCHAR(255) NOT NULL,
+    scope VARCHAR(20) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    operation VARCHAR(50) NOT NULL, -- 'GET', 'SET', 'UPDATE', 'DELETE'
+    ip_address INET,
+    user_agent TEXT,
+    accessed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for configuration system
+CREATE INDEX IF NOT EXISTS idx_config_values_scope ON configuration_values(scope);
+CREATE INDEX IF NOT EXISTS idx_config_values_module ON configuration_values(module_name);
+CREATE INDEX IF NOT EXISTS idx_config_values_updated ON configuration_values(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_changes_key ON configuration_changes(config_key, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_changes_user ON configuration_changes(changed_by, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_backups_name ON configuration_backups(backup_name);
+CREATE INDEX IF NOT EXISTS idx_config_access_key ON configuration_access_logs(config_key, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_access_user ON configuration_access_logs(user_id, accessed_at DESC);
+
+-- ============================================================================
+-- END OF DYNAMIC CONFIGURATION MANAGEMENT SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- ADVANCED RULE ENGINE SYSTEM
+-- ============================================================================
+
+-- Fraud detection rules table
+CREATE TABLE IF NOT EXISTS fraud_detection_rules (
+    rule_id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    priority INTEGER NOT NULL DEFAULT 2, -- 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL
+    rule_type VARCHAR(50) NOT NULL, -- 'VALIDATION', 'SCORING', 'PATTERN', 'MACHINE_LEARNING'
+    rule_logic JSONB NOT NULL,
+    parameters JSONB,
+    input_fields JSONB, -- Array of field names
+    output_fields JSONB, -- Array of field names
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    valid_from TIMESTAMP WITH TIME ZONE,
+    valid_until TIMESTAMP WITH TIME ZONE,
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Fraud detection results table
+CREATE TABLE IF NOT EXISTS fraud_detection_results (
+    result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    transaction_id VARCHAR(255) NOT NULL,
+    is_fraudulent BOOLEAN NOT NULL DEFAULT false,
+    overall_risk INTEGER NOT NULL DEFAULT 0, -- 0=LOW, 1=MEDIUM, 2=HIGH, 3=CRITICAL
+    fraud_score DECIMAL(5,4) NOT NULL DEFAULT 0.0,
+    rule_results JSONB, -- Array of rule execution results
+    aggregated_findings JSONB,
+    detection_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    processing_duration VARCHAR(50),
+    recommendation VARCHAR(20), -- 'APPROVE', 'REVIEW', 'BLOCK'
+    INDEX idx_fraud_results_transaction (transaction_id),
+    INDEX idx_fraud_results_time (detection_time DESC),
+    INDEX idx_fraud_results_risk (overall_risk, detection_time DESC)
+);
+
+-- Rule execution logs table
+CREATE TABLE IF NOT EXISTS rule_execution_logs (
+    log_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    transaction_id VARCHAR(255) NOT NULL,
+    rule_id VARCHAR(64) NOT NULL,
+    execution_result VARCHAR(20) NOT NULL, -- 'PASS', 'FAIL', 'ERROR', 'TIMEOUT', 'SKIPPED'
+    confidence_score DECIMAL(3,2) DEFAULT 0.0,
+    risk_level INTEGER DEFAULT 0,
+    rule_output JSONB,
+    execution_time_ms INTEGER NOT NULL,
+    triggered_conditions JSONB,
+    error_message TEXT,
+    executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_rule_execution_transaction (transaction_id),
+    INDEX idx_rule_execution_rule (rule_id),
+    INDEX idx_rule_execution_time (executed_at DESC),
+    INDEX idx_rule_execution_result (execution_result, executed_at DESC)
+);
+
+-- Rule performance metrics table
+CREATE TABLE IF NOT EXISTS rule_performance_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    rule_id VARCHAR(64) NOT NULL UNIQUE,
+    total_executions INTEGER NOT NULL DEFAULT 0,
+    successful_executions INTEGER NOT NULL DEFAULT 0,
+    failed_executions INTEGER NOT NULL DEFAULT 0,
+    fraud_detections INTEGER NOT NULL DEFAULT 0,
+    false_positives INTEGER NOT NULL DEFAULT 0,
+    average_execution_time_ms DECIMAL(8,2) DEFAULT 0.0,
+    average_confidence_score DECIMAL(3,2) DEFAULT 0.0,
+    last_execution TIMESTAMP WITH TIME ZONE,
+    error_counts JSONB, -- Map of error types to counts
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_rule_metrics_rule (rule_id),
+    INDEX idx_rule_metrics_executions (total_executions DESC)
+);
+
+-- Batch processing jobs table
+CREATE TABLE IF NOT EXISTS batch_processing_jobs (
+    job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    batch_id VARCHAR(64) NOT NULL UNIQUE,
+    job_type VARCHAR(50) NOT NULL, -- 'FRAUD_EVALUATION', 'RULE_TESTING', etc.
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'
+    total_items INTEGER NOT NULL DEFAULT 0,
+    processed_items INTEGER NOT NULL DEFAULT 0,
+    progress DECIMAL(5,4) DEFAULT 0.0,
+    parameters JSONB,
+    results JSONB,
+    error_message TEXT,
+    created_by VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    INDEX idx_batch_jobs_batch (batch_id),
+    INDEX idx_batch_jobs_status (status, created_at DESC),
+    INDEX idx_batch_jobs_type (job_type, created_at DESC)
+);
+
+-- ============================================================================
+-- END OF ADVANCED RULE ENGINE SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- TOOL CATEGORIES SYSTEM
+-- ============================================================================
+
+-- Tool execution results table
+CREATE TABLE IF NOT EXISTS tool_execution_results (
+    result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tool_name VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    success BOOLEAN NOT NULL DEFAULT true,
+    message TEXT,
+    data JSONB,
+    error_details TEXT,
+    execution_time_ms INTEGER,
+    executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_tool_results_tool (tool_name, executed_at DESC),
+    INDEX idx_tool_results_user (user_id, executed_at DESC),
+    INDEX idx_tool_results_success (success, executed_at DESC)
+);
+
+-- Tool performance metrics table
+CREATE TABLE IF NOT EXISTS tool_performance_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tool_name VARCHAR(100) NOT NULL,
+    total_executions INTEGER NOT NULL DEFAULT 0,
+    successful_executions INTEGER NOT NULL DEFAULT 0,
+    failed_executions INTEGER NOT NULL DEFAULT 0,
+    average_execution_time_ms DECIMAL(8,2) DEFAULT 0.0,
+    last_execution TIMESTAMP WITH TIME ZONE,
+    error_counts JSONB, -- Map of error types to counts
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_tool_metrics_tool (tool_name),
+    INDEX idx_tool_metrics_executions (total_executions DESC)
+);
+
+-- Tool configurations table
+CREATE TABLE IF NOT EXISTS tool_configurations (
+    config_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tool_name VARCHAR(100) NOT NULL,
+    config_key VARCHAR(255) NOT NULL,
+    config_value JSONB,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_by VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(tool_name, config_key),
+    INDEX idx_tool_config_tool (tool_name),
+    INDEX idx_tool_config_active (is_active)
+);
+
+-- Tool usage analytics table
+CREATE TABLE IF NOT EXISTS tool_usage_analytics (
+    analytic_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tool_name VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100),
+    operation VARCHAR(50) NOT NULL, -- 'execute', 'configure', 'monitor'
+    success BOOLEAN NOT NULL DEFAULT true,
+    execution_time_ms INTEGER,
+    data_processed INTEGER, -- Records, bytes, etc.
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_tool_analytics_tool (tool_name, recorded_at DESC),
+    INDEX idx_tool_analytics_user (user_id, recorded_at DESC),
+    INDEX idx_tool_analytics_operation (operation, recorded_at DESC)
+);
+
+-- ============================================================================
+-- END OF TOOL CATEGORIES SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- CONSENSUS ENGINE SYSTEM
+-- ============================================================================
+
+-- Consensus processes table
+CREATE TABLE IF NOT EXISTS consensus_processes (
+    consensus_id VARCHAR(64) PRIMARY KEY,
+    topic VARCHAR(500) NOT NULL,
+    algorithm INTEGER NOT NULL DEFAULT 1, -- 0=UNANIMOUS, 1=MAJORITY, etc.
+    participants JSONB NOT NULL,
+    max_rounds INTEGER NOT NULL DEFAULT 3,
+    timeout_per_round_min INTEGER NOT NULL DEFAULT 10,
+    consensus_threshold DECIMAL(3,2) NOT NULL DEFAULT 0.7,
+    min_participants INTEGER NOT NULL DEFAULT 3,
+    allow_discussion BOOLEAN NOT NULL DEFAULT true,
+    require_justification BOOLEAN NOT NULL DEFAULT true,
+    custom_rules JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_consensus_topic (topic),
+    INDEX idx_consensus_algorithm (algorithm),
+    INDEX idx_consensus_created (created_at DESC)
+);
+
+-- Consensus agents table
+CREATE TABLE IF NOT EXISTS consensus_agents (
+    agent_id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    role INTEGER NOT NULL DEFAULT 0, -- 0=EXPERT, 1=REVIEWER, etc.
+    voting_weight DECIMAL(5,2) NOT NULL DEFAULT 1.0,
+    domain_expertise VARCHAR(255),
+    confidence_threshold DECIMAL(3,2) NOT NULL DEFAULT 0.7,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    last_active TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_agents_active (is_active, last_active DESC),
+    INDEX idx_agents_role (role)
+);
+
+-- Consensus results table
+CREATE TABLE IF NOT EXISTS consensus_results (
+    result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    consensus_id VARCHAR(64) NOT NULL,
+    final_decision TEXT,
+    confidence_level INTEGER NOT NULL DEFAULT 3, -- 1=VERY_LOW, 5=VERY_HIGH
+    algorithm_used INTEGER NOT NULL,
+    final_state INTEGER NOT NULL, -- 0=INITIALIZING, 6=REACHED_CONSENSUS, etc.
+    total_participants INTEGER NOT NULL,
+    agreement_percentage DECIMAL(5,4),
+    total_duration_ms BIGINT,
+    resolution_details JSONB,
+    dissenting_opinions JSONB,
+    completed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_results_consensus (consensus_id),
+    INDEX idx_results_completed (completed_at DESC),
+    INDEX idx_results_state (final_state, completed_at DESC)
+);
+
+-- Voting rounds table
+CREATE TABLE IF NOT EXISTS consensus_voting_rounds (
+    round_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    consensus_id VARCHAR(64) NOT NULL,
+    round_number INTEGER NOT NULL,
+    topic VARCHAR(500),
+    description TEXT,
+    opinions JSONB,
+    vote_counts JSONB,
+    state INTEGER NOT NULL DEFAULT 0,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    ended_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    INDEX idx_rounds_consensus (consensus_id, round_number),
+    INDEX idx_rounds_state (state, started_at DESC)
+);
+
+-- Agent opinions table
+CREATE TABLE IF NOT EXISTS consensus_agent_opinions (
+    opinion_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    consensus_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64) NOT NULL,
+    round_number INTEGER NOT NULL,
+    decision TEXT NOT NULL,
+    confidence_score DECIMAL(3,2) NOT NULL DEFAULT 0.5,
+    reasoning TEXT,
+    supporting_data JSONB,
+    concerns JSONB,
+    submitted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_opinions_consensus (consensus_id, round_number),
+    INDEX idx_opinions_agent (agent_id, submitted_at DESC),
+    INDEX idx_opinions_decision (decision, confidence_score DESC)
+);
+
+-- Consensus performance metrics table
+CREATE TABLE IF NOT EXISTS consensus_performance_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    consensus_id VARCHAR(64),
+    agent_id VARCHAR(64),
+    metric_type VARCHAR(50) NOT NULL, -- 'execution_time', 'agreement_rate', etc.
+    metric_value DECIMAL(10,4),
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_metrics_consensus (consensus_id, recorded_at DESC),
+    INDEX idx_metrics_agent (agent_id, recorded_at DESC),
+    INDEX idx_metrics_type (metric_type, recorded_at DESC)
+);
+
+-- ============================================================================
+-- END OF CONSENSUS ENGINE SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- MESSAGE TRANSLATOR SYSTEM
+-- ============================================================================
+
+-- Translation rules table
+CREATE TABLE IF NOT EXISTS translation_rules (
+    rule_id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    from_protocol INTEGER NOT NULL,
+    to_protocol INTEGER NOT NULL,
+    transformation_rules JSONB,
+    bidirectional BOOLEAN NOT NULL DEFAULT false,
+    priority INTEGER NOT NULL DEFAULT 1,
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_translation_rules_protocols (from_protocol, to_protocol),
+    INDEX idx_translation_rules_active (active, priority DESC),
+    INDEX idx_translation_rules_created (created_at DESC)
+);
+
+-- Protocol schemas table
+CREATE TABLE IF NOT EXISTS protocol_schemas (
+    protocol_id INTEGER PRIMARY KEY,
+    protocol_name VARCHAR(50) NOT NULL,
+    schema_definition JSONB NOT NULL,
+    content_type VARCHAR(100),
+    supports_binary BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_protocol_schemas_name (protocol_name)
+);
+
+-- Translation statistics table
+CREATE TABLE IF NOT EXISTS translation_statistics (
+    stat_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    from_protocol VARCHAR(50) NOT NULL,
+    to_protocol VARCHAR(50) NOT NULL,
+    result_status VARCHAR(20) NOT NULL,
+    processing_time_ms INTEGER,
+    message_size_bytes INTEGER,
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_translation_stats_protocols (from_protocol, to_protocol, recorded_at DESC),
+    INDEX idx_translation_stats_result (result_status, recorded_at DESC),
+    INDEX idx_translation_stats_time (processing_time_ms, recorded_at DESC)
+);
+
+-- Translation cache table
+CREATE TABLE IF NOT EXISTS translation_cache (
+    cache_key VARCHAR(255) PRIMARY KEY,
+    original_message TEXT NOT NULL,
+    translated_message TEXT NOT NULL,
+    from_protocol INTEGER NOT NULL,
+    to_protocol INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_accessed TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    access_count INTEGER NOT NULL DEFAULT 0,
+    INDEX idx_translation_cache_access (last_accessed DESC, access_count DESC)
+);
+
+-- ============================================================================
+-- END OF MESSAGE TRANSLATOR SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- COMMUNICATION MEDIATOR SYSTEM
+-- ============================================================================
+
+-- Conversation contexts table
+CREATE TABLE IF NOT EXISTS conversation_contexts (
+    conversation_id VARCHAR(64) PRIMARY KEY,
+    topic VARCHAR(500) NOT NULL,
+    objective TEXT NOT NULL,
+    state INTEGER NOT NULL DEFAULT 0, -- 0=INITIALIZING, 1=ACTIVE, etc.
+    participants JSONB NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_activity TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    timeout_duration_min INTEGER NOT NULL DEFAULT 30,
+    metadata JSONB,
+    INDEX idx_conversation_topic (topic),
+    INDEX idx_conversation_state (state, last_activity DESC),
+    INDEX idx_conversation_started (started_at DESC)
+);
+
+-- Conversation messages table
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    message_id VARCHAR(64) PRIMARY KEY,
+    conversation_id VARCHAR(64) NOT NULL,
+    sender_agent_id VARCHAR(64) NOT NULL,
+    recipient_agent_id VARCHAR(64), -- NULL for broadcast
+    message_type VARCHAR(50) NOT NULL DEFAULT 'message',
+    content JSONB NOT NULL,
+    sent_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    acknowledged BOOLEAN NOT NULL DEFAULT false,
+    metadata JSONB,
+    INDEX idx_messages_conversation (conversation_id, sent_at DESC),
+    INDEX idx_messages_sender (sender_agent_id, sent_at DESC),
+    INDEX idx_messages_recipient (recipient_agent_id, sent_at DESC),
+    INDEX idx_messages_type (message_type, sent_at DESC)
+);
+
+-- Message deliveries table (for tracking delivery status)
+CREATE TABLE IF NOT EXISTS message_deliveries (
+    delivery_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64) NOT NULL,
+    delivered_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    acknowledged_at TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) NOT NULL DEFAULT 'delivered', -- delivered, acknowledged, failed
+    UNIQUE(message_id, agent_id),
+    INDEX idx_deliveries_message (message_id),
+    INDEX idx_deliveries_agent (agent_id, delivered_at DESC),
+    INDEX idx_deliveries_status (status, delivered_at DESC)
+);
+
+-- Conflict resolutions table
+CREATE TABLE IF NOT EXISTS conflict_resolutions (
+    conflict_id VARCHAR(64) PRIMARY KEY,
+    conversation_id VARCHAR(64) NOT NULL,
+    conflict_type INTEGER NOT NULL, -- 0=CONTRADICTORY_RESPONSES, etc.
+    description TEXT NOT NULL,
+    involved_agents JSONB NOT NULL,
+    strategy_used INTEGER NOT NULL, -- 0=MAJORITY_VOTE, etc.
+    conflict_details JSONB,
+    resolution_result JSONB,
+    detected_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    resolved_successfully BOOLEAN NOT NULL DEFAULT false,
+    resolution_summary TEXT,
+    INDEX idx_conflicts_conversation (conversation_id, detected_at DESC),
+    INDEX idx_conflicts_type (conflict_type, detected_at DESC),
+    INDEX idx_conflicts_resolved (resolved_successfully, resolved_at DESC)
+);
+
+-- Conversation performance metrics table
+CREATE TABLE IF NOT EXISTS conversation_performance_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    conversation_id VARCHAR(64),
+    agent_id VARCHAR(64),
+    metric_type VARCHAR(50) NOT NULL, -- 'participation_rate', 'response_time', etc.
+    metric_value DECIMAL(10,4),
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    INDEX idx_conversation_metrics_conversation (conversation_id, recorded_at DESC),
+    INDEX idx_conversation_metrics_agent (agent_id, recorded_at DESC),
+    INDEX idx_conversation_metrics_type (metric_type, recorded_at DESC)
+);
+
+-- ============================================================================
+-- END OF COMMUNICATION MEDIATOR SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- CONSENSUS ENGINE SYSTEM
+-- ============================================================================
+
+-- Consensus type enumeration
+CREATE TYPE consensus_type AS ENUM (
+    'unanimous',        -- All agents must agree
+    'majority',         -- Simple majority (>50%)
+    'supermajority',    -- 2/3 or 3/4 agreement
+    'weighted_voting',  -- Votes weighted by agent confidence/expertise
+    'ranked_choice',    -- Agents rank options, instant runoff
+    'bayesian'          -- Combine probabilistic beliefs
+);
+
+-- Consensus status enumeration
+CREATE TYPE consensus_status AS ENUM (
+    'open',             -- Accepting votes
+    'closed',           -- No more votes accepted
+    'reached',          -- Consensus achieved
+    'failed',           -- Couldn't reach consensus
+    'timeout'           -- Deadline passed
+);
+
+-- Consensus sessions table
+CREATE TABLE IF NOT EXISTS consensus_sessions (
+    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    topic VARCHAR(500) NOT NULL,
+    description TEXT,
+    consensus_type consensus_type NOT NULL,
+    status consensus_status DEFAULT 'open',
+    required_votes INTEGER NOT NULL,
+    current_votes INTEGER DEFAULT 0,
+    threshold DECIMAL(5,2),  -- For majority/supermajority
+    started_at TIMESTAMP DEFAULT NOW(),
+    deadline TIMESTAMP,
+    closed_at TIMESTAMP,
+    result JSONB,
+    result_confidence DECIMAL(5,2),
+    initiator_agent_id UUID REFERENCES agents(agent_id),
+    metadata JSONB
+);
+
+-- Consensus votes table
+CREATE TABLE IF NOT EXISTS consensus_votes (
+    vote_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID REFERENCES consensus_sessions(session_id) ON DELETE CASCADE,
+    agent_id UUID NOT NULL REFERENCES agents(agent_id),
+    vote_value JSONB NOT NULL,  -- Flexible: boolean, number, ranking, etc.
+    confidence DECIMAL(5,2),    -- Agent's confidence in their vote
+    reasoning TEXT,
+    cast_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(session_id, agent_id)  -- One vote per agent per session
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_consensus_status ON consensus_sessions(status, deadline);
+CREATE INDEX IF NOT EXISTS idx_consensus_votes_session ON consensus_votes(session_id, cast_at);
+
+-- ============================================================================
+-- END OF CONSENSUS ENGINE SYSTEM
+-- ============================================================================
+
+-- =============================================================================
+-- TOOL INTEGRATION SYSTEM
+-- =============================================================================
+
+-- Tool credentials table for secure storage of tool authentication data
+CREATE TABLE IF NOT EXISTS tool_credentials (
+    credential_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_name VARCHAR(100) NOT NULL,
+    credential_type VARCHAR(50) NOT NULL, -- api_key, oauth, basic_auth, jwt, certificate, etc.
+    encrypted_credentials BYTEA NOT NULL, -- AES-256 encrypted credential data
+    credential_metadata JSONB, -- Additional metadata (expiry, scopes, etc.)
+    created_by UUID NOT NULL, -- User or agent who created the credential
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE, -- Optional expiration date
+    last_used TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+
+    -- Constraints
+    CHECK (credential_type IN ('api_key', 'oauth', 'basic_auth', 'jwt', 'certificate', 'kerberos', 'saml')),
+    CHECK (expires_at IS NULL OR expires_at > created_at)
+);
+
+-- Tool usage metrics table for tracking tool performance and usage
+CREATE TABLE IF NOT EXISTS tool_usage_metrics (
+    usage_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_name VARCHAR(100) NOT NULL,
+    operation VARCHAR(100) NOT NULL,
+    success BOOLEAN NOT NULL,
+    execution_time_ms INTEGER,
+    error_message TEXT,
+    error_code VARCHAR(50),
+    user_id UUID, -- User who initiated the operation (if applicable)
+    agent_id UUID, -- Agent who initiated the operation (if applicable)
+    session_id UUID, -- Session context
+    request_metadata JSONB, -- Request parameters, headers, etc.
+    response_metadata JSONB, -- Response details, status codes, etc.
+    executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    tool_version VARCHAR(50), -- Version of the tool used
+    rate_limit_status VARCHAR(20), -- 'ok', 'limited', 'blocked'
+
+    -- Constraints
+    CHECK (rate_limit_status IN ('ok', 'limited', 'blocked')),
+    CHECK (execution_time_ms >= 0)
+);
+
+-- Tool health status table for monitoring tool availability
+CREATE TABLE IF NOT EXISTS tool_health_status (
+    health_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_name VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL, -- 'healthy', 'degraded', 'unhealthy', 'offline', 'maintenance'
+    last_check TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    next_check TIMESTAMP WITH TIME ZONE,
+    uptime_percentage DECIMAL(5,2), -- Percentage of time tool was available
+    average_response_time_ms INTEGER,
+    error_rate DECIMAL(5,4), -- Error rate as decimal (0.0000 to 1.0000)
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_failure TIMESTAMP WITH TIME ZONE,
+    health_metadata JSONB, -- Additional health information
+    alert_sent BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Constraints
+    CHECK (status IN ('healthy', 'degraded', 'unhealthy', 'offline', 'maintenance')),
+    CHECK (uptime_percentage >= 0.00 AND uptime_percentage <= 100.00),
+    CHECK (error_rate >= 0.0000 AND error_rate <= 1.0000),
+    CHECK (consecutive_failures >= 0)
+);
+
+-- Tool configuration templates table
+CREATE TABLE IF NOT EXISTS tool_config_templates (
+    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_category VARCHAR(50) NOT NULL,
+    tool_type VARCHAR(100) NOT NULL,
+    template_name VARCHAR(255) NOT NULL,
+    template_version VARCHAR(20) NOT NULL DEFAULT '1.0',
+    config_schema JSONB NOT NULL, -- JSON Schema for configuration validation
+    default_config JSONB NOT NULL, -- Default configuration values
+    required_capabilities JSONB, -- Required tool capabilities
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by UUID NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+    -- Constraints
+    CHECK (tool_category IN ('communication', 'erp', 'crm', 'dms', 'storage', 'analytics', 'workflow', 'integration', 'security', 'monitoring', 'web_search', 'mcp_tools')),
+    UNIQUE (tool_type, template_name, template_version)
+);
+
+-- Indexes for tool integration system
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_tool_name ON tool_credentials(tool_name, is_active);
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_created_by ON tool_credentials(created_by);
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_expires_at ON tool_credentials(expires_at) WHERE expires_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_tool_name ON tool_usage_metrics(tool_name, executed_at);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_user ON tool_usage_metrics(user_id, executed_at);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_agent ON tool_usage_metrics(agent_id, executed_at);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_success ON tool_usage_metrics(success, executed_at);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_operation ON tool_usage_metrics(operation, tool_name);
+
+CREATE INDEX IF NOT EXISTS idx_tool_health_status_tool ON tool_health_status(tool_name, last_check);
+CREATE INDEX IF NOT EXISTS idx_tool_health_status_status ON tool_health_status(status, last_check);
+
+CREATE INDEX IF NOT EXISTS idx_tool_config_templates_category ON tool_config_templates(tool_category, is_active);
+CREATE INDEX IF NOT EXISTS idx_tool_config_templates_type ON tool_config_templates(tool_type, is_active);
+
+-- ============================================================================
+-- END OF TOOL INTEGRATION SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- CUSTOMER MANAGEMENT SYSTEM
+-- ============================================================================
+
+-- Customers table
+CREATE TABLE IF NOT EXISTS customers (
+    customer_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    full_name VARCHAR(200) NOT NULL,
+    email VARCHAR(255) UNIQUE,
+    phone VARCHAR(50),
+    date_of_birth DATE,
+    nationality VARCHAR(3),  -- ISO 3166-1 alpha-3
+    residency_country VARCHAR(3),
+    occupation VARCHAR(100),
+
+    -- KYC/AML Fields
+    kyc_status VARCHAR(20) DEFAULT 'PENDING' CHECK (kyc_status IN ('PENDING', 'IN_PROGRESS', 'VERIFIED', 'FAILED', 'EXPIRED')),
+    kyc_completed_date DATE,
+    kyc_expiry_date DATE,
+    kyc_documents_uploaded BOOLEAN DEFAULT false,
+    pep_status BOOLEAN DEFAULT false,
+    pep_details TEXT,
+    watchlist_flags TEXT[],
+    sanctions_screening_date DATE,
+    sanctions_match_found BOOLEAN DEFAULT false,
+
+    -- Risk Assessment
+    risk_rating VARCHAR(20) DEFAULT 'LOW' CHECK (risk_rating IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    risk_score INTEGER CHECK (risk_score >= 0 AND risk_score <= 100),
+    risk_factors JSONB,
+    last_risk_assessment_date TIMESTAMP WITH TIME ZONE,
+    risk_assessment_reason TEXT,
+
+    -- Account Info
+    account_opened_date DATE DEFAULT CURRENT_DATE,
+    account_status VARCHAR(20) DEFAULT 'active' CHECK (account_status IN ('active', 'suspended', 'closed', 'frozen')),
+    account_type VARCHAR(50),  -- individual, business, joint
+
+    -- Aggregates (updated via triggers)
+    total_transactions INTEGER DEFAULT 0,
+    total_volume_usd DECIMAL(15,2) DEFAULT 0,
+    last_transaction_date TIMESTAMP WITH TIME ZONE,
+    flagged_transactions INTEGER DEFAULT 0,
+
+    -- Metadata
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by UUID,
+    updated_by UUID
+);
+
+-- Customer address history
+CREATE TABLE IF NOT EXISTS customer_addresses (
+    address_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
+    address_type VARCHAR(20) CHECK (address_type IN ('residential', 'business', 'mailing')),
+    street_address TEXT,
+    city VARCHAR(100),
+    state_province VARCHAR(100),
+    postal_code VARCHAR(20),
+    country VARCHAR(3),
+    is_current BOOLEAN DEFAULT true,
+    valid_from DATE DEFAULT CURRENT_DATE,
+    valid_to DATE,
+    verified BOOLEAN DEFAULT false,
+    verification_date DATE
+);
+
+-- Customer risk factors
+CREATE TABLE IF NOT EXISTS customer_risk_events (
+    event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    event_description TEXT,
+    severity VARCHAR(20) CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    risk_score_impact INTEGER,
+    detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    resolved BOOLEAN DEFAULT false,
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    resolution_notes TEXT
+);
+
+-- Indexes for customer system
+CREATE INDEX IF NOT EXISTS idx_customers_risk_rating ON customers(risk_rating);
+CREATE INDEX IF NOT EXISTS idx_customers_kyc_status ON customers(kyc_status);
+CREATE INDEX IF NOT EXISTS idx_customers_pep ON customers(pep_status) WHERE pep_status = true;
+CREATE INDEX IF NOT EXISTS idx_customers_sanctions ON customers(sanctions_match_found) WHERE sanctions_match_found = true;
+CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+CREATE INDEX IF NOT EXISTS idx_customers_created_at ON customers(created_at);
+CREATE INDEX IF NOT EXISTS idx_customers_updated_at ON customers(updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON customer_addresses(customer_id, is_current);
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_country ON customer_addresses(country);
+
+CREATE INDEX IF NOT EXISTS idx_customer_risk_events_customer ON customer_risk_events(customer_id, detected_at);
+CREATE INDEX IF NOT EXISTS idx_customer_risk_events_severity ON customer_risk_events(severity, resolved);
+CREATE INDEX IF NOT EXISTS idx_customer_risk_events_type ON customer_risk_events(event_type);
+
+-- ============================================================================
+-- FRAUD DETECTION BATCH PROCESSING SYSTEM
+-- ============================================================================
+
+-- Job queue for batch fraud scanning
+CREATE TABLE IF NOT EXISTS fraud_scan_job_queue (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    status VARCHAR(20) DEFAULT 'queued' CHECK (status IN ('queued', 'processing', 'completed', 'failed')),
+    worker_id VARCHAR(50),
+    priority INTEGER DEFAULT 3 CHECK (priority >= 1 AND priority <= 10),
+    filters JSONB NOT NULL,  -- Transaction selection criteria
+    claimed_at TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    progress INTEGER DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+    transactions_processed INTEGER DEFAULT 0,
+    transactions_total INTEGER,
+    transactions_flagged INTEGER DEFAULT 0,
+    results_summary JSONB,
+    error_message TEXT,
+    created_by UUID REFERENCES user_authentication(user_id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes for job queue performance
+CREATE INDEX IF NOT EXISTS idx_job_queue_status ON fraud_scan_job_queue(status, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_job_queue_worker ON fraud_scan_job_queue(worker_id, status);
+
+-- ============================================================================
+-- END OF CUSTOMER MANAGEMENT SYSTEM
+-- ============================================================================
+
+-- ============================================================================
+-- SYSTEM CONFIGURATION MANAGEMENT
+-- ============================================================================
+
+-- System configuration table for dynamic runtime configuration
+CREATE TABLE IF NOT EXISTS system_configuration (
+    config_key VARCHAR(100) PRIMARY KEY,
+    config_value JSONB NOT NULL,
+    config_type VARCHAR(50) NOT NULL CHECK (config_type IN ('string', 'integer', 'float', 'boolean', 'json')),
+    description TEXT,
+    is_sensitive BOOLEAN DEFAULT false,
+    validation_rules JSONB,  -- Min/max, allowed values, regex, etc.
+    last_updated TIMESTAMP DEFAULT NOW(),
+    updated_by UUID REFERENCES user_authentication(user_id) ON DELETE SET NULL,
+    requires_restart BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Configuration history table for audit trail
+CREATE TABLE IF NOT EXISTS configuration_history (
+    history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    config_key VARCHAR(100) NOT NULL,
+    old_value JSONB,
+    new_value JSONB,
+    changed_by UUID NOT NULL REFERENCES user_authentication(user_id) ON DELETE CASCADE,
+    changed_at TIMESTAMP DEFAULT NOW(),
+    change_reason TEXT,
+    change_source VARCHAR(50) DEFAULT 'manual' CHECK (change_source IN ('manual', 'api', 'automated', 'migration')),
+    approved_by UUID REFERENCES user_authentication(user_id) ON DELETE SET NULL,
+    approval_timestamp TIMESTAMP,
+    rollback_available BOOLEAN DEFAULT false
+);
+
+-- Indexes for performance and auditing
+CREATE INDEX IF NOT EXISTS idx_config_history_key ON configuration_history(config_key, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_history_time ON configuration_history(changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_history_user ON configuration_history(changed_by, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_history_source ON configuration_history(change_source, changed_at DESC);
+
+-- Trigger to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_configuration_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_config_updated_at
+    BEFORE UPDATE ON system_configuration
+    FOR EACH ROW
+    EXECUTE FUNCTION update_configuration_updated_at();
+
+-- ============================================================================
+-- END OF SYSTEM CONFIGURATION MANAGEMENT
+-- ============================================================================

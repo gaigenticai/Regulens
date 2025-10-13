@@ -78,6 +78,12 @@ struct LearnedPattern {
     // Learning statistics
     std::vector<LearningSignal> recent_signals;
     std::unordered_map<std::string, double> context_weights;
+    
+    // Detailed success tracking
+    int success_count = 0;
+    int failure_count = 0;
+    double confidence = 0.5;
+    nlohmann::json metadata = nlohmann::json::object();
 
     LearnedPattern(std::string /*aid*/, std::string atype, std::string context, nlohmann::json decision)
         : pattern_id(generate_pattern_id()), agent_type(std::move(atype)),
@@ -329,6 +335,13 @@ private:
     std::shared_ptr<AnthropicClient> anthropic_client_;
     StructuredLogger* logger_;
     ErrorHandler* error_handler_;
+    
+    // Optional database connection for persistence
+    void* db_connection_;  // DatabaseConnection* - using void* to avoid forward declaration
+    
+    // In-memory cache of learned patterns
+    std::unordered_map<std::string, LearnedPattern> learned_patterns_;
+    mutable std::mutex patterns_mutex_;
 
     /**
      * @brief Generate pattern description using LLM
@@ -354,6 +367,13 @@ private:
      * @return Feature map with weights
      */
     std::unordered_map<std::string, double> extract_context_features(const nlohmann::json& context);
+    
+    /**
+     * @brief Flag pattern for human review
+     * @param pattern_id Pattern identifier
+     * @param reason Reason for flagging
+     */
+    void flag_pattern_for_review(const std::string& pattern_id, const std::string& reason);
 };
 
 /**

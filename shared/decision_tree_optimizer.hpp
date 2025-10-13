@@ -516,6 +516,38 @@ private:
      */
     bool validate_decision_input(const std::string& decision_problem,
                                 const std::vector<DecisionAlternative>& alternatives) const;
+    
+    // Helper methods for alternative analysis
+    
+    /**
+     * @brief Parse criteria scores from LLM text response
+     */
+    std::unordered_map<DecisionCriterion, double> parse_criteria_scores_from_llm(const std::string& llm_response) const;
+    
+    /**
+     * @brief Analyze financial impact from description text
+     */
+    double analyze_financial_impact(const std::string& description) const;
+    
+    /**
+     * @brief Analyze regulatory compliance from description text
+     */
+    double analyze_regulatory_compliance(const std::string& description) const;
+    
+    /**
+     * @brief Analyze risk level from description text
+     */
+    double analyze_risk_level(const std::string& description) const;
+    
+    /**
+     * @brief Analyze operational impact from description text
+     */
+    double analyze_operational_impact(const std::string& description) const;
+    
+    /**
+     * @brief Analyze strategic alignment from description text
+     */
+    double analyze_strategic_alignment(const std::string& description) const;
 };
 
 // Utility functions

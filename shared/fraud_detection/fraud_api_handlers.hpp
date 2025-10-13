@@ -36,6 +36,7 @@ std::string get_model_performance(PGconn* db_conn, const std::string& model_id);
 
 // Batch Operations
 std::string run_batch_fraud_scan(PGconn* db_conn, const std::string& request_body, const std::string& user_id);
+std::string get_fraud_scan_job_status(PGconn* db_conn, const std::string& job_id);
 
 // Reporting
 std::string export_fraud_report(PGconn* db_conn, const std::string& request_body, const std::string& user_id);

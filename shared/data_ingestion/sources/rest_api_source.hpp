@@ -131,6 +131,7 @@ private:
     RESTAPIConfig api_config_;
     bool connected_;
     std::string auth_token_;
+    std::string auth_header_name_;  // Custom authentication header name (e.g., "X-API-Key")
     std::string oauth_refresh_token_;
     std::chrono::system_clock::time_point token_expiry_;
     int request_count_in_window_;

@@ -469,7 +469,7 @@ double FeedbackIncorporationSystem::apply_reinforcement_learning(const std::vect
         reward_count++;
 
         // TD-learning: calculate temporal difference error
-        std::string state_key = fb.entity_id;
+        std::string state_key = fb.target_entity; // Use target_entity as state key
         double current_q = q_values[state_key];
         double next_q = q_values[state_key];  // In this context, terminal state
         double td_error = immediate_reward + discount_factor * next_q - current_q;

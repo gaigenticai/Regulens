@@ -54,6 +54,12 @@ private:
     std::shared_ptr<ConfigurationManager> config_;
     StructuredLogger* logger_;
     ErrorHandler* error_handler_;
+    
+    // Optional database connection for advanced features
+    void* db_connection_;  // DatabaseConnection* - using void* to avoid forward declaration issues
+    
+    // Registered function definitions (mutable for lazy initialization)
+    mutable std::unordered_map<std::string, FunctionDefinition> registered_functions_;
 
     // Function implementations
 

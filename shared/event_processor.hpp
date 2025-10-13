@@ -31,6 +31,7 @@ private:
     void processing_thread();
 
     std::shared_ptr<StructuredLogger> logger_;
+    void* metrics_;  // MetricsCollector* - optional metrics integration
     std::queue<ComplianceEvent> event_queue_;
     mutable std::mutex queue_mutex_;
     std::condition_variable queue_cv_;

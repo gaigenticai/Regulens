@@ -439,57 +439,67 @@ void HealthCheckHandler::update_metrics(HealthProbeType probe_type, bool success
                     break;
             }
             
-            // Update Prometheus counter
-            metrics_->increment_counter("health_check_total", 
-                                       {{"probe_type", probe_name}, 
-                                        {"status", success ? "success" : "failure"}});
-            
-            // Update gauge for current health status
-            metrics_->set_gauge("health_check_status", 
-                               success ? 1.0 : 0.0,
-                               {{"probe_type", probe_name}});
-            
-            // Update histogram for response times if applicable
-            auto now = std::chrono::system_clock::now();
-            if (last_probe_time_.count(probe_type) > 0) {
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - last_probe_time_[probe_type]
-                );
-                metrics_->observe_histogram("health_check_duration_ms",
-                                           duration.count(),
-                                           {{"probe_type", probe_name}});
+            // Production-grade metrics tracking with Prometheus system collector
+            if (metrics_) {
+                auto& system_collector = metrics_->get_system_collector();
+                
+                // Record health check as HTTP endpoint call for consistent tracking
+                int status_code = success ? 200 : 503;
+                auto now = std::chrono::system_clock::now();
+                long duration_ms = 0;
+                
+                if (last_probe_time_.count(probe_type) > 0) {
+                    duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - last_probe_time_[probe_type]
+                    ).count();
+                }
+                
+                system_collector.record_http_call("/health/" + probe_name, "GET", status_code, duration_ms);
+                last_probe_time_[probe_type] = now;
             }
-            last_probe_time_[probe_type] = now;
         }
         
         // Persist metrics to database for long-term trending and analysis
         if (db_connection_) {
-            std::string insert_query = R"(
-                INSERT INTO health_metrics 
-                (probe_type, success, timestamp, response_time_ms, metadata)
-                VALUES ($1, $2, NOW(), $3, $4)
-            )";
-            
-            int response_time = 0;
-            if (last_probe_time_.count(probe_type) > 0) {
-                auto now = std::chrono::system_clock::now();
-                response_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - last_probe_time_[probe_type]
-                ).count();
+            try {
+                auto* pool = static_cast<ConnectionPool*>(db_connection_);
+                auto conn = pool->get_connection();
+                
+                if (conn && conn->is_connected()) {
+                    std::string insert_query = R"(
+                        INSERT INTO health_metrics 
+                        (probe_type, success, timestamp, response_time_ms, metadata)
+                        VALUES ($1, $2, NOW(), $3, $4)
+                    )";
+                    
+                    int response_time = 0;
+                    if (last_probe_time_.count(probe_type) > 0) {
+                        auto now = std::chrono::system_clock::now();
+                        response_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now - last_probe_time_[probe_type]
+                        ).count();
+                    }
+                    
+                    nlohmann::json metadata = {
+                        {"service_name", "regulens"},
+                        {"instance_id", instance_id_},
+                        {"environment", config_->get_string("ENVIRONMENT").value_or("production")}
+                    };
+                    
+                    conn->execute_command(insert_query, {
+                        std::to_string(static_cast<int>(probe_type)),
+                        success ? "true" : "false",
+                        std::to_string(response_time),
+                        metadata.dump()
+                    });
+                    
+                    pool->return_connection(conn);
+                } else {
+                    if (conn) pool->return_connection(conn);
+                }
+            } catch (const std::exception& db_error) {
+                logger_->log(LogLevel::WARN, "Failed to persist health metrics: " + std::string(db_error.what()));
             }
-            
-            nlohmann::json metadata = {
-                {"service_name", "regulens"},
-                {"instance_id", instance_id_},
-                {"environment", config_->get_string("ENVIRONMENT").value_or("production")}
-            };
-            
-            db_connection_->execute_query(insert_query, {
-                std::to_string(static_cast<int>(probe_type)),
-                success ? "true" : "false",
-                std::to_string(response_time),
-                metadata.dump()
-            });
         }
     }
     catch (const std::exception& e) {

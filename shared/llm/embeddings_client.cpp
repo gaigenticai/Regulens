@@ -12,6 +12,7 @@
 #include <sstream>
 #include <regex>
 #include <chrono>
+#include <fstream>
 
 // FastEmbed integration (conditional compilation)
 #ifdef USE_FASTEMBED
@@ -25,7 +26,8 @@ namespace regulens {
 EmbeddingsClient::EmbeddingsClient(std::shared_ptr<ConfigurationManager> config,
                                  StructuredLogger* logger,
                                  ErrorHandler* error_handler)
-    : config_(config), logger_(logger), error_handler_(error_handler) {
+    : config_(config), logger_(logger), error_handler_(error_handler),
+      openai_client_(nullptr) {
 
     load_model_config();
 
@@ -283,8 +285,8 @@ bool EmbeddingsClient::preload_model(const std::string& model_name) {
         // When FastEmbed is not available, use HTTP-based embedding service
         if (openai_client_) {
             // Test the model by generating a small embedding
-            std::vector<std::string> test_texts = {"test"};
-            auto test_result = generate_embeddings(test_texts, model_name);
+            EmbeddingRequest test_request{{"test"}, model_name};
+            auto test_result = generate_embeddings(test_request);
             
             if (test_result && !test_result->embeddings.empty()) {
                 if (logger_) {

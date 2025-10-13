@@ -36,6 +36,13 @@ interface LearningFeedback {
   created_at: string;
 }
 
+interface ErrorState {
+  hasError: boolean;
+  message: string;
+  code?: string;
+  timestamp: number;
+}
+
 export default function MemoryManagement() {
   const [activeTab, setActiveTab] = useState<'conversations' | 'cases' | 'feedback' | 'consolidation'>('conversations');
   const [memories, setMemories] = useState<ConversationMemory[]>([]);
@@ -43,6 +50,7 @@ export default function MemoryManagement() {
   const [feedback, setFeedback] = useState<LearningFeedback[]>([]);
   const [loading, setLoading] = useState(false);
   const [consolidationStatus, setConsolidationStatus] = useState<any>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
 
   useEffect(() => {
     if (activeTab === 'conversations') {
@@ -58,27 +66,29 @@ export default function MemoryManagement() {
 
   const loadMemories = async () => {
     setLoading(true);
+    setError(null); // Clear previous errors
+
     try {
       // API endpoint: GET /api/memory/conversations
       const response = await fetch('/api/memory/conversations?limit=50');
-      if (response.ok) {
-        const data = await response.json();
-        setMemories(data.memories || []);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+
+      const data = await response.json();
+      setMemories(data.memories || []);
     } catch (error) {
       console.error('Failed to load memories:', error);
-      // Generate sample data for development
-      setMemories([
-        {
-          memory_id: 'mem_001',
-          conversation_id: 'conv_001',
-          agent_id: 'agent_compliance',
-          memory_type: 'episodic',
-          importance_level: 8,
-          content: 'Regulatory compliance discussion about GDPR requirements',
-          created_at: new Date().toISOString()
-        }
-      ]);
+
+      // Set proper error state instead of mock data
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: Date.now()
+      });
+
+      // Clear memories on error
+      setMemories([]);
     } finally {
       setLoading(false);
     }
@@ -212,6 +222,37 @@ export default function MemoryManagement() {
           ))}
         </nav>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <h3 className="text-sm font-medium text-red-800">
+                Failed to load data
+              </h3>
+              <p className="text-sm text-red-700 mt-1">
+                {error.message}
+              </p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  if (activeTab === 'conversations') loadMemories();
+                  else if (activeTab === 'cases') loadCases();
+                  else if (activeTab === 'feedback') loadFeedback();
+                  else if (activeTab === 'consolidation') loadConsolidationStatus();
+                }}
+                className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (

@@ -1,0 +1,442 @@
+/**
+ * Tool Categories API Handlers Implementation
+ * REST API endpoints for tool category management and execution
+ */
+
+#include "tool_categories_api_handlers.hpp"
+#include <spdlog/spdlog.h>
+#include <algorithm>
+
+namespace regulens {
+
+ToolCategoriesAPIHandlers::ToolCategoriesAPIHandlers(
+    std::shared_ptr<PostgreSQLConnection> db_conn
+) : db_conn_(db_conn), tool_registry_(ToolRegistry::get_instance()) {
+
+    spdlog::info("ToolCategoriesAPIHandlers initialized");
+}
+
+ToolCategoriesAPIHandlers::~ToolCategoriesAPIHandlers() {
+    spdlog::info("ToolCategoriesAPIHandlers shutting down");
+}
+
+std::string ToolCategoriesAPIHandlers::handle_register_tools(const std::string& request_body, const std::string& user_id) {
+    try {
+        if (!is_admin_user(user_id)) {
+            return create_error_response("Admin access required", 403).dump();
+        }
+
+        nlohmann::json request = nlohmann::json::parse(request_body);
+        std::vector<std::string> categories = request.value("categories", std::vector<std::string>{});
+
+        // Initialize logger (simplified - in real implementation would get from dependency injection)
+        auto logger = std::make_shared<StructuredLogger>();
+
+        int tools_registered = 0;
+
+        if (std::find(categories.begin(), categories.end(), "analytics") != categories.end()) {
+            tool_registry_.register_analytics_tools(db_conn_, logger);
+            tools_registered += 4;
+        }
+
+        if (std::find(categories.begin(), categories.end(), "workflow") != categories.end()) {
+            tool_registry_.register_workflow_tools(db_conn_, logger);
+            tools_registered += 3;
+        }
+
+        if (std::find(categories.begin(), categories.end(), "security") != categories.end()) {
+            tool_registry_.register_security_tools(db_conn_, logger);
+            tools_registered += 4;
+        }
+
+        if (std::find(categories.begin(), categories.end(), "monitoring") != categories.end()) {
+            tool_registry_.register_monitoring_tools(db_conn_, logger);
+            tools_registered += 4;
+        }
+
+        nlohmann::json response_data = {
+            {"tools_registered", tools_registered},
+            {"categories_registered", categories}
+        };
+
+        return create_success_response(response_data, "Tools registered successfully").dump();
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in handle_register_tools: {}", e.what());
+        return create_error_response("Internal server error", 500).dump();
+    }
+}
+
+std::string ToolCategoriesAPIHandlers::handle_get_available_tools(const std::string& user_id) {
+    try {
+        if (!validate_user_access(user_id, "list_tools", "")) {
+            return create_error_response("Access denied", 403).dump();
+        }
+
+        auto tools = tool_registry_.get_available_tools();
+
+        return create_tool_list_response(tools).dump();
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in handle_get_available_tools: {}", e.what());
+        return create_error_response("Internal server error", 500).dump();
+    }
+}
+
+std::string ToolCategoriesAPIHandlers::handle_get_tools_by_category(const std::string& category_str, const std::string& user_id) {
+    try {
+        if (!validate_user_access(user_id, "list_tools", "")) {
+            return create_error_response("Access denied", 403).dump();
+        }
+
+        ToolCategory category = parse_tool_category(category_str);
+        auto tools = tool_registry_.get_tools_by_category(category);
+
+        nlohmann::json response_data = {
+            {"category", category_str},
+            {"tools", tools},
+            {"count", tools.size()}
+        };
+
+        return create_success_response(response_data).dump();
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in handle_get_tools_by_category: {}", e.what());
+        return create_error_response("Internal server error", 500).dump();
+    }
+}
+
+std::string ToolCategoriesAPIHandlers::handle_execute_tool(const std::string& tool_name, const std::string& request_body, const std::string& user_id) {
+    try {
+        if (!validate_user_access(user_id, tool_name, "execute")) {
+            return create_error_response("Access denied", 403).dump();
+        }
+
+        nlohmann::json request = nlohmann::json::parse(request_body);
+        std::string validation_error;
+        if (!validate_tool_request(request, tool_name, validation_error)) {
+            return create_error_response(validation_error).dump();
+        }
+
+        // Determine tool category and execute
+        ToolResult result;
+        if (tool_name == "data_analyzer" || tool_name == "report_generator" ||
+            tool_name == "dashboard_builder" || tool_name == "predictive_model") {
+            result = execute_analytics_tool(tool_name, request);
+        } else if (tool_name == "task_automator" || tool_name == "process_optimizer" ||
+                   tool_name == "approval_workflow") {
+            result = execute_workflow_tool(tool_name, request);
+        } else if (tool_name == "vulnerability_scanner" || tool_name == "compliance_checker" ||
+                   tool_name == "access_analyzer" || tool_name == "audit_logger") {
+            result = execute_security_tool(tool_name, request);
+        } else if (tool_name == "system_monitor" || tool_name == "performance_tracker" ||
+                   tool_name == "alert_manager" || tool_name == "health_checker") {
+            result = execute_monitoring_tool(tool_name, request);
+        } else {
+            return create_error_response("Unknown tool: " + tool_name, 404).dump();
+        }
+
+        // Store execution result
+        store_tool_execution_result(tool_name, user_id, result);
+
+        // Log execution
+        log_tool_execution(tool_name, user_id, result.success);
+
+        return format_tool_result(result).dump();
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in handle_execute_tool: {}", e.what());
+        return create_error_response("Internal server error", 500).dump();
+    }
+}
+
+std::string ToolCategoriesAPIHandlers::handle_get_tool_info(const std::string& tool_name, const std::string& user_id) {
+    try {
+        if (!validate_user_access(user_id, tool_name, "info")) {
+            return create_error_response("Access denied", 403).dump();
+        }
+
+        auto tool = tool_registry_.get_tool(tool_name);
+        if (!tool) {
+            return create_error_response("Tool not found: " + tool_name, 404).dump();
+        }
+
+        nlohmann::json response_data = format_tool_info(tool_name, tool);
+        return create_success_response(response_data).dump();
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in handle_get_tool_info: {}", e.what());
+        return create_error_response("Internal server error", 500).dump();
+    }
+}
+
+// Analytics tool handlers
+std::string ToolCategoriesAPIHandlers::handle_analyze_dataset(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("data_analyzer", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_generate_report(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("report_generator", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_build_dashboard(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("dashboard_builder", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_run_prediction(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("predictive_model", request_body, user_id);
+}
+
+// Workflow tool handlers
+std::string ToolCategoriesAPIHandlers::handle_automate_task(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("task_automator", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_optimize_process(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("process_optimizer", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_manage_approval(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("approval_workflow", request_body, user_id);
+}
+
+// Security tool handlers
+std::string ToolCategoriesAPIHandlers::handle_scan_vulnerabilities(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("vulnerability_scanner", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_check_compliance(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("compliance_checker", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_analyze_access(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("access_analyzer", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_log_audit_event(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("audit_logger", request_body, user_id);
+}
+
+// Monitoring tool handlers
+std::string ToolCategoriesAPIHandlers::handle_monitor_system(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("system_monitor", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_track_performance(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("performance_tracker", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_manage_alerts(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("alert_manager", request_body, user_id);
+}
+
+std::string ToolCategoriesAPIHandlers::handle_check_health(const std::string& request_body, const std::string& user_id) {
+    return handle_execute_tool("health_checker", request_body, user_id);
+}
+
+// Helper method implementations
+
+ToolCategory ToolCategoriesAPIHandlers::parse_tool_category(const std::string& category_str) {
+    if (category_str == "analytics") return ToolCategory::ANALYTICS;
+    if (category_str == "workflow") return ToolCategory::WORKFLOW;
+    if (category_str == "security") return ToolCategory::SECURITY;
+    if (category_str == "monitoring") return ToolCategory::MONITORING;
+    return ToolCategory::ANALYTICS; // default
+}
+
+nlohmann::json ToolCategoriesAPIHandlers::format_tool_result(const ToolResult& result) {
+    nlohmann::json response = {
+        {"success", result.success},
+        {"tool_name", result.tool_name},
+        {"message", result.message},
+        {"data", result.data}
+    };
+
+    if (!result.error_details.empty()) {
+        response["error_details"] = result.error_details;
+    }
+
+    return create_success_response(response);
+}
+
+nlohmann::json ToolCategoriesAPIHandlers::format_tool_info(const std::string& tool_name, std::shared_ptr<Tool> tool) {
+    return {
+        {"tool_name", tool_name},
+        {"description", tool->get_description()},
+        {"required_parameters", tool->get_required_parameters()}
+    };
+}
+
+bool ToolCategoriesAPIHandlers::validate_tool_request(const nlohmann::json& request, const std::string& tool_name, std::string& error_message) {
+    auto tool = tool_registry_.get_tool(tool_name);
+    if (!tool) {
+        error_message = "Tool not found: " + tool_name;
+        return false;
+    }
+
+    auto required_params = tool->get_required_parameters();
+    for (const auto& param : required_params) {
+        if (!request.contains(param)) {
+            error_message = "Missing required parameter: " + param;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ToolCategoriesAPIHandlers::validate_user_access(const std::string& user_id, const std::string& tool_name, const std::string& operation) {
+    // TODO: Implement proper access control based on user roles and permissions
+    return !user_id.empty();
+}
+
+ToolResult ToolCategoriesAPIHandlers::execute_analytics_tool(const std::string& tool_name, const nlohmann::json& parameters) {
+    auto tool = tool_registry_.get_tool(tool_name);
+    if (!tool) {
+        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+    }
+
+    if (tool_name == "data_analyzer") {
+        return std::static_pointer_cast<DataAnalyzerTool>(tool)->analyze_dataset(parameters);
+    } else if (tool_name == "report_generator") {
+        return std::static_pointer_cast<ReportGeneratorTool>(tool)->generate_report(parameters);
+    } else if (tool_name == "dashboard_builder") {
+        return std::static_pointer_cast<DashboardBuilderTool>(tool)->build_dashboard(parameters);
+    } else if (tool_name == "predictive_model") {
+        return std::static_pointer_cast<PredictiveModelTool>(tool)->run_prediction(parameters);
+    }
+
+    return ToolResult{false, tool_name, "Unknown analytics tool", "", nlohmann::json{}};
+}
+
+ToolResult ToolCategoriesAPIHandlers::execute_workflow_tool(const std::string& tool_name, const nlohmann::json& parameters) {
+    auto tool = tool_registry_.get_tool(tool_name);
+    if (!tool) {
+        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+    }
+
+    if (tool_name == "task_automator") {
+        return std::static_pointer_cast<TaskAutomatorTool>(tool)->automate_task(parameters);
+    } else if (tool_name == "process_optimizer") {
+        return std::static_pointer_cast<ProcessOptimizerTool>(tool)->optimize_process(parameters);
+    } else if (tool_name == "approval_workflow") {
+        return std::static_pointer_cast<ApprovalWorkflowTool>(tool)->manage_approval(parameters);
+    }
+
+    return ToolResult{false, tool_name, "Unknown workflow tool", "", nlohmann::json{}};
+}
+
+ToolResult ToolCategoriesAPIHandlers::execute_security_tool(const std::string& tool_name, const nlohmann::json& parameters) {
+    auto tool = tool_registry_.get_tool(tool_name);
+    if (!tool) {
+        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+    }
+
+    if (tool_name == "vulnerability_scanner") {
+        return std::static_pointer_cast<VulnerabilityScannerTool>(tool)->scan_vulnerabilities(parameters);
+    } else if (tool_name == "compliance_checker") {
+        return std::static_pointer_cast<ComplianceCheckerTool>(tool)->check_compliance(parameters);
+    } else if (tool_name == "access_analyzer") {
+        return std::static_pointer_cast<AccessAnalyzerTool>(tool)->analyze_access(parameters);
+    } else if (tool_name == "audit_logger") {
+        return std::static_pointer_cast<AuditLoggerTool>(tool)->log_audit_event(parameters);
+    }
+
+    return ToolResult{false, tool_name, "Unknown security tool", "", nlohmann::json{}};
+}
+
+ToolResult ToolCategoriesAPIHandlers::execute_monitoring_tool(const std::string& tool_name, const nlohmann::json& parameters) {
+    auto tool = tool_registry_.get_tool(tool_name);
+    if (!tool) {
+        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+    }
+
+    if (tool_name == "system_monitor") {
+        return std::static_pointer_cast<SystemMonitorTool>(tool)->monitor_system(parameters);
+    } else if (tool_name == "performance_tracker") {
+        return std::static_pointer_cast<PerformanceTrackerTool>(tool)->track_performance(parameters);
+    } else if (tool_name == "alert_manager") {
+        return std::static_pointer_cast<AlertManagerTool>(tool)->manage_alerts(parameters);
+    } else if (tool_name == "health_checker") {
+        return std::static_pointer_cast<HealthCheckerTool>(tool)->check_health(parameters);
+    }
+
+    return ToolResult{false, tool_name, "Unknown monitoring tool", "", nlohmann::json{}};
+}
+
+nlohmann::json ToolCategoriesAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {
+    nlohmann::json response = {
+        {"success", true},
+        {"status_code", 200}
+    };
+
+    if (!message.empty()) {
+        response["message"] = message;
+    }
+
+    if (data.is_object() || data.is_array()) {
+        response["data"] = data;
+    }
+
+    return response;
+}
+
+nlohmann::json ToolCategoriesAPIHandlers::create_error_response(const std::string& message, int status_code) {
+    return {
+        {"success", false},
+        {"status_code", status_code},
+        {"error", message}
+    };
+}
+
+nlohmann::json ToolCategoriesAPIHandlers::create_tool_list_response(const std::vector<std::string>& tools) {
+    nlohmann::json response = {
+        {"success", true},
+        {"status_code", 200},
+        {"data", {
+            {"tools", tools},
+            {"total_count", tools.size()}
+        }}
+    };
+
+    return response;
+}
+
+void ToolCategoriesAPIHandlers::log_tool_execution(const std::string& tool_name, const std::string& user_id, bool success, const std::string& duration) {
+    spdlog::info("Tool execution: {} by user {} - success: {}, duration: {}",
+                 tool_name, user_id, success, duration);
+}
+
+bool ToolCategoriesAPIHandlers::store_tool_execution_result(const std::string& tool_name, const std::string& user_id, const ToolResult& result) {
+    try {
+        if (!db_conn_) return false;
+
+        std::string query = R"(
+            INSERT INTO tool_execution_results (
+                tool_name, user_id, success, message, data, error_details, executed_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        )";
+
+        std::vector<std::string> params = {
+            tool_name,
+            user_id,
+            result.success ? "true" : "false",
+            result.message,
+            result.data.dump(),
+            result.error_details
+        };
+
+        return db_conn_->execute_command(query, params);
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in store_tool_execution_result: {}", e.what());
+        return false;
+    }
+}
+
+bool ToolCategoriesAPIHandlers::is_admin_user(const std::string& user_id) {
+    // TODO: Implement proper admin user checking
+    return user_id == "admin" || user_id == "system";
+}
+
+} // namespace regulens

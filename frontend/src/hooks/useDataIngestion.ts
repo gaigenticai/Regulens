@@ -35,46 +35,16 @@ export function useDataPipelines() {
   return useQuery({
     queryKey: ['data-pipelines'],
     queryFn: async () => {
-      // Mock data for now - replace with real API call when endpoint is available
-      return [
-        {
-          id: 'pipeline-1',
-          name: 'Regulatory Data Feed',
-          type: 'streaming',
-          status: 'active',
-          source: 'SEC EDGAR API',
-          destination: 'PostgreSQL',
-          recordsProcessed: 125430,
-          recordsFailed: 23,
-          lastRun: new Date(Date.now() - 300000).toISOString(),
-          nextRun: new Date(Date.now() + 300000).toISOString(),
-        },
-        {
-          id: 'pipeline-2',
-          name: 'Transaction Data Import',
-          type: 'batch',
-          status: 'active',
-          source: 'CSV Files',
-          destination: 'PostgreSQL',
-          recordsProcessed: 453289,
-          recordsFailed: 102,
-          lastRun: new Date(Date.now() - 1800000).toISOString(),
-          nextRun: new Date(Date.now() + 3600000).toISOString(),
-        },
-        {
-          id: 'pipeline-3',
-          name: 'Compliance Rules Sync',
-          type: 'scheduled',
-          status: 'active',
-          source: 'External API',
-          destination: 'Knowledge Base',
-          recordsProcessed: 8934,
-          recordsFailed: 5,
-          lastRun: new Date(Date.now() - 7200000).toISOString(),
-          nextRun: new Date(Date.now() + 14400000).toISOString(),
-        },
-      ] as Pipeline[];
+      // Make real API call - remove mock data
+      const response = await fetch('/api/ingestion/pipelines');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch pipelines: ${response.status} ${response.statusText}`);
+      }
+      const data = await response.json();
+      return data as Pipeline[];
     },
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 }
@@ -86,15 +56,16 @@ export function useIngestionMetrics() {
   return useQuery({
     queryKey: ['ingestion-metrics'],
     queryFn: async () => {
-      // Mock data for now - replace with real API call when endpoint is available
-      return {
-        totalPipelines: 3,
-        activePipelines: 3,
-        totalRecordsProcessed: 587653,
-        totalRecordsFailed: 130,
-        averageThroughput: 1250,
-      } as IngestionMetrics;
+      // Make real API call - remove mock data
+      const response = await fetch('/api/ingestion/metrics');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch metrics: ${response.status} ${response.statusText}`);
+      }
+      const data = await response.json();
+      return data as IngestionMetrics;
     },
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
     refetchInterval: 10000,
   });
 }

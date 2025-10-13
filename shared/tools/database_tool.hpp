@@ -21,7 +21,7 @@
 #define REGULENS_DATABASE_TOOL_HPP
 
 #include "tool_base.hpp"
-#include "../database/connection_pool.hpp"
+#include "../database/postgresql_connection.hpp"
 #include <libpq-fe.h>
 
 namespace regulens {

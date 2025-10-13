@@ -185,10 +185,19 @@ private:
     PipelineConfig pipeline_config_;
     std::unordered_set<PipelineStage> enabled_stages_;
 
+    // Storage and database access
+    std::shared_ptr<ConnectionPool> storage_;  // Database connection pool for lookups and storage
+
     // Caches for performance
     std::unordered_map<std::string, nlohmann::json> enrichment_cache_;
     std::unordered_map<std::string, std::chrono::system_clock::time_point> cache_timestamps_;
     std::unordered_set<std::string> processed_duplicate_keys_;
+
+    // Lookup tables cache for enrichment
+    std::unordered_map<std::string, std::unordered_map<std::string, nlohmann::json>> lookup_tables_;
+    
+    // Fuzzy matching configuration for advanced duplicate detection
+    bool enable_fuzzy_matching_ = false;
 
     // Metrics and monitoring
     int total_records_processed_;

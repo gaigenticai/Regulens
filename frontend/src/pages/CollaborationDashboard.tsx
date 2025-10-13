@@ -22,26 +22,35 @@ import {
   useCreateCollaborationSession,
 } from '@/hooks/useCollaborationSessions';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'react-hot-toast';
 
 const CollaborationDashboard: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  
+  const { user } = useAuth();
+
   const { data: sessions = [], isLoading: sessionsLoading, refetch: refetchSessions } = useCollaborationSessions(statusFilter, 50);
   const { data: stats, isLoading: statsLoading } = useCollaborationDashboardStats();
   const createSession = useCreateCollaborationSession();
 
   const handleCreateSession = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (!user) {
+      toast.error('You must be logged in to create sessions');
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
-    
+
     await createSession.mutateAsync({
       title: formData.get('title') as string,
       description: formData.get('description') as string,
       objective: formData.get('objective') as string,
-      created_by: 'current_user', // TODO: Get from auth context
+      created_by: user.userId,
     });
-    
+
     setShowCreateModal(false);
     e.currentTarget.reset();
   };

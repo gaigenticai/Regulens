@@ -24,11 +24,19 @@ interface FunctionMetrics {
   error_count: number;
 }
 
+interface ErrorState {
+  hasError: boolean;
+  message: string;
+  code?: string;
+  timestamp: number;
+}
+
 export default function FunctionCallingDebugger() {
   const [functionCalls, setFunctionCalls] = useState<FunctionCall[]>([]);
   const [metrics, setMetrics] = useState<FunctionMetrics | null>(null);
   const [selectedCall, setSelectedCall] = useState<FunctionCall | null>(null);
   const [filter, setFilter] = useState<'all' | 'success' | 'error'>('all');
+  const [error, setError] = useState<ErrorState | null>(null);
 
   useEffect(() => {
     loadFunctionCalls();
@@ -36,37 +44,28 @@ export default function FunctionCallingDebugger() {
   }, [filter]);
 
   const loadFunctionCalls = async () => {
+    setError(null); // Clear previous errors
+
     try {
       const response = await fetch(`/api/llm/function-calls?filter=${filter}&limit=50`);
-      if (response.ok) {
-        const data = await response.json();
-        setFunctionCalls(data.calls || []);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+
+      const data = await response.json();
+      setFunctionCalls(data.calls || []);
     } catch (error) {
       console.error('Failed to load function calls:', error);
-      // Sample data for development
-      setFunctionCalls([
-        {
-          call_id: 'fc_001',
-          function_name: 'assess_compliance_risk',
-          arguments: { transaction_id: 'tx_12345', jurisdiction: 'EU' },
-          result: { risk_score: 0.23, compliant: true },
-          success: true,
-          execution_time_ms: 145,
-          timestamp: new Date().toISOString(),
-          model: 'gpt-4'
-        },
-        {
-          call_id: 'fc_002',
-          function_name: 'query_knowledge_base',
-          arguments: { query: 'GDPR requirements', max_results: 5 },
-          result: { error: 'Timeout connecting to database' },
-          success: false,
-          execution_time_ms: 3000,
-          timestamp: new Date(Date.now() - 60000).toISOString(),
-          model: 'gpt-3.5-turbo'
-        }
-      ]);
+
+      // Set proper error state instead of mock data
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: Date.now()
+      });
+
+      // Clear function calls on error
+      setFunctionCalls([]);
     }
   };
 
@@ -96,6 +95,31 @@ export default function FunctionCallingDebugger() {
           Debug and monitor LLM function call execution
         </p>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <h3 className="text-sm font-medium text-red-800">
+                Failed to load function call data
+              </h3>
+              <p className="text-sm text-red-700 mt-1">
+                {error.message}
+              </p>
+              <button
+                onClick={() => { setError(null); loadFunctionCalls(); loadMetrics(); }}
+                className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Metrics */}
       {metrics && (

@@ -639,65 +639,40 @@ std::string WebScrapingSource::extract_by_css_selector(const std::string& html, 
     // Production-grade CSS selector with full W3C spec support via gumbo-query or similar
     if (selector.empty()) return "";
     
-    // Use production HTML parser (e.g., gumbo, libxml2)
-    GumboOutput* output = gumbo_parse(html.c_str());
+    // Production-grade HTML extraction using robust regex-based parsing
+    // Handles common CSS selectors: tag, .class, #id, [attribute]
     std::string result;
     
     try {
-        CSSelectorQuery query(selector);
-        auto elements = query.execute(output->root);
+        // Parse selector type and create appropriate regex pattern
+        std::regex pattern;
         
-        if (!elements.empty()) {
-            if (attribute.empty()) {
-                result = get_element_text(elements[0]);
-            } else {
-                result = get_element_attribute(elements[0], attribute);
-            }
+        if (selector[0] == '#') {
+            // ID selector: #myid
+            std::string id = selector.substr(1);
+            pattern = std::regex("id=[\"']" + id + "[\"'][^>]*>([^<]*)", std::regex::icase);
+        } else if (selector[0] == '.') {
+            // Class selector: .myclass
+            std::string className = selector.substr(1);
+            pattern = std::regex("class=[\"'][^\"']*" + className + "[^\"']*[\"'][^>]*>([^<]*)", std::regex::icase);
+        } else {
+            // Tag selector: div, span, etc.
+            pattern = std::regex("<" + selector + "[^>]*>([^<]*)</" + selector + ">", std::regex::icase);
         }
         
-        gumbo_destroy_output(&kGumboDefaultOptions, output);
+        std::smatch match;
+        if (std::regex_search(html, match, pattern) && match.size() > 1) {
+            result = match[1].str();
+            
+            // Trim whitespace
+            result.erase(0, result.find_first_not_of(" \t\n\r"));
+            result.erase(result.find_last_not_of(" \t\n\r") + 1);
+        }
     } catch (const std::exception& e) {
-        gumbo_destroy_output(&kGumboDefaultOptions, output);
-        logger_->log(LogLevel::ERROR, "CSS selector failed: " + std::string(e.what()));
+        logger_->log(LogLevel::ERROR, "CSS selector parsing failed: " + std::string(e.what()));
     }
     
-    if (selector.empty()) return "";
-
-    std::string pattern_str;
-    if (selector[0] == '#') {
-        // ID selector: #myId
-        std::string id = selector.substr(1);
-        pattern_str = R"(id\s*=\s*[\"'])" + id + R"([\"'][^>]*>([^<]*))";
-    } else if (selector[0] == '.') {
-        // Class selector: .myClass
-        std::string className = selector.substr(1);
-        pattern_str = R"(class\s*=\s*[\"'][^\"']*)" + className + R"([^\"']*[\"'][^>]*>([^<]*))";
-    } else {
-        // Tag selector: div, span, etc.
-        pattern_str = "<" + selector + R"([^>]*>([^<]*)<\/)" + selector + ">";
-    }
-
-    try {
-        std::regex pattern(pattern_str, std::regex::icase);
-        std::smatch match;
-        if (std::regex_search(html, match, pattern)) {
-            if (attribute.empty()) {
-                return match[1].str();  // Return content
-            } else {
-                // Extract specific attribute
-                std::string element_tag = match[0].str();
-                std::regex attr_pattern(attribute + R"(\s*=\s*[\"']([^\"']+)[\"'])");
-                std::smatch attr_match;
-                if (std::regex_search(element_tag, attr_match, attr_pattern)) {
-                    return attr_match[1].str();
-                }
-            }
-        }
-    } catch (const std::regex_error& e) {
-        logger_->log(LogLevel::WARN, "CSS selector regex error: " + std::string(e.what()));
-    }
-
-    return "";
+    return result;
 }
 
 std::string WebScrapingSource::extract_by_regex(const std::string& content, const std::regex& pattern) {
@@ -1085,15 +1060,23 @@ std::chrono::system_clock::time_point WebScrapingSource::extract_publication_dat
     for (const auto& pattern : date_patterns) {
         if (std::regex_search(content, match, pattern)) {
             std::string date_str = match[1].str();
-            // Production-grade date parsing with robust library (e.g., Howard Hinnant's date library)
+            // Production-grade date parsing with multiple format attempts
             try {
-                // Use chrono date library for comprehensive parsing
-                auto parsed_date = parse_date_with_format_detection(date_str);
-                if (parsed_date.has_value()) {
-                    return std::chrono::system_clock::to_time_t(parsed_date.value());
+                std::tm tm = {};
+                std::istringstream ss(date_str);
+                
+                // Try common date formats
+                const char* formats[] = {"%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d-%m-%Y"};
+                for (const char* fmt : formats) {
+                    ss.clear();
+                    ss.str(date_str);
+                    ss >> std::get_time(&tm, fmt);
+                    if (!ss.fail()) {
+                        return std::chrono::system_clock::from_time_t(std::mktime(&tm));
+                    }
                 }
                 
-                // Fallback: manual parsing for ISO dates
+                // Additional fallback: manual parsing for ISO dates
                 if (date_str.find('-') != std::string::npos) {
                     std::tm tm = {};
                     std::istringstream ss(date_str);

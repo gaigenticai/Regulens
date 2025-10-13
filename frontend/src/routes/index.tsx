@@ -27,6 +27,7 @@ const AgentDetail = lazy(() => import('@/pages/AgentDetail'));
 // Transaction & Fraud
 const Transactions = lazy(() => import('@/pages/Transactions'));
 const TransactionDetail = lazy(() => import('@/pages/TransactionDetail'));
+const CustomerProfile = lazy(() => import('@/pages/CustomerProfile'));
 const FraudRules = lazy(() => import('@/pages/FraudRules'));
 
 // Data & Analytics
@@ -68,7 +69,10 @@ const RegulatoryChatbot = lazy(() => import('@/pages/RegulatoryChatbot'));
 // Feature 13: Integration Marketplace
 const IntegrationMarketplace = lazy(() => import('@/pages/IntegrationMarketplace'));
 
-// Feature 14: Compliance Training Module
+// Feature 14: Tool Categories Testing
+const ToolCategoriesTesting = lazy(() => import('@/pages/ToolCategoriesTesting'));
+
+// Feature 15: Compliance Training Module
 const ComplianceTraining = lazy(() => import('@/pages/ComplianceTraining'));
 
 // System & Monitoring - Production-grade implementations
@@ -170,6 +174,12 @@ export const routes: AppRoute[] = [
     path: '/transactions/:id',
     name: 'Transaction Detail',
     element: TransactionDetail,
+    showInNav: false,
+  },
+  {
+    path: '/customers/:customerId',
+    name: 'Customer Profile',
+    element: CustomerProfile,
     showInNav: false,
   },
   {
@@ -281,6 +291,13 @@ export const routes: AppRoute[] = [
     element: IntegrationMarketplace,
     showInNav: true,
     icon: 'Package',
+  },
+  {
+    path: '/tool-categories-testing',
+    name: 'Tool Categories Testing',
+    element: ToolCategoriesTesting,
+    showInNav: true,
+    icon: 'Activity',
   },
   {
     path: '/training',

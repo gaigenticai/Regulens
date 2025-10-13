@@ -2,6 +2,7 @@
 
 add_library(regulens_agentic_brain STATIC
     agentic_orchestrator.cpp
+    consensus_engine.cpp
 )
 
 target_include_directories(regulens_agentic_brain

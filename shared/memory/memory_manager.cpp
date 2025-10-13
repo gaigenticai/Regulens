@@ -11,6 +11,7 @@
 #include <random>
 #include <sstream>
 #include <fstream>
+#include <set>
 
 namespace regulens {
 
@@ -56,8 +57,20 @@ bool MemoryManager::initialize() {
                 // Parse consolidation strategies
                 if (plan_json.contains("consolidation_strategies")) {
                     optimization_plan_.consolidation_strategies.clear();
-                    for (const auto& strategy : plan_json["consolidation_strategies"]) {
-                        optimization_plan_.consolidation_strategies.push_back(strategy.get<std::string>());
+                    for (const auto& strategy_str : plan_json["consolidation_strategies"]) {
+                        std::string strategy = strategy_str.get<std::string>();
+                        // Parse string to ConsolidationStrategy enum
+                        if (strategy == "MERGE_SIMILAR") {
+                            optimization_plan_.consolidation_strategies.push_back(ConsolidationStrategy::MERGE_SIMILAR);
+                        } else if (strategy == "EXTRACT_PATTERNS") {
+                            optimization_plan_.consolidation_strategies.push_back(ConsolidationStrategy::EXTRACT_PATTERNS);
+                        } else if (strategy == "COMPRESS_DETAILS") {
+                            optimization_plan_.consolidation_strategies.push_back(ConsolidationStrategy::COMPRESS_DETAILS);
+                        } else if (strategy == "PROMOTE_IMPORTANT") {
+                            optimization_plan_.consolidation_strategies.push_back(ConsolidationStrategy::PROMOTE_IMPORTANT);
+                        } else if (strategy == "AGGREGATE_STATS") {
+                            optimization_plan_.consolidation_strategies.push_back(ConsolidationStrategy::AGGREGATE_STATS);
+                        }
                     }
                 }
                 
@@ -1117,15 +1130,15 @@ void MemoryManager::schedule_next_optimization(const MemoryOptimizationPlan& pla
         // - Or internal thread-based timer system
         
         // For thread-based scheduling in application:
-        if (optimization_timer_thread_.joinable()) {
+        if (optimization_timer_thread_ && optimization_timer_thread_->joinable()) {
             // Cancel existing timer
             cancel_scheduled_optimization_ = true;
-            optimization_timer_thread_.join();
+            optimization_timer_thread_->join();
         }
         
         // Start new timer thread
         cancel_scheduled_optimization_ = false;
-        optimization_timer_thread_ = std::thread([this, next_optimization_time, plan]() {
+        optimization_timer_thread_ = std::make_shared<std::thread>([this, next_optimization_time, plan]() {
             auto duration = next_optimization_time - std::chrono::system_clock::now();
             auto sleep_duration = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
             
@@ -1135,7 +1148,7 @@ void MemoryManager::schedule_next_optimization(const MemoryOptimizationPlan& pla
                 if (!cancel_scheduled_optimization_) {
                     // Execute scheduled optimization
                     try {
-                        run_optimization_cycle(plan);
+                        optimize_memory(plan);
                     } catch (const std::exception& e) {
                         if (logger_) {
                             logger_->error("Scheduled optimization failed: " + std::string(e.what()),
@@ -1519,25 +1532,14 @@ std::vector<MemoryEntry> MemoryManager::get_memories_older_than(
                 LIMIT 10000
             )";
             
-            auto db_result = conversation_memory_->execute_age_query(query, cutoff_timestamp);
-            
-            // Convert database results to MemoryEntry objects
-            for (const auto& row : db_result) {
-                MemoryEntry entry;
-                entry.memory_id = row["memory_id"];
-                entry.conversation_id = row["conversation_id"];
-                entry.agent_id = row["agent_id"];
-                entry.memory_type = row["memory_type"];
-                entry.importance_level = std::stoi(row["importance_level"]);
-                entry.content = row["content"];
-                entry.timestamp = std::chrono::system_clock::from_time_t(std::stoll(row["created_at"]));
-                
-                old_memories.push_back(entry);
-            }
+            // Use get_memories_by_agent to get all memories older than cutoff
+            // (pass empty agent_id to get all agents' memories, and time range from epoch to cutoff_time)
+            auto epoch = std::chrono::system_clock::time_point();
+            old_memories = conversation_memory_->get_memories_by_agent("", epoch, cutoff_time);
             
             if (logger_) {
                 logger_->debug("Retrieved " + std::to_string(old_memories.size()) + 
-                              " memories older than cutoff using indexed query",
+                              " memories older than cutoff",
                               "MemoryManager", "get_memories_older_than");
             }
         }

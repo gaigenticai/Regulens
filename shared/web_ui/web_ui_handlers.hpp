@@ -22,6 +22,7 @@
 #include <mutex>
 #include "web_ui_server.hpp"
 #include "../config/configuration_manager.hpp"
+#include "../config/dynamic_config_manager.hpp"
 #include "../logging/structured_logger.hpp"
 #include "../metrics/metrics_collector.hpp"
 #include "../database/postgresql_connection.hpp"
@@ -41,19 +42,22 @@
 #include "../memory/memory_manager.hpp"
 #include "../risk_assessment.hpp"
 #include "../decision_tree_optimizer.hpp"
-#include "../../core/agent/agent_communication.hpp"
 #include "../../core/agent/message_translator.hpp"
-#include "../../core/agent/consensus_engine.hpp"
+#include "../agentic_brain/consensus_engine.hpp"
+#include "../agentic_brain/communication_mediator.hpp"
+#include "../agentic_brain/inter_agent_communicator.hpp"
 #include "../../agents/real_agent.hpp"
 #include "../knowledge_base.hpp"
 #include "../regulatory_knowledge_base.hpp"
-#include "../audit/decision_audit_trail.hpp"
+#include "../agentic_brain/inter_agent_api_handlers.hpp"
 #include "../../regulatory_monitor/regulatory_monitor.hpp"
 
 namespace regulens {
 
 // Forward declarations
 class AgentOrchestrator;
+// TODO: Implement InterAgentAPIHandlers
+// class InterAgentAPIHandlers;
 
 /**
  * @brief Agent types for the system
@@ -199,6 +203,7 @@ public:
     HTTPResponse handle_agent_message_send(const HTTPRequest& request);
     HTTPResponse handle_agent_message_receive(const HTTPRequest& request);
     HTTPResponse handle_agent_message_broadcast(const HTTPRequest& request);
+    HTTPResponse handle_agent_message_acknowledge(const HTTPRequest& request);
     HTTPResponse handle_consensus_start(const HTTPRequest& request);
     HTTPResponse handle_consensus_contribute(const HTTPRequest& request);
     HTTPResponse handle_consensus_result(const HTTPRequest& request);
@@ -263,6 +268,7 @@ public:
 
 private:
     std::shared_ptr<ConfigurationManager> config_manager_;
+    std::shared_ptr<DynamicConfigManager> dynamic_config_manager_;
     std::shared_ptr<StructuredLogger> logger_;
     std::shared_ptr<MetricsCollector> metrics_collector_;
 
@@ -325,6 +331,7 @@ private:
     // Multi-Agent Communication System
     std::shared_ptr<AgentCommRegistry> agent_registry_;
     std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
+    std::shared_ptr<InterAgentAPIHandlers> inter_agent_api_handlers_;
     std::shared_ptr<IntelligentMessageTranslator> message_translator_;
     std::shared_ptr<ConsensusEngine> consensus_engine_;
     std::shared_ptr<CommunicationMediator> communication_mediator_;

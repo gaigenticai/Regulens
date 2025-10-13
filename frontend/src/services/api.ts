@@ -1,13 +1,13 @@
 /**
  * Production API Client for Regulens
+ * JWT-based authentication with automatic token refresh
  * Real axios-based HTTP client - NO MOCKS, NO STUBS
- * Connects directly to C++ backend APIs
  */
 
-import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import type * as API from '@/types/api';
 
-class RegulesAPIClient {
+class APIClient {
   private client: AxiosInstance;
 
   constructor(baseURL: string = '/api') {
@@ -17,53 +17,108 @@ class RegulesAPIClient {
       headers: {
         'Content-Type': 'application/json',
       },
-      // DATABASE-BACKED SESSIONS: Enable credentials to send/receive HttpOnly cookies
-      withCredentials: true,
     });
 
     this.setupInterceptors();
-    // NO TOKEN LOADING - Sessions are handled via HttpOnly cookies
   }
 
   private setupInterceptors(): void {
-    // Response interceptor - handle errors
+    // Request interceptor to add token
+    this.client.interceptors.request.use(
+      (config) => {
+        const token = localStorage.getItem('token');
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
+    // Response interceptor to handle 401 and refresh token
+    let isRefreshing = false;
+    let failedQueue: any[] = [];
+
+    const processQueue = (error: any, token: string | null = null) => {
+      failedQueue.forEach((prom) => {
+        if (error) {
+          prom.reject(error);
+        } else {
+          prom.resolve(token);
+        }
+      });
+
+      failedQueue = [];
+    };
+
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError<API.APIError>) => {
-        if (error.response?.status === 401) {
-          // Session expired or invalid - trigger logout
-          window.dispatchEvent(new Event('auth:logout'));
+      async (error: AxiosError) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest?._retry) {
+          if (isRefreshing) {
+            return new Promise((resolve, reject) => {
+              failedQueue.push({ resolve, reject });
+            })
+              .then((token) => {
+                originalRequest!.headers.Authorization = `Bearer ${token}`;
+                return this.client(originalRequest!);
+              })
+              .catch((err) => Promise.reject(err));
+          }
+
+          originalRequest!._retry = true;
+          isRefreshing = true;
+
+          try {
+            const response = await axios.post('/auth/refresh', {}, {
+              headers: {
+                Authorization: `Bearer ${localStorage.getItem('token')}`
+              }
+            });
+
+            const { token: newToken } = response.data;
+            localStorage.setItem('token', newToken);
+            this.client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+
+            processQueue(null, newToken);
+
+            originalRequest!.headers.Authorization = `Bearer ${newToken}`;
+            return this.client(originalRequest!);
+          } catch (refreshError) {
+            processQueue(refreshError, null);
+
+            // Refresh failed, logout user
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+
+            return Promise.reject(refreshError);
+          } finally {
+            isRefreshing = false;
+          }
         }
+
         return Promise.reject(error);
       }
     );
-  }
-
-  // NO TOKEN METHODS - Everything handled via HttpOnly cookies
-  // More secure: JavaScript cannot access session tokens
-  getToken(): string | null {
-    return null; // Token is in HttpOnly cookie, not accessible to JS
   }
 
   // ============================================================================
   // AUTHENTICATION
   // ============================================================================
 
-  async login(credentials: API.LoginRequest, config?: any): Promise<API.LoginResponse> {
-    // DATABASE-BACKED SESSIONS: Backend returns user data + sets HttpOnly cookie
-    // No token storage needed - cookie is automatically sent with future requests
-    const response = await this.client.post<API.LoginResponse>('/auth/login', credentials, config);
+  async login(credentials: API.LoginRequest): Promise<API.LoginResponse> {
+    const response = await this.client.post<API.LoginResponse>('/auth/login', credentials);
     return response.data;
   }
 
-  async logout(config?: any): Promise<void> {
-    // DATABASE-BACKED SESSIONS: Backend invalidates session in DB and clears cookie
-    await this.client.post('/auth/logout', {}, config);
-    // No client-side cleanup needed - cookie is cleared by backend
+  async logout(): Promise<void> {
+    await this.client.post('/auth/logout');
   }
 
   async getCurrentUser(): Promise<API.User> {
-    // Always use backend - no dev mocks for production parity
     const response = await this.client.get<API.User>('/auth/me');
     return response.data;
   }
@@ -1580,7 +1635,38 @@ export default apiClient;
     const response = await this.client.get<API.TrainingLeaderboardEntry[]>('/v1/training/leaderboard');
     return response.data;
   }
+
+  // Customer Profile Management
+  async getCustomerProfile(customerId: string): Promise<API.CustomerProfile> {
+    const response = await this.client.get<API.CustomerProfile>(`/customers/${customerId}`);
+    return response.data.customer;
+  }
+
+  async getCustomerRiskProfile(customerId: string): Promise<API.CustomerRiskEvent[]> {
+    const response = await this.client.get<{ riskEvents: API.CustomerRiskEvent[] }>(`/customers/${customerId}/risk-profile`);
+    return response.data.riskEvents;
+  }
+
+  async getCustomerTransactions(customerId: string, limit: number = 50): Promise<API.Transaction[]> {
+    const response = await this.client.get<{ transactions: API.Transaction[], count: number }>(`/customers/${customerId}/transactions?limit=${limit}`);
+    return response.data.transactions;
+  }
+
+  async updateCustomerKYC(customerId: string, kycStatus: string, notes?: string): Promise<{ success: boolean, customerId: string, kycStatus: string }> {
+    const response = await this.client.post<{ success: boolean, customerId: string, kycStatus: string }>(`/customers/${customerId}/kyc-update`, {
+      kyc_status: kycStatus,
+      notes: notes || ''
+    });
+    return response.data;
+  }
 }
 
 // Export singleton instance
-export const apiClient = new APIClient();
+// Development vs Production strategy:
+// - Development: Direct connection to backend (works for Chrome, Firefox, Edge)
+// - Production: Environment variable or relative URL
+const isDevelopment = import.meta.env.MODE === 'development';
+const baseURL = import.meta.env.VITE_API_BASE_URL ||
+  (isDevelopment ? 'http://localhost:8080/api' : '/api');
+export const apiClient = new APIClient(baseURL);
+export default apiClient;

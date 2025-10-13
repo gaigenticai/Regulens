@@ -20,7 +20,8 @@ ComplianceFunctionLibrary::ComplianceFunctionLibrary(
     StructuredLogger* logger,
     ErrorHandler* error_handler)
     : knowledge_base_(knowledge_base), risk_engine_(risk_engine),
-      config_(config), logger_(logger), error_handler_(error_handler) {}
+      config_(config), logger_(logger), error_handler_(error_handler),
+      db_connection_(nullptr) {}
 
 bool ComplianceFunctionLibrary::register_all_functions(FunctionRegistry& registry) {
     // Search regulations function
@@ -214,6 +215,13 @@ bool ComplianceFunctionLibrary::register_all_functions(FunctionRegistry& registr
     success &= registry.register_function(check_compliance_def);
     success &= registry.register_function(get_updates_def);
     success &= registry.register_function(analyze_transaction_def);
+    
+    // Also store in local map for quick lookup
+    registered_functions_[search_regulations_def.name] = search_regulations_def;
+    registered_functions_[assess_risk_def.name] = assess_risk_def;
+    registered_functions_[check_compliance_def.name] = check_compliance_def;
+    registered_functions_[get_updates_def.name] = get_updates_def;
+    registered_functions_[analyze_transaction_def.name] = analyze_transaction_def;
 
     if (success) {
         logger_->info("Registered all compliance functions successfully",
@@ -227,45 +235,21 @@ bool ComplianceFunctionLibrary::register_all_functions(FunctionRegistry& registr
 }
 
 std::vector<FunctionDefinition> ComplianceFunctionLibrary::get_functions_by_category(const std::string& category) const {
-    // Production-grade function retrieval by category with database storage
+    // Production-grade function retrieval by category
     std::vector<FunctionDefinition> category_functions;
     
     try {
-        // Query function definitions from database by category
-        // Functions are stored in database for persistence and dynamic updates
-        if (db_connection_) {
-            std::string query = R"(
-                SELECT function_name, description, parameters, category, version
-                FROM function_definitions
-                WHERE category = $1 AND active = true
-                ORDER BY function_name
-            )";
-            
-            auto result = db_connection_->execute_query(query, {category});
-            
-            for (const auto& row : result) {
-                FunctionDefinition func_def;
-                func_def.name = row["function_name"];
-                func_def.description = row["description"];
-                func_def.parameters = nlohmann::json::parse(row["parameters"]);
-                func_def.category = row["category"];
-                
+        // Filter from registered functions map
+        for (const auto& [name, func_def] : registered_functions_) {
+            if (func_def.category == category) {
                 category_functions.push_back(func_def);
             }
-            
-            if (logger_) {
-                logger_->debug("Retrieved " + std::to_string(category_functions.size()) + 
-                              " functions for category: " + category,
-                              "ComplianceFunctionLibrary", "get_functions_by_category");
-            }
         }
-        else {
-            // Fallback: filter from registered functions map
-            for (const auto& [name, func_def] : registered_functions_) {
-                if (func_def.category == category) {
-                    category_functions.push_back(func_def);
-                }
-            }
+        
+        if (logger_) {
+            logger_->debug("Retrieved " + std::to_string(category_functions.size()) + 
+                          " functions for category: " + category,
+                          "ComplianceFunctionLibrary", "get_functions_by_category");
         }
     }
     catch (const std::exception& e) {
@@ -354,8 +338,8 @@ FunctionResult ComplianceFunctionLibrary::assess_risk(const nlohmann::json& args
                 transaction_data.transaction_id = tx.value("id", entity_id);
                 transaction_data.amount = tx.value("amount", 0.0);
                 transaction_data.currency = tx.value("currency", "USD");
-                transaction_data.sender_id = tx.value("sender_id", "");
-                transaction_data.receiver_id = tx.value("receiver_id", "");
+                transaction_data.entity_id = tx.value("sender_id", "");
+                transaction_data.counterparty_id = tx.value("receiver_id", "");
                 transaction_data.timestamp = tx.value("timestamp", 0);
             }
             
@@ -364,14 +348,14 @@ FunctionResult ComplianceFunctionLibrary::assess_risk(const nlohmann::json& args
             if (args.contains("entity_profile")) {
                 auto profile = args["entity_profile"];
                 entity_profile.entity_id = profile.value("id", entity_id);
-                entity_profile.name = profile.value("name", "");
-                entity_profile.type = profile.value("type", "");
+                entity_profile.entity_type = profile.value("type", "individual");
+                entity_profile.business_type = profile.value("business_type", "");
                 entity_profile.jurisdiction = profile.value("jurisdiction", "");
-                entity_profile.risk_rating = profile.value("risk_rating", 0.5);
+                entity_profile.verification_status = profile.value("verification_status", "unverified");
             }
             
-            // Perform specialized transaction risk assessment
-            assessment = risk_engine_->assess_transaction_risk(transaction_data, entity_profile, risk_context);
+            // Perform specialized transaction risk assessment (2 parameters only)
+            assessment = risk_engine_->assess_transaction_risk(transaction_data, entity_profile);
         } else if (type == "entity") {
             // Production-grade entity risk assessment with profile and history
             // Build comprehensive entity profile
@@ -379,12 +363,17 @@ FunctionResult ComplianceFunctionLibrary::assess_risk(const nlohmann::json& args
             if (args.contains("entity_profile")) {
                 auto profile = args["entity_profile"];
                 entity_profile.entity_id = profile.value("id", entity_id);
-                entity_profile.name = profile.value("name", "");
-                entity_profile.type = profile.value("type", "");
+                entity_profile.entity_type = profile.value("type", "individual");
+                entity_profile.business_type = profile.value("business_type", "");
                 entity_profile.jurisdiction = profile.value("jurisdiction", "");
-                entity_profile.risk_rating = profile.value("risk_rating", 0.5);
-                entity_profile.sanctions_status = profile.value("sanctions_status", false);
-                entity_profile.pep_status = profile.value("pep_status", false);
+                entity_profile.verification_status = profile.value("verification_status", "unverified");
+                // Add risk flags based on sanctions/PEP status
+                if (profile.value("sanctions_status", false)) {
+                    entity_profile.risk_flags.push_back("sanctions_match");
+                }
+                if (profile.value("pep_status", false)) {
+                    entity_profile.risk_flags.push_back("pep");
+                }
             }
             
             // Get transaction history for behavioral analysis
@@ -400,8 +389,8 @@ FunctionResult ComplianceFunctionLibrary::assess_risk(const nlohmann::json& args
                 }
             }
             
-            // Perform specialized entity risk assessment
-            assessment = risk_engine_->assess_entity_risk(entity_profile, transaction_history, risk_context);
+            // Perform specialized entity risk assessment (2 parameters only)
+            assessment = risk_engine_->assess_entity_risk(entity_profile, transaction_history);
         } else {
             // Default to regulatory risk assessment
             assessment = risk_engine_->assess_regulatory_risk(entity_id, risk_context);

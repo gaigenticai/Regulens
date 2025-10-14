@@ -177,15 +177,15 @@ public:
      * @brief Get tool execution statistics
      */
     nlohmann::json get_statistics() const {
-        return {
-            {"tool_name", tool_name_},
-            {"total_calls", total_calls_},
-            {"successful_calls", successful_calls_},
-            {"failed_calls", failed_calls_},
-            {"success_rate", total_calls_ > 0 ? (double)successful_calls_ / total_calls_ : 0.0},
-            {"circuit_breaker_open", circuit_breaker_open_},
-            {"consecutive_failures", consecutive_failures_}
-        };
+        nlohmann::json stats;
+        stats["tool_name"] = tool_name_;
+        stats["total_calls"] = total_calls_.load();
+        stats["successful_calls"] = successful_calls_.load();
+        stats["failed_calls"] = failed_calls_.load();
+        stats["success_rate"] = total_calls_.load() > 0 ? (double)successful_calls_.load() / total_calls_.load() : 0.0;
+        stats["circuit_breaker_open"] = circuit_breaker_open_.load();
+        stats["consecutive_failures"] = consecutive_failures_.load();
+        return stats;
     }
     
 protected:
@@ -259,16 +259,17 @@ protected:
      * @brief Log tool execution to database for audit trail
      */
     void log_tool_execution(const ToolContext& context, const nlohmann::json& parameters, const ToolResult& result) {
+        nlohmann::json log_data;
+        log_data["agent_id"] = context.agent_id;
+        log_data["agent_name"] = context.agent_name;
+        log_data["success"] = result.success;
+        log_data["execution_time_ms"] = result.execution_time.count();
+        log_data["error"] = result.error_message;
+
         logger_->log(
             result.success ? LogLevel::INFO : LogLevel::ERROR,
             "Tool execution: " + tool_name_,
-            {
-                {"agent_id", context.agent_id},
-                {"agent_name", context.agent_name},
-                {"success", result.success},
-                {"execution_time_ms", result.execution_time.count()},
-                {"error", result.error_message}
-            }
+            log_data
         );
         
         // Production: Also log to function_call_logs table for debugging

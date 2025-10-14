@@ -105,10 +105,10 @@ protected:
         // Validate URL (security check)
         if (!is_url_allowed(url)) {
             result.error_message = "URL not allowed by security policy: " + url;
-            logger_->log(LogLevel::WARN, "Blocked HTTP request to unauthorized URL", {
-                {"url", url},
-                {"agent_id", context.agent_id}
-            });
+            nlohmann::json log_data;
+            log_data["url"] = url;
+            log_data["agent_id"] = context.agent_id;
+            logger_->log(LogLevel::WARN, "Blocked HTTP request to unauthorized URL", log_data);
             return result;
         }
         

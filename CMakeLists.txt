@@ -188,7 +188,7 @@ include_directories(
 add_subdirectory(shared)
 add_subdirectory(core)
 add_subdirectory(data_ingestion)
-add_subdirectory(regulatory_monitor)
+# add_subdirectory(regulatory_monitor)  # Temporarily disabled due to missing dependencies
 add_subdirectory(agents)
 # Infrastructure (K8s operator) temporarily disabled for core build
 # Temporarily disabled due to missing prometheus_client.hpp dependency

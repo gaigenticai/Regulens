@@ -131,29 +131,37 @@ protected:
         
         try {
             // Call LLM API
-            auto llm_response = llm_client_->complex_reasoning_task(prompt, max_tokens, temperature);
-            
-            if (llm_response["success"].get<bool>()) {
+            auto llm_response_opt = llm_client_->complex_reasoning_task(prompt, max_tokens, temperature);
+
+            if (!llm_response_opt.has_value()) {
+                result.error_message = "LLM API call failed: No response received";
+                return result;
+            }
+
+            // Parse the JSON response
+            nlohmann::json llm_response = nlohmann::json::parse(llm_response_opt.value());
+
+            if (llm_response.contains("success") && llm_response["success"].get<bool>()) {
                 result.success = true;
-                result.result = {
-                    {"analysis", llm_response["response"]},
-                    {"task_type", task_type},
-                    {"tokens_used", llm_response.value("tokens_used", 0)},
-                    {"model", llm_response.value("model", "claude-3-sonnet")},
-                    {"from_cache", false}
-                };
-                
+                nlohmann::json result_data;
+                result_data["analysis"] = llm_response.value("response", "");
+                result_data["task_type"] = task_type;
+                result_data["tokens_used"] = llm_response.value("tokens_used", 0);
+                result_data["model"] = llm_response.value("model", "claude-3-sonnet");
+                result_data["from_cache"] = false;
+                result.result = result_data;
+
                 result.tokens_used = llm_response.value("tokens_used", 0);
-                
+
                 // Update token usage tracking
                 record_token_usage(context.agent_id, result.tokens_used);
-                
+
                 // Cache the response
                 if (enable_caching_) {
                     std::string cache_key = generate_cache_key(task_type, parameters["input_data"]);
                     cache_response(cache_key, result);
                 }
-                
+
             } else {
                 result.error_message = "LLM API call failed: " + llm_response.value("error", "Unknown error");
             }

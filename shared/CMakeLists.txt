@@ -72,6 +72,8 @@ add_library(regulens_shared STATIC
     fraud_detection/fraud_api_handlers.cpp
     fraud_detection/fraud_scan_worker.cpp
     data_ingestion/ingestion_api_handlers.cpp
+    # OpenAPI Documentation Generator - Production-grade API documentation (Rule 6 compliance)
+    api_docs/openapi_generator.cpp
 )
 
 # Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)
@@ -90,6 +92,7 @@ target_include_directories(regulens_shared
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/config
+        ${CMAKE_CURRENT_SOURCE_DIR}/api_docs
         ${CMAKE_CURRENT_SOURCE_DIR}/database
         ${CMAKE_CURRENT_SOURCE_DIR}/logging
         ${CMAKE_CURRENT_SOURCE_DIR}/models

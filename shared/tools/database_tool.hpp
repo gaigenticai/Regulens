@@ -142,7 +142,7 @@ private:
      * @brief Get customer profile with KYC/AML data
      */
     ToolResult execute_customer_profile_query(
-        std::shared_ptr<DatabaseConnection> conn,
+        std::shared_ptr<regulens::PostgreSQLConnection> conn,
         const nlohmann::json& parameters
     ) {
         ToolResult result;
@@ -183,7 +183,7 @@ private:
      * @brief Get transaction history for a customer
      */
     ToolResult execute_transaction_history_query(
-        std::shared_ptr<DatabaseConnection> conn,
+        std::shared_ptr<regulens::PostgreSQLConnection> conn,
         const nlohmann::json& parameters,
         int limit
     ) {
@@ -225,7 +225,7 @@ private:
      * @brief Get recent regulatory changes
      */
     ToolResult execute_regulatory_changes_query(
-        std::shared_ptr<DatabaseConnection> conn,
+        std::shared_ptr<regulens::PostgreSQLConnection> conn,
         const nlohmann::json& parameters,
         int limit
     ) {
@@ -270,7 +270,7 @@ private:
      * @brief Search knowledge base
      */
     ToolResult execute_knowledge_entries_query(
-        std::shared_ptr<DatabaseConnection> conn,
+        std::shared_ptr<regulens::PostgreSQLConnection> conn,
         const nlohmann::json& parameters,
         int limit
     ) {
@@ -321,7 +321,7 @@ private:
      * @brief Get agent decisions for analysis
      */
     ToolResult execute_agent_decisions_query(
-        std::shared_ptr<DatabaseConnection> conn,
+        std::shared_ptr<regulens::PostgreSQLConnection> conn,
         const nlohmann::json& parameters,
         int limit
     ) {
@@ -366,7 +366,7 @@ private:
      * @brief Execute custom SQL query (with safety checks)
      */
     ToolResult execute_custom_query(
-        std::shared_ptr<DatabaseConnection> conn,
+        std::shared_ptr<regulens::PostgreSQLConnection> conn,
         const nlohmann::json& parameters,
         int limit
     ) {
@@ -382,9 +382,9 @@ private:
         // Security check: Ensure query is read-only
         if (!is_query_safe(sql)) {
             result.error_message = "Query contains unsafe operations (INSERT/UPDATE/DELETE/DROP)";
-            logger_->log(LogLevel::WARN, "Blocked unsafe SQL query", {
-                {"query", sql}
-            });
+            nlohmann::json log_data;
+            log_data["query"] = sql;
+            logger_->log(LogLevel::WARN, "Blocked unsafe SQL query", log_data);
             return result;
         }
         

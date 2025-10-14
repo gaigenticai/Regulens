@@ -35,6 +35,10 @@
 #include <sys/statvfs.h>
 
 // JWT Authentication - Production-grade security implementation (Rule 1 compliance)
+
+// Forward declaration for HMAC-SHA256 function
+std::string hmac_sha256(const std::string& key, const std::string& data);
+
 namespace regulens {
 
 // Simple JWT claims structure
@@ -264,6 +268,9 @@ private:
 #include "shared/llm/policy_generation_service.hpp"
 #include "shared/fraud_detection/fraud_api_handlers.hpp"
 #include "shared/fraud_detection/fraud_scan_worker.hpp"
+
+// OpenAPI Documentation Generator - Production-grade API documentation (Rule 6 compliance)
+#include "shared/api_docs/openapi_generator.hpp"
 
 // Service instances
 std::unique_ptr<regulens::ChatbotService> chatbot_service;
@@ -14787,6 +14794,7 @@ Be concise but comprehensive, and maintain a professional tone suitable for regu
         // Public routes: authentication NOT required
         // Note: /api/agents/{id}/control is PROTECTED (requires auth)
         bool is_public_route = (path_without_query == "/api/auth/login" || path_without_query == "/api/auth/refresh" || path_without_query == "/health" ||
+                               path_without_query == "/docs" || path_without_query == "/redoc" || path_without_query == "/api/docs" ||  // API Documentation (public access)
                                path_without_query == "/agents" || path_without_query == "/api/agents" || 
                                (path_without_query.find("/api/agents/") == 0 && path_without_query.find("/control") == std::string::npos) ||  // Allow agent GET, but NOT control
                                path_without_query == "/regulatory" || path_without_query == "/api/regulatory" || path_without_query == "/regulatory-changes" || path_without_query == "/api/regulatory-changes" ||
@@ -14833,7 +14841,12 @@ Be concise but comprehensive, and maintain a professional tone suitable for regu
                 response_stream << "Referrer-Policy: no-referrer\r\n";
 
                 response_stream << "Server: Regulens/1.0.0\r\n";
-                
+
+                // API Version Headers (Phase 3: API Versioning Strategy)
+                response_stream << "X-API-Version: v1\r\n";
+                response_stream << "X-API-Compatible-Versions: v1\r\n";
+                response_stream << "X-API-Deprecation-Date: none\r\n";
+
                 // CORS: Use environment variable for allowed origins (production-ready)
                 const char* allowed_origin_env = std::getenv("CORS_ALLOWED_ORIGIN");
                 std::string allowed_origin = allowed_origin_env ? std::string(allowed_origin_env) : "http://localhost:3000";
@@ -14911,7 +14924,23 @@ Be concise but comprehensive, and maintain a professional tone suitable for regu
         }
 
         if (response_body.empty()) {
-            if (path == "/health") {
+            // API Documentation Routes - Public access (Rule 6 compliance - UI testing)
+            if (path == "/api/docs") {
+                // Return OpenAPI JSON specification
+                try {
+                    regulens::OpenAPIGenerator generator;
+                    regulens::register_regulens_api_endpoints(generator);
+                    response_body = generator.generate_json();
+                } catch (const std::exception& e) {
+                    response_body = "{\"error\":\"Internal Server Error\",\"message\":\"Failed to generate API documentation\"}";
+                }
+            } else if (path == "/docs") {
+                // Return Swagger UI HTML
+                response_body = regulens::OpenAPIGenerator::generate_swagger_ui_html("/api/docs");
+            } else if (path == "/redoc") {
+                // Return ReDoc HTML (alternative documentation viewer)
+                response_body = regulens::OpenAPIGenerator::generate_redoc_html("/api/docs");
+            } else if (path == "/health") {
                 response_body = handle_health_check();
             } else if (path_without_query == "/api/auth/login" && method == "POST") {
                 response_body = handle_login(request_body, client_ip, user_agent);
@@ -15976,7 +16005,12 @@ Be concise but comprehensive, and maintain a professional tone suitable for regu
         response_stream << "Cross-Origin-Resource-Policy: same-origin\r\n"; // CORP
 
         response_stream << "Server: Regulens/1.0.0\r\n";
-        
+
+        // API Version Headers (Phase 3: API Versioning Strategy)
+        response_stream << "X-API-Version: v1\r\n";
+        response_stream << "X-API-Compatible-Versions: v1\r\n";
+        response_stream << "X-API-Deprecation-Date: none\r\n";
+
         // CORS: Use environment variable for allowed origins (production-ready)
         const char* allowed_origin_env = std::getenv("CORS_ALLOWED_ORIGIN");
         std::string allowed_origin = allowed_origin_env ? std::string(allowed_origin_env) : "http://localhost:3000";

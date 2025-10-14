@@ -139,11 +139,46 @@ public:
 
     /**
      * Set server URL
-     * 
+     *
      * @param url Server URL
      * @param description Server description
      */
     void add_server(const std::string& url, const std::string& description = "");
+
+    /**
+     * Set API version
+     *
+     * @param version API version string
+     */
+    void set_info_version(const std::string& version);
+
+    /**
+     * Set API description
+     *
+     * @param description API description
+     */
+    void set_info_description(const std::string& description);
+
+    /**
+     * Set API title
+     *
+     * @param title API title
+     */
+    void set_info_title(const std::string& title);
+
+    /**
+     * Set contact information
+     *
+     * @param contact JSON object with contact info
+     */
+    void set_info_contact(const nlohmann::json& contact);
+
+    /**
+     * Set license information
+     *
+     * @param license JSON object with license info
+     */
+    void set_info_license(const nlohmann::json& license);
 
     /**
      * Generate OpenAPI JSON specification

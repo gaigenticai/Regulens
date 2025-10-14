@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, ArrowLeft, Save, RefreshCw, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { Settings as SettingsIcon, ArrowLeft, Save, RefreshCw, AlertTriangle, CheckCircle, XCircle, ExternalLink, FileText, Code } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 interface ConfigItem {
@@ -304,6 +304,103 @@ const Settings: React.FC = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* API Documentation Section */}
+        <div className="mt-8 bg-white shadow-sm rounded-lg">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-green-100 rounded-lg">
+                <FileText className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-medium text-gray-900">API Documentation</h2>
+                <p className="text-sm text-gray-600">Interactive API testing and comprehensive documentation</p>
+              </div>
+            </div>
+          </div>
+          <div className="px-6 py-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Swagger UI */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center mb-3">
+                  <Code className="w-5 h-5 text-blue-600 mr-2" />
+                  <h3 className="text-sm font-medium text-gray-900">Interactive API Testing</h3>
+                </div>
+                <p className="text-xs text-gray-600 mb-4">
+                  Test all API endpoints with authentication, request building, and response validation.
+                </p>
+                <a
+                  href="/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  Open Swagger UI
+                </a>
+              </div>
+
+              {/* ReDoc */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center mb-3">
+                  <FileText className="w-5 h-5 text-green-600 mr-2" />
+                  <h3 className="text-sm font-medium text-gray-900">ReDoc Documentation</h3>
+                </div>
+                <p className="text-xs text-gray-600 mb-4">
+                  Clean, readable API documentation with examples and schemas.
+                </p>
+                <a
+                  href="/redoc"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                >
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  Open ReDoc
+                </a>
+              </div>
+
+              {/* OpenAPI Spec */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center mb-3">
+                  <Code className="w-5 h-5 text-purple-600 mr-2" />
+                  <h3 className="text-sm font-medium text-gray-900">OpenAPI Specification</h3>
+                </div>
+                <p className="text-xs text-gray-600 mb-4">
+                  Download the complete OpenAPI 3.0 JSON specification for integrations.
+                </p>
+                <a
+                  href="/api/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-xs font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+                >
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  View JSON Spec
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex">
+                <AlertTriangle className="w-5 h-5 text-blue-600 mt-0.5" />
+                <div className="ml-3">
+                  <h4 className="text-sm font-medium text-blue-800">API Documentation Features</h4>
+                  <div className="mt-2 text-xs text-blue-700">
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>25+ fully documented endpoints with request/response schemas</li>
+                      <li>JWT authentication integration with bearer tokens</li>
+                      <li>Interactive testing with real authentication</li>
+                      <li>Standardized error responses and status codes</li>
+                      <li>Pagination support for large datasets</li>
+                      <li>Rate limiting and security headers</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

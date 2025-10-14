@@ -29,7 +29,7 @@
 #include <curl/curl.h>
 #include "../logging/structured_logger.hpp"
 #include "../config/configuration_manager.hpp"
-#include "../database/connection_pool.hpp"
+#include "../database/postgresql_connection.hpp"
 
 namespace regulens {
 

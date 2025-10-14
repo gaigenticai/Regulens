@@ -53,6 +53,8 @@ add_library(regulens_shared STATIC
     knowledge_base/semantic_search_api_handlers.cpp
     llm/llm_api_handlers.cpp
     llm/chatbot_service.cpp
+    chatbot/regulatory_chatbot_service.cpp
+    chatbot/chatbot_api_handlers.cpp
     llm/text_analysis_service.cpp
     llm/text_analysis_api_handlers.cpp
     llm/policy_generation_service.cpp
@@ -67,11 +69,20 @@ add_library(regulens_shared STATIC
     agentic_brain/message_translator_api_handlers.cpp
     agentic_brain/communication_mediator.cpp
     agentic_brain/communication_mediator_api_handlers.cpp
-    tools/tool_categories.cpp
-    tools/tool_categories_api_handlers.cpp
     fraud_detection/fraud_api_handlers.cpp
     fraud_detection/fraud_scan_worker.cpp
     data_ingestion/ingestion_api_handlers.cpp
+    policy/nl_policy_converter.cpp
+    policy/policy_api_handlers.cpp
+    simulator/regulatory_simulator.cpp
+    simulator/simulator_api_handlers.cpp
+    llm/llm_key_manager.cpp
+    llm/function_call_debugger.cpp
+    memory/memory_visualizer.cpp
+    embeddings/embeddings_explorer.cpp
+    security/access_control_service.cpp
+    decisions/mcda_advanced.cpp
+    tools/tool_test_harness.cpp
     # OpenAPI Documentation Generator - Production-grade API documentation (Rule 6 compliance)
     api_docs/openapi_generator.cpp
 )
@@ -106,8 +117,12 @@ target_include_directories(regulens_shared
         ${CMAKE_CURRENT_SOURCE_DIR}/transactions
         ${CMAKE_CURRENT_SOURCE_DIR}/patterns
         ${CMAKE_CURRENT_SOURCE_DIR}/llm
+        ${CMAKE_CURRENT_SOURCE_DIR}/chatbot
         ${CMAKE_CURRENT_SOURCE_DIR}/fraud_detection
+        ${CMAKE_CURRENT_SOURCE_DIR}/policy
+        ${CMAKE_CURRENT_SOURCE_DIR}/simulator
         ${CMAKE_CURRENT_SOURCE_DIR}/auth
+        ${CMAKE_CURRENT_SOURCE_DIR}/security
 )
 
 target_link_libraries(regulens_shared

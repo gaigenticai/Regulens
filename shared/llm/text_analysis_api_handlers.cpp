@@ -12,7 +12,7 @@ namespace regulens {
 TextAnalysisAPIHandlers::TextAnalysisAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<TextAnalysisService> text_analysis_service
-) : db_conn_(db_conn), text_analysis_service_(text_analysis_service) {
+) : db_conn_(db_conn), text_analysis_service_(text_analysis_service), access_control_(db_conn) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for TextAnalysisAPIHandlers");
@@ -581,9 +581,29 @@ bool TextAnalysisAPIHandlers::validate_text_input(const std::string& text, std::
 }
 
 bool TextAnalysisAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation) {
-    // TODO: Implement proper access control based on user roles and permissions
-    // For now, allow all authenticated users
-    return !user_id.empty();
+    if (user_id.empty() || operation.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    std::vector<AccessControlService::PermissionQuery> queries = {
+        {operation, "text_analysis", "", 0},
+        {operation, "llm_analysis", "", 0},
+        {"use_text_analysis", "", "", 0},
+        {operation, "", "", 0}
+    };
+
+    if (operation.find("batch") != std::string::npos) {
+        queries.push_back({"batch_text_analysis", "text_analysis", "", 0});
+    }
+    if (operation.find("stats") != std::string::npos) {
+        queries.push_back({"view_text_analysis_metrics", "", "", 0});
+    }
+
+    return access_control_.has_any_permission(user_id, queries);
 }
 
 std::vector<AnalysisTask> TextAnalysisAPIHandlers::parse_task_list(const nlohmann::json& tasks_json) {

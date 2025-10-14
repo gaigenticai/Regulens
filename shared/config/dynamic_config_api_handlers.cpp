@@ -14,7 +14,7 @@ namespace regulens {
 DynamicConfigAPIHandlers::DynamicConfigAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<DynamicConfigManager> config_manager
-) : db_conn_(db_conn), config_manager_(config_manager) {
+) : db_conn_(db_conn), config_manager_(config_manager), access_control_(db_conn) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for DynamicConfigAPIHandlers");
@@ -512,13 +512,50 @@ bool DynamicConfigAPIHandlers::validate_config_request(const nlohmann::json& req
 }
 
 bool DynamicConfigAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation, const std::string& key) {
-    // TODO: Implement proper access control based on user roles and permissions
-    return !user_id.empty();
+    if (user_id.empty() || operation.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    std::vector<AccessControlService::PermissionQuery> queries = {
+        {operation, "dynamic_config", key, 0},
+        {operation, "configuration", key, 0},
+        {operation, "dynamic_config", "*", 0},
+        {operation, "configuration", "*", 0},
+        {"manage_dynamic_config", "", "", 0},
+        {"manage_configurations", "", "", 0},
+        {operation, "", "", 0}
+    };
+
+    if (!key.empty()) {
+        queries.push_back({"manage_dynamic_config", "dynamic_config", key, 0});
+    }
+
+    return access_control_.has_any_permission(user_id, queries);
 }
 
 bool DynamicConfigAPIHandlers::validate_scope_access(const std::string& user_id, ConfigScope scope) {
-    // TODO: Implement scope-based access control
-    return true;
+    if (user_id.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    const std::string scope_name = config_manager_->scope_to_string(scope);
+    if (scope_name.empty()) {
+        return false;
+    }
+
+    if (access_control_.has_scope_access(user_id, scope_name)) {
+        return true;
+    }
+
+    return access_control_.has_scope_access(user_id, "*");
 }
 
 nlohmann::json DynamicConfigAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {
@@ -568,8 +605,17 @@ nlohmann::json DynamicConfigAPIHandlers::create_paginated_response(
 }
 
 bool DynamicConfigAPIHandlers::is_admin_user(const std::string& user_id) {
-    // TODO: Implement proper admin user checking
-    return user_id == "admin" || user_id == "system";
+    return access_control_.is_admin(user_id);
+}
+
+std::vector<std::string> DynamicConfigAPIHandlers::get_user_allowed_scopes(const std::string& user_id) {
+    auto scopes = access_control_.get_user_scopes(user_id);
+
+    if (scopes.empty() && access_control_.is_admin(user_id)) {
+        scopes = {"GLOBAL", "ENVIRONMENT", "MODULE", "ORGANIZATION", "USER"};
+    }
+
+    return scopes;
 }
 
 } // namespace regulens

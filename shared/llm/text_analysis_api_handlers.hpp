@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 #include "text_analysis_service.hpp"
 #include "../database/postgresql_connection.hpp"
+#include "../security/access_control_service.hpp"
 
 namespace regulens {
 
@@ -47,6 +48,7 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<TextAnalysisService> text_analysis_service_;
+    AccessControlService access_control_;
 
     // Helper methods
     TextAnalysisRequest parse_analysis_request(const nlohmann::json& request);

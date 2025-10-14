@@ -7,10 +7,167 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <iomanip>
+#include <ctime>
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 
 namespace regulens {
+
+namespace {
+
+using Clock = std::chrono::system_clock;
+
+std::optional<Clock::time_point> parse_timestamp(const std::string& value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    std::tm tm{};
+    std::istringstream ss(value);
+    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    if (ss.fail()) {
+        ss.clear();
+        ss.str(value);
+        ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    }
+
+    if (ss.fail()) {
+        return std::nullopt;
+    }
+
+#if defined(_WIN32)
+    time_t time_utc = _mkgmtime(&tm);
+#else
+    time_t time_utc = timegm(&tm);
+#endif
+    if (time_utc == static_cast<time_t>(-1)) {
+        return std::nullopt;
+    }
+
+    Clock::time_point tp = Clock::from_time_t(time_utc);
+
+    auto dot_pos = value.find('.');
+    if (dot_pos != std::string::npos) {
+        auto end = value.find_first_not_of("0123456789", dot_pos + 1);
+        std::string fraction = value.substr(dot_pos + 1, end == std::string::npos ? std::string::npos : end - (dot_pos + 1));
+        if (!fraction.empty()) {
+            if (fraction.size() > 9) {
+                fraction = fraction.substr(0, 9);
+            }
+            while (fraction.size() < 9) {
+                fraction.push_back('0');
+            }
+            auto nanos = static_cast<long long>(std::stoll(fraction));
+            tp += std::chrono::nanoseconds(nanos);
+        }
+    }
+
+    return tp;
+}
+
+std::string format_timestamp(const Clock::time_point& tp) {
+    auto time_val = Clock::to_time_t(tp);
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm, &time_val);
+#else
+    gmtime_r(&time_val, &tm);
+#endif
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+    auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count() % 1000000000LL;
+    if (nanos > 0) {
+        oss << '.' << std::setw(9) << std::setfill('0') << nanos;
+    }
+    oss << "+00";
+    return oss.str();
+}
+
+AgentMessage build_agent_message(const std::unordered_map<std::string, std::string>& row) {
+    AgentMessage msg;
+    auto get_value = [&](const std::string& key) -> std::string {
+        auto it = row.find(key);
+        return it != row.end() ? it->second : std::string();
+    };
+
+    msg.message_id = get_value("message_id");
+    msg.from_agent_id = get_value("from_agent_id");
+
+    std::string to_agent = get_value("to_agent_id");
+    if (!to_agent.empty()) {
+        msg.to_agent_id = to_agent;
+    }
+
+    msg.message_type = get_value("message_type");
+
+    std::string content_str = get_value("content");
+    if (!content_str.empty()) {
+        try {
+            msg.content = nlohmann::json::parse(content_str);
+        } catch (const std::exception&) {
+            msg.content = nlohmann::json::object({{"raw", content_str}});
+        }
+    }
+
+    std::string priority_str = get_value("priority");
+    msg.priority = priority_str.empty() ? 3 : std::stoi(priority_str);
+
+    std::string status_str = get_value("status");
+    msg.status = status_str.empty() ? "pending" : status_str;
+
+    if (auto created = parse_timestamp(get_value("created_at")); created) {
+        msg.created_at = *created;
+    } else {
+        msg.created_at = Clock::now();
+    }
+
+    if (auto delivered = parse_timestamp(get_value("delivered_at")); delivered) {
+        msg.delivered_at = delivered;
+    }
+
+    if (auto acknowledged = parse_timestamp(get_value("acknowledged_at")); acknowledged) {
+        msg.acknowledged_at = acknowledged;
+    }
+
+    if (auto expires = parse_timestamp(get_value("expires_at")); expires) {
+        msg.expires_at = expires;
+    }
+
+    std::string retry_str = get_value("retry_count");
+    if (!retry_str.empty()) {
+        msg.retry_count = std::stoi(retry_str);
+    }
+
+    std::string max_retry_str = get_value("max_retries");
+    if (!max_retry_str.empty()) {
+        msg.max_retries = std::stoi(max_retry_str);
+    }
+
+    std::string error_str = get_value("error_message");
+    if (!error_str.empty()) {
+        msg.error_message = error_str;
+    }
+
+    std::string correlation_str = get_value("correlation_id");
+    if (!correlation_str.empty()) {
+        msg.correlation_id = correlation_str;
+    }
+
+    std::string parent_str = get_value("parent_message_id");
+    if (!parent_str.empty()) {
+        msg.parent_message_id = parent_str;
+    }
+
+    std::string conversation_str = get_value("conversation_id");
+    if (!conversation_str.empty()) {
+        msg.conversation_id = conversation_str;
+    }
+
+    return msg;
+}
+
+} // namespace
 
 InterAgentCommunicator::InterAgentCommunicator(std::shared_ptr<PostgreSQLConnection> db_conn)
     : db_conn_(db_conn), processor_running_(false) {
@@ -105,7 +262,7 @@ std::optional<std::string> InterAgentCommunicator::send_message(
     }
 }
 
-bool InterAgentCommunicator::send_message_async(
+std::optional<std::string> InterAgentCommunicator::send_message_async(
     const std::string& from_agent,
     const std::string& to_agent,
     const std::string& message_type,
@@ -119,19 +276,20 @@ bool InterAgentCommunicator::send_message_async(
         auto message_id = send_message(from_agent, to_agent, message_type, content,
                                      priority, correlation_id, conversation_id, expiry_hours);
         if (message_id) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            message_queue_.push(*message_id);
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                message_queue_.push(*message_id);
+            }
             cv_.notify_one();
-            return true;
         }
-        return false;
+        return message_id;
     } catch (const std::exception& e) {
         spdlog::error("Exception in send_message_async: {}", e.what());
-        return false;
+        return std::nullopt;
     }
 }
 
-bool InterAgentCommunicator::broadcast_message(
+std::optional<std::string> InterAgentCommunicator::broadcast_message(
     const std::string& from_agent,
     const std::string& message_type,
     const nlohmann::json& content,
@@ -144,22 +302,22 @@ bool InterAgentCommunicator::broadcast_message(
         // Validate inputs
         if (from_agent.empty() || message_type.empty()) {
             spdlog::error("Invalid broadcast parameters: from_agent and message_type are required");
-            return false;
+            return std::nullopt;
         }
 
         if (!is_valid_priority(priority)) {
             spdlog::error("Invalid priority: {}. Must be between 1-5", priority);
-            return false;
+            return std::nullopt;
         }
 
         if (!validate_message_type(message_type)) {
             spdlog::error("Unsupported message type: {}", message_type);
-            return false;
+            return std::nullopt;
         }
 
         if (!validate_message_content(message_type, content)) {
             spdlog::error("Invalid message content for type: {}", message_type);
-            return false;
+            return std::nullopt;
         }
 
         // Generate UUID for message_id
@@ -196,15 +354,20 @@ bool InterAgentCommunicator::broadcast_message(
         if (success) {
             spdlog::info("Broadcast message sent successfully: {} from {} (type: {})",
                         message_id, from_agent, message_type);
-            return true;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                message_queue_.push(message_id);
+            }
+            cv_.notify_one();
+            return message_id;
         }
 
         spdlog::error("Failed to insert broadcast message into database");
-        return false;
+        return std::nullopt;
 
     } catch (const std::exception& e) {
         spdlog::error("Exception in broadcast_message: {}", e.what());
-        return false;
+        return std::nullopt;
     }
 }
 
@@ -839,44 +1002,18 @@ std::vector<AgentMessage> InterAgentCommunicator::query_messages(const std::stri
     std::vector<AgentMessage> messages;
 
     try {
-        std::string query = "SELECT message_id, from_agent_id, to_agent_id, message_type, content, "
-                           "priority, status, created_at, delivered_at, acknowledged_at, "
-                           "retry_count, expires_at, correlation_id, conversation_id "
-                           "FROM agent_messages WHERE " + where_clause +
-                           " ORDER BY priority DESC, created_at DESC LIMIT " + std::to_string(limit);
+        std::string query =
+            "SELECT message_id, from_agent_id, to_agent_id, message_type, content, "
+            "priority, status, created_at, delivered_at, acknowledged_at, read_at, "
+            "retry_count, max_retries, expires_at, error_message, correlation_id, "
+            "parent_message_id, conversation_id "
+            "FROM agent_messages WHERE " + where_clause +
+            " ORDER BY priority ASC, created_at ASC LIMIT " + std::to_string(limit);
 
         auto result = db_conn_->execute_query(query);
-
+        messages.reserve(result.rows.size());
         for (const auto& row : result.rows) {
-            AgentMessage msg;
-
-            auto get_string = [&](const std::string& key) -> std::string {
-                auto it = row.find(key);
-                return it != row.end() ? it->second : "";
-            };
-
-            msg.message_id = get_string("message_id");
-            msg.from_agent_id = get_string("from_agent_id");
-
-            std::string to_agent = get_string("to_agent_id");
-            if (!to_agent.empty()) msg.to_agent_id = to_agent;
-
-            msg.message_type = get_string("message_type");
-            msg.content = nlohmann::json::parse(get_string("content"));
-            msg.priority = std::stoi(get_string("priority"));
-            msg.status = get_string("status");
-            msg.retry_count = std::stoi(get_string("retry_count"));
-
-            std::string correlation_id = get_string("correlation_id");
-            if (!correlation_id.empty()) msg.correlation_id = correlation_id;
-
-            std::string conversation_id = get_string("conversation_id");
-            if (!conversation_id.empty()) msg.conversation_id = conversation_id;
-
-            // TODO: Parse timestamps properly
-            msg.created_at = std::chrono::system_clock::now();
-
-            messages.push_back(msg);
+            messages.push_back(build_agent_message(row));
         }
 
     } catch (const std::exception& e) {
@@ -884,6 +1021,160 @@ std::vector<AgentMessage> InterAgentCommunicator::query_messages(const std::stri
     }
 
     return messages;
+}
+
+std::optional<AgentMessage> InterAgentCommunicator::get_message_by_id(const std::string& message_id) {
+    try {
+        auto result = db_conn_->execute_query(
+            "SELECT message_id, from_agent_id, to_agent_id, message_type, content, "
+            "priority, status, created_at, delivered_at, acknowledged_at, read_at, "
+            "retry_count, max_retries, expires_at, error_message, correlation_id, "
+            "parent_message_id, conversation_id "
+            "FROM agent_messages WHERE message_id = $1 LIMIT 1",
+            {message_id}
+        );
+
+        if (!result.rows.empty()) {
+            return build_agent_message(result.rows.front());
+        }
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in get_message_by_id: {}", e.what());
+    }
+
+    return std::nullopt;
+}
+
+bool InterAgentCommunicator::update_message_delivery_status(
+    const std::string& message_id,
+    const std::string& status,
+    const std::optional<std::chrono::system_clock::time_point>& timestamp
+) {
+    if (!is_valid_status(status)) {
+        spdlog::error("Attempted to set invalid message status '{}'", status);
+        return false;
+    }
+
+    try {
+        pqxx::work txn(*db_conn_);
+        pqxx::result result;
+
+        const auto effective_ts = timestamp.value_or(Clock::now());
+        const std::string ts_value = format_timestamp(effective_ts);
+
+        if (status == "delivered") {
+            result = txn.exec_params(
+                "UPDATE agent_messages SET status = $1, delivered_at = $2::timestamptz, updated_at = NOW() WHERE message_id = $3",
+                status, ts_value, message_id
+            );
+        } else if (status == "acknowledged") {
+            result = txn.exec_params(
+                "UPDATE agent_messages SET status = $1, acknowledged_at = $2::timestamptz, updated_at = NOW() WHERE message_id = $3",
+                status, ts_value, message_id
+            );
+        } else if (status == "read") {
+            result = txn.exec_params(
+                "UPDATE agent_messages SET status = $1, read_at = $2::timestamptz, updated_at = NOW() WHERE message_id = $3",
+                status, ts_value, message_id
+            );
+        } else {
+            result = txn.exec_params(
+                "UPDATE agent_messages SET status = $1, updated_at = NOW() WHERE message_id = $2",
+                status, message_id
+            );
+        }
+
+        txn.commit();
+
+        bool updated = result.affected_rows() > 0;
+        if (!updated) {
+            spdlog::warn("Message {} status update to '{}' affected 0 rows", message_id, status);
+        }
+        return updated;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in update_message_delivery_status: {}", e.what());
+        return false;
+    }
+}
+
+std::optional<AgentMessage> InterAgentCommunicator::fetch_next_pending_message() {
+    try {
+        auto messages = query_messages(
+            "status = 'pending' AND (expires_at IS NULL OR expires_at > NOW())",
+            1
+        );
+        if (!messages.empty()) {
+            return messages.front();
+        }
+    } catch (const std::exception& e) {
+        spdlog::error("Exception in fetch_next_pending_message: {}", e.what());
+    }
+    return std::nullopt;
+}
+
+MessageDeliveryResult InterAgentCommunicator::attempt_delivery(const AgentMessage& message) {
+    MessageDeliveryResult result;
+    result.message_id = message.message_id;
+    result.retry_count = message.retry_count;
+
+    try {
+        auto delivered_ts = Clock::now();
+
+        if (!update_message_delivery_status(message.message_id, "delivered", delivered_ts)) {
+            result.error_message = "Failed to update delivery status";
+            result.will_retry = message.retry_count + 1 < message.max_retries;
+            return result;
+        }
+
+        if (message.to_agent_id && !message.to_agent_id->empty()) {
+            pqxx::work txn(*db_conn_);
+            txn.exec_params(
+                "INSERT INTO message_deliveries (message_id, agent_id, delivered_at, status) "
+                "VALUES ($1, $2, $3::timestamptz, 'delivered') "
+                "ON CONFLICT (message_id, agent_id) DO UPDATE SET delivered_at = EXCLUDED.delivered_at, status = 'delivered'",
+                message.message_id,
+                *message.to_agent_id,
+                format_timestamp(delivered_ts)
+            );
+            txn.commit();
+        }
+
+        spdlog::debug("Message {} delivered to {}", message.message_id,
+                      message.to_agent_id ? *message.to_agent_id : std::string("broadcast"));
+
+        result.success = true;
+        return result;
+
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.error_message = e.what();
+        result.will_retry = message.retry_count + 1 < message.max_retries;
+        return result;
+    }
+}
+
+void InterAgentCommunicator::handle_delivery_failure(
+    const AgentMessage& message,
+    const std::string& error_code,
+    const std::string& error_message
+) {
+    spdlog::warn("Delivery failed for message {}: {}", message.message_id, error_message);
+    log_delivery_attempt(message.message_id, message.retry_count + 1, error_code, error_message);
+
+    update_message_status(message.message_id, "failed", error_message);
+
+    if (message.retry_count + 1 >= message.max_retries) {
+        spdlog::error("Message {} reached max retries ({}). Marking as failed.",
+                      message.message_id, message.max_retries);
+        return;
+    }
+
+    if (retry_failed_message(message.message_id)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        message_queue_.push(message.message_id);
+        cv_.notify_one();
+    }
 }
 
 bool InterAgentCommunicator::validate_message_content(const std::string& message_type, const nlohmann::json& content) {
@@ -919,27 +1210,49 @@ void InterAgentCommunicator::message_processor_loop() {
 
     while (processor_running_) {
         try {
-            std::string message_id;
+            std::optional<AgentMessage> message;
 
+            std::string queued_message_id;
             {
-                std::unique_lock<std::mutex> lock(mutex_);
-                cv_.wait_for(lock, std::chrono::seconds(5), [this]() {
-                    return !message_queue_.empty() || !processor_running_;
-                });
-
-                if (!processor_running_) break;
-
+                std::lock_guard<std::mutex> lock(mutex_);
                 if (!message_queue_.empty()) {
-                    message_id = message_queue_.front();
+                    queued_message_id = message_queue_.front();
                     message_queue_.pop();
-                } else {
+                }
+            }
+
+            if (!queued_message_id.empty()) {
+                message = get_message_by_id(queued_message_id);
+                if (!message) {
+                    spdlog::warn("Queued message {} could not be loaded", queued_message_id);
+                    continue;
+                }
+            } else {
+                auto now = Clock::now();
+                if (now - last_queue_refresh_ >= queue_refresh_interval_) {
+                    message = fetch_next_pending_message();
+                    last_queue_refresh_ = now;
+                }
+
+                if (!message) {
+                    std::unique_lock<std::mutex> lock(mutex_);
+                    cv_.wait_for(lock, queue_refresh_interval_, [this]() {
+                        return !message_queue_.empty() || !processor_running_;
+                    });
                     continue;
                 }
             }
 
-            if (!message_id.empty()) {
-                // Process the message (mark as delivered, etc.)
-                update_message_delivery_status(message_id, "delivered");
+            auto delivery_result = attempt_delivery(*message);
+            if (!delivery_result.success) {
+                handle_delivery_failure(
+                    *message,
+                    "DELIVERY_ERROR",
+                    delivery_result.error_message.empty() ? "Unknown delivery failure" : delivery_result.error_message
+                );
+            } else if (queued_message_id.empty()) {
+                // Allow immediate follow-up pulls from backlog when we sourced directly from the database
+                last_queue_refresh_ = Clock::now() - queue_refresh_interval_;
             }
 
         } catch (const std::exception& e) {

@@ -13,7 +13,7 @@ namespace regulens {
 PolicyGenerationAPIHandlers::PolicyGenerationAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<PolicyGenerationService> policy_service
-) : db_conn_(db_conn), policy_service_(policy_service) {
+) : db_conn_(db_conn), policy_service_(policy_service), access_control_(db_conn) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for PolicyGenerationAPIHandlers");
@@ -481,13 +481,52 @@ bool PolicyGenerationAPIHandlers::validate_generation_request(const nlohmann::js
 }
 
 bool PolicyGenerationAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation) {
-    // TODO: Implement proper access control based on user roles and permissions
-    return !user_id.empty();
+    if (user_id.empty() || operation.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    std::vector<AccessControlService::PermissionQuery> queries = {
+        {operation, "policy_generation", "", 0},
+        {operation, "policy_rule", "", 0},
+        {operation, "policy_template", "", 0},
+        {"manage_policy_generation", "", "", 0},
+        {operation, "", "", 0}
+    };
+
+    if (operation.find("rule") != std::string::npos) {
+        queries.push_back({"manage_policy_rules", "policy_rule", "", 0});
+    }
+    if (operation.find("template") != std::string::npos) {
+        queries.push_back({"manage_policy_templates", "policy_template", "", 0});
+    }
+    if (operation.find("stats") != std::string::npos || operation.find("analytics") != std::string::npos) {
+        queries.push_back({"view_policy_generation_metrics", "", "", 0});
+    }
+
+    return access_control_.has_any_permission(user_id, queries);
 }
 
 bool PolicyGenerationAPIHandlers::validate_rule_ownership(const std::string& rule_id, const std::string& user_id) {
-    // TODO: Implement proper ownership validation
-    return true;
+    if (rule_id.empty() || user_id.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    std::vector<AccessControlService::PermissionQuery> ownership_checks = {
+        {"manage_rule", "policy_rule", rule_id, 0},
+        {"manage_policy_rules", "policy_rule", rule_id, 0},
+        {"manage_rule", "policy_rule", "*", 0},
+        {"manage_policy_rules", "policy_rule", "*", 0}
+    };
+
+    return access_control_.has_any_permission(user_id, ownership_checks);
 }
 
 std::unordered_map<std::string, std::string> PolicyGenerationAPIHandlers::parse_query_params(const std::string& query_string) {

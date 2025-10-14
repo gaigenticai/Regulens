@@ -17,12 +17,14 @@
 
 namespace regulens {
 
+#ifndef REGULENS_TOOL_CATEGORY_ENUM_DEFINED
 enum class ToolCategory {
     ANALYTICS,
     WORKFLOW,
     SECURITY,
     MONITORING
 };
+#endif
 
 enum class AnalyticsToolType {
     DATA_ANALYZER,
@@ -358,6 +360,7 @@ private:
 // TOOL REGISTRY AND FACTORY
 // ============================================================================
 
+#ifndef REGULENS_TOOL_REGISTRY_DEFINED
 class ToolRegistry {
 public:
     static ToolRegistry& get_instance();
@@ -380,6 +383,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<Tool>> tools_;
     std::mutex registry_mutex_;
 };
+#endif
 
 } // namespace regulens
 

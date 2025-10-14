@@ -9,9 +9,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "policy_generation_service.hpp"
 #include "../database/postgresql_connection.hpp"
+#include "../security/access_control_service.hpp"
 
 namespace regulens {
 
@@ -55,6 +57,7 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<PolicyGenerationService> policy_service_;
+    AccessControlService access_control_;
 
     // Helper methods
     PolicyGenerationRequest parse_generation_request(const nlohmann::json& request);

@@ -7,6 +7,8 @@
 
 #include "web_ui_handlers.hpp"
 #include <nlohmann/json.hpp>
+#include <chrono>
+#include <ctime>
 #include <sstream>
 #include <iomanip>
 #include <pqxx/pqxx>
@@ -26,6 +28,79 @@ static std::optional<std::string> get_query_param(const regulens::HTTPRequest& r
         return it->second;
     }
     return std::nullopt;
+}
+
+static std::string to_iso8601(const std::chrono::system_clock::time_point& timestamp) {
+    auto time = std::chrono::system_clock::to_time_t(timestamp);
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm, &time);
+#else
+    gmtime_r(&time, &tm);
+#endif
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    return oss.str();
+}
+
+static std::vector<std::string> parse_pg_text_array(const std::string& raw) {
+    std::vector<std::string> values;
+    if (raw.empty() || raw == "{}") {
+        return values;
+    }
+
+    std::string content = raw;
+    if (content.front() == '{' && content.back() == '}') {
+        content = content.substr(1, content.size() - 2);
+    }
+
+    std::string buffer;
+    bool in_quotes = false;
+    for (size_t i = 0; i < content.size(); ++i) {
+        char c = content[i];
+        if (c == '"' && (i == 0 || content[i - 1] != '\\')) {
+            in_quotes = !in_quotes;
+        } else if (c == ',' && !in_quotes) {
+            if (!buffer.empty()) {
+                if (buffer.front() == '"' && buffer.back() == '"') {
+                    buffer = buffer.substr(1, buffer.size() - 2);
+                }
+                std::string value;
+                value.reserve(buffer.size());
+                for (size_t j = 0; j < buffer.size(); ++j) {
+                    if (buffer[j] == '\\' && j + 1 < buffer.size()) {
+                        ++j;
+                        value.push_back(buffer[j]);
+                    } else {
+                        value.push_back(buffer[j]);
+                    }
+                }
+                values.push_back(value);
+            }
+            buffer.clear();
+        } else {
+            buffer.push_back(c);
+        }
+    }
+
+    if (!buffer.empty()) {
+        if (buffer.front() == '"' && buffer.back() == '"') {
+            buffer = buffer.substr(1, buffer.size() - 2);
+        }
+        std::string value;
+        value.reserve(buffer.size());
+        for (size_t j = 0; j < buffer.size(); ++j) {
+            if (buffer[j] == '\\' && j + 1 < buffer.size()) {
+                ++j;
+                value.push_back(buffer[j]);
+            } else {
+                value.push_back(buffer[j]);
+            }
+        }
+        values.push_back(value);
+    }
+
+    return values;
 }
 
 namespace regulens {
@@ -10599,6 +10674,322 @@ std::string WebUIHandlers::generate_embeddings_html() const {
 
 // ===== MULTI-AGENT COMMUNICATION HANDLERS =====
 
+HTTPResponse WebUIHandlers::handle_communication_overview(const HTTPRequest& request) {
+    if (!validate_request(request) || request.method != "GET") {
+        return create_error_response(400, "Invalid request");
+    }
+
+    auto agent_param = get_query_param(request, "agent_id");
+    auto limit_param = get_query_param(request, "limit");
+    auto hours_param = get_query_param(request, "hours");
+    auto consensus_limit_param = get_query_param(request, "consensus_limit");
+
+    int message_limit = 25;
+    if (limit_param) {
+        try {
+            message_limit = std::clamp(std::stoi(*limit_param), 1, 200);
+        } catch (...) {
+            message_limit = 25;
+        }
+    }
+
+    int consensus_limit = 5;
+    if (consensus_limit_param) {
+        try {
+            consensus_limit = std::clamp(std::stoi(*consensus_limit_param), 1, 50);
+        } catch (...) {
+            consensus_limit = 5;
+        }
+    }
+
+    std::optional<std::string> agent_filter;
+    if (agent_param && !agent_param->empty()) {
+        agent_filter = *agent_param;
+    }
+
+    std::optional<std::chrono::hours> horizon;
+    if (hours_param) {
+        try {
+            int hours = std::stoi(*hours_param);
+            horizon = std::chrono::hours(std::clamp(hours, 1, 24 * 14));
+        } catch (...) {
+            horizon.reset();
+        }
+    }
+
+    nlohmann::json response = {
+        {"status", "success"},
+        {"generated_at", to_iso8601(std::chrono::system_clock::now())},
+        {"filters", {
+            {"agent_id", agent_filter ? *agent_filter : ""},
+            {"limit", message_limit},
+            {"hours", horizon ? horizon->count() : nlohmann::json()},
+            {"consensus_limit", consensus_limit}
+        }},
+        {"communication", nlohmann::json::object()},
+        {"messages", nlohmann::json::array()},
+        {"consensus", nlohmann::json::object()}
+    };
+
+    if (inter_agent_communicator_) {
+        try {
+            auto stats = inter_agent_communicator_->get_communication_stats(agent_filter, horizon);
+            response["communication"]["messaging"] = {
+                {"total_sent", stats.total_messages_sent},
+                {"total_delivered", stats.total_messages_delivered},
+                {"total_failed", stats.total_messages_failed},
+                {"pending", stats.pending_messages},
+                {"active_conversations", stats.active_conversations},
+                {"average_delivery_time_ms", stats.average_delivery_time_ms},
+                {"delivery_success_rate", stats.delivery_success_rate}
+            };
+
+            if (agent_filter) {
+                auto pending_messages = inter_agent_communicator_->get_pending_messages(*agent_filter, message_limit);
+                nlohmann::json messages_json = nlohmann::json::array();
+                messages_json.reserve(pending_messages.size());
+                for (const auto& message : pending_messages) {
+                    nlohmann::json message_json = {
+                        {"message_id", message.message_id},
+                        {"from_agent", message.from_agent_id},
+                        {"to_agent", message.to_agent_id ? message.to_agent_id.value() : std::string("broadcast")},
+                        {"message_type", message.message_type},
+                        {"priority", message.priority},
+                        {"status", message.status},
+                        {"created_at", to_iso8601(message.created_at)},
+                        {"content", message.content},
+                        {"retry_count", message.retry_count},
+                        {"max_retries", message.max_retries},
+                        {"correlation_id", message.correlation_id ? nlohmann::json(*message.correlation_id) : nlohmann::json(nullptr)},
+                        {"conversation_id", message.conversation_id ? nlohmann::json(*message.conversation_id) : nlohmann::json(nullptr)}
+                    };
+
+                    message_json["delivered_at"] = message.delivered_at ? nlohmann::json(to_iso8601(*message.delivered_at)) : nlohmann::json(nullptr);
+                    message_json["acknowledged_at"] = message.acknowledged_at ? nlohmann::json(to_iso8601(*message.acknowledged_at)) : nlohmann::json(nullptr);
+                    message_json["expires_at"] = message.expires_at ? nlohmann::json(to_iso8601(*message.expires_at)) : nlohmann::json(nullptr);
+
+                    messages_json.push_back(std::move(message_json));
+                }
+                response["messages"] = std::move(messages_json);
+            }
+        } catch (const std::exception& e) {
+            if (logger_) {
+                logger_->warn("Failed to gather messaging overview: {}", e.what());
+            }
+            response["communication"]["messaging_error"] = e.what();
+        }
+    } else {
+        response["communication"]["messaging"] = {
+            {"status", "not_available"}
+        };
+    }
+
+    if (communication_mediator_) {
+        try {
+            auto conversation_stats = communication_mediator_->get_conversation_stats();
+            nlohmann::json conv_stats_json = nlohmann::json::object();
+            for (const auto& [key, value] : conversation_stats) {
+                conv_stats_json[key] = value;
+            }
+            response["communication"]["conversations"] = std::move(conv_stats_json);
+        } catch (const std::exception& e) {
+            if (logger_) {
+                logger_->warn("Failed to gather conversation stats: {}", e.what());
+            }
+            response["communication"]["conversations_error"] = e.what();
+        }
+    } else {
+        response["communication"]["conversations"] = {
+            {"status", "not_available"}
+        };
+    }
+
+    if (consensus_engine_) {
+        try {
+            auto consensus_stats = consensus_engine_->get_consensus_statistics();
+            nlohmann::json stats_json = nlohmann::json::object();
+            for (const auto& [key, value] : consensus_stats) {
+                stats_json[key] = value;
+            }
+            response["consensus"]["statistics"] = std::move(stats_json);
+        } catch (const std::exception& e) {
+            if (logger_) {
+                logger_->warn("Failed to gather consensus statistics: {}", e.what());
+            }
+            response["consensus"]["statistics_error"] = e.what();
+        }
+    } else {
+        response["consensus"]["statistics"] = {
+            {"status", "not_available"}
+        };
+    }
+
+    try {
+        response["consensus"]["sessions"] = build_consensus_sessions_snapshot(consensus_limit);
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Failed to build consensus snapshot: {}", e.what());
+        }
+        response["consensus"]["sessions_error"] = e.what();
+    }
+
+    return create_json_response(response.dump(2));
+}
+
+HTTPResponse WebUIHandlers::handle_communication_consensus(const HTTPRequest& request) {
+    if (!validate_request(request) || request.method != "GET") {
+        return create_error_response(400, "Invalid request");
+    }
+
+    auto limit_param = get_query_param(request, "limit");
+    int limit = 10;
+    if (limit_param) {
+        try {
+            limit = std::clamp(std::stoi(*limit_param), 1, 100);
+        } catch (...) {
+            limit = 10;
+        }
+    }
+
+    try {
+        auto sessions = build_consensus_sessions_snapshot(limit);
+        nlohmann::json response = {
+            {"status", "success"},
+            {"count", sessions.size()},
+            {"consensus", std::move(sessions)},
+            {"generated_at", to_iso8601(std::chrono::system_clock::now())}
+        };
+        return create_json_response(response.dump(2));
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->error("Failed to retrieve consensus overview: {}", e.what());
+        }
+        return create_error_response(500, std::string("Failed to retrieve consensus sessions: ") + e.what());
+    }
+}
+
+nlohmann::json WebUIHandlers::build_consensus_sessions_snapshot(int limit) {
+    nlohmann::json sessions = nlohmann::json::array();
+
+    if (limit <= 0) {
+        return sessions;
+    }
+
+    limit = std::min(limit, 100);
+
+    std::shared_ptr<PostgreSQLConnection> connection = db_connection_;
+    bool release_connection = false;
+
+    if ((!connection || !connection->is_connected()) && db_pool_) {
+        connection = db_pool_->get_connection();
+        release_connection = true;
+    }
+
+    if (!connection || !connection->is_connected()) {
+        if (release_connection && db_pool_ && connection) {
+            db_pool_->return_connection(connection);
+        }
+        return sessions;
+    }
+
+    try {
+        static const std::string query = R"(
+            SELECT
+                cs.consensus_id,
+                cs.topic,
+                cs.description,
+                cs.participants,
+                cs.status,
+                cs.consensus_threshold,
+                cs.updated_at,
+                cs.created_at,
+                cr.final_decision,
+                cr.agreement_percentage,
+                cr.total_participants,
+                cr.confidence_level,
+                cr.reached_at
+            FROM consensus_sessions cs
+            LEFT JOIN consensus_results cr ON cr.consensus_id = cs.consensus_id
+            ORDER BY cs.updated_at DESC NULLS LAST, cs.created_at DESC
+            LIMIT $1
+        )";
+
+        auto rows = connection->execute_query_multi(query, {std::to_string(limit)});
+
+        for (const auto& row : rows) {
+            nlohmann::json session = {
+                {"consensus_id", row.value("consensus_id", "")},
+                {"topic", row.value("topic", "")},
+                {"status", row.value("status", "unknown")},
+                {"final_decision", row.value("final_decision", "")},
+                {"confidence_level", row.value("confidence_level", "")},
+                {"description", row.value("description", "")}
+            };
+
+            const std::string participants_raw = row.value("participants", "");
+            session["participants"] = participants_raw.empty() ? nlohmann::json::array()
+                                                                 : nlohmann::json(parse_pg_text_array(participants_raw));
+
+            const std::string agreement_raw = row.value("agreement_percentage", "");
+            if (!agreement_raw.empty()) {
+                try {
+                    session["agreement_level"] = std::stod(agreement_raw);
+                } catch (...) {
+                    session["agreement_level"] = nullptr;
+                }
+            } else {
+                session["agreement_level"] = nullptr;
+            }
+
+            const std::string threshold_raw = row.value("consensus_threshold", "");
+            if (!threshold_raw.empty()) {
+                try {
+                    session["consensus_threshold"] = std::stod(threshold_raw);
+                } catch (...) {
+                    session["consensus_threshold"] = nullptr;
+                }
+            } else {
+                session["consensus_threshold"] = nullptr;
+            }
+
+            const std::string participants_count_raw = row.value("total_participants", "");
+            if (!participants_count_raw.empty()) {
+                try {
+                    session["total_participants"] = std::stoi(participants_count_raw);
+                } catch (...) {
+                    session["total_participants"] = nullptr;
+                }
+            } else {
+                session["total_participants"] = nullptr;
+            }
+
+            const std::string reached_at = row.value("reached_at", "");
+            const std::string updated_at = row.value("updated_at", "");
+            const std::string created_at = row.value("created_at", "");
+
+            if (!reached_at.empty()) {
+                session["timestamp"] = reached_at;
+            } else if (!updated_at.empty()) {
+                session["timestamp"] = updated_at;
+            } else {
+                session["timestamp"] = created_at;
+            }
+
+            sessions.push_back(std::move(session));
+        }
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Failed to query consensus sessions: {}", e.what());
+        }
+    }
+
+    if (release_connection && db_pool_ && connection) {
+        db_pool_->return_connection(connection);
+    }
+
+    return sessions;
+}
+
 HTTPResponse WebUIHandlers::handle_multi_agent_dashboard(const HTTPRequest& request) {
     if (!validate_request(request)) {
         return create_error_response(400, "Invalid request");
@@ -10740,17 +11131,18 @@ HTTPResponse WebUIHandlers::handle_agent_message_broadcast(const HTTPRequest& re
         int priority = request_data.value("priority", 3);
 
         // Broadcast message
-        bool success = inter_agent_communicator_->broadcast_message(
+        auto message_id = inter_agent_communicator_->broadcast_message(
             from_agent, message_type, content, priority
         );
 
-        if (!success) {
+        if (!message_id) {
             return create_error_response(500, "Failed to broadcast message");
         }
 
         nlohmann::json response = {
             {"success", true},
             {"status", "broadcast"},
+            {"message_id", *message_id},
             {"message", "Message broadcast successfully"}
         };
 

@@ -12,6 +12,7 @@
 #include <memory>
 #include <chrono>
 #include <thread>
+#include <atomic>
 #include <nlohmann/json.hpp>
 #include <mutex>
 #include <condition_variable>
@@ -66,7 +67,7 @@ public:
         const std::optional<std::chrono::hours>& expiry_hours = std::nullopt
     );
 
-    bool send_message_async(
+    std::optional<std::string> send_message_async(
         const std::string& from_agent,
         const std::string& to_agent,
         const std::string& message_type,
@@ -77,7 +78,7 @@ public:
         const std::optional<std::chrono::hours>& expiry_hours = std::nullopt
     );
 
-    bool broadcast_message(
+    std::optional<std::string> broadcast_message(
         const std::string& from_agent,
         const std::string& message_type,
         const nlohmann::json& content,
@@ -196,6 +197,10 @@ private:
     std::atomic<bool> processor_running_;
     std::thread processor_thread_;
 
+    // Scheduler state
+    std::chrono::system_clock::time_point last_queue_refresh_{std::chrono::system_clock::now()};
+    const std::chrono::seconds queue_refresh_interval_{std::chrono::seconds(5)};
+
     // Configuration
     int max_retries_ = 3;
     std::chrono::seconds retry_delay_ = std::chrono::seconds(30);
@@ -209,6 +214,11 @@ private:
     bool update_message_delivery_status(const std::string& message_id,
                                       const std::string& status,
                                       const std::optional<std::chrono::system_clock::time_point>& timestamp = std::nullopt);
+    std::optional<AgentMessage> fetch_next_pending_message();
+    MessageDeliveryResult attempt_delivery(const AgentMessage& message);
+    void handle_delivery_failure(const AgentMessage& message,
+                                 const std::string& error_code,
+                                 const std::string& error_message);
     void log_delivery_attempt(const std::string& message_id,
                              int attempt_number,
                              const std::string& error_code = "",

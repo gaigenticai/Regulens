@@ -192,16 +192,17 @@ std::string InterAgentAPIHandlers::handle_broadcast_message(
         }
 
         // Send broadcast
-        bool success = communicator_->broadcast_message(
+        auto message_id = communicator_->broadcast_message(
             from_agent, message_type, content, priority,
             excluded_agents, correlation_id, expiry_hours
         );
 
-        if (success) {
+        if (message_id) {
             return create_success_response({
                 {"status", "broadcast_sent"},
                 {"from_agent", from_agent},
-                {"message_type", message_type}
+                {"message_type", message_type},
+                {"message_id", *message_id}
             }).dump();
         } else {
             return create_error_response("Failed to send broadcast message", 500).dump();

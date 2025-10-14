@@ -279,6 +279,16 @@ bool PostgreSQLConnection::ping() {
     return success;
 }
 
+PGconn* PostgreSQLConnection::get_connection() {
+    std::lock_guard<std::mutex> lock(connection_mutex_);
+    
+    if (!connected_) {
+        return nullptr;
+    }
+    
+    return connection_;
+}
+
 nlohmann::json PostgreSQLConnection::get_connection_stats() const {
     return {
         {"connected", connected_.load()},

@@ -201,15 +201,11 @@ private:
 
         // API: Communication
         web_ui_server_->add_route("GET", "/api/communication", [this](const HTTPRequest& req) {
-            nlohmann::json response = {
-                {"messages", nlohmann::json::array({
-                    {{"from", "Transaction Guardian"}, {"to", "Decision Engine"}, {"from_icon", "🛡️"},
-                     {"message", "Request: Risk assessment for TXN-789456 ($45,000)"}, {"time", "14:35:10"}},
-                    {{"from", "Decision Engine"}, {"to", "Transaction Guardian"}, {"from_icon", "⚖️"},
-                     {"message", "Response: APPROVED (95% confidence)"}, {"time", "14:35:12"}}
-                })}
-            };
-            return HTTPResponse(200, "OK", response.dump(), "application/json");
+            return web_ui_handlers_->handle_communication_overview(req);
+        });
+
+        web_ui_server_->add_route("GET", "/api/communication/consensus", [this](const HTTPRequest& req) {
+            return web_ui_handlers_->handle_communication_consensus(req);
         });
 
         // =============================================================================

@@ -44,6 +44,9 @@ enum class ToolCategory {
     WEB_SEARCH,        // Web search and information retrieval
     MCP_TOOLS         // Model Context Protocol tools
 };
+#ifndef REGULENS_TOOL_CATEGORY_ENUM_DEFINED
+#define REGULENS_TOOL_CATEGORY_ENUM_DEFINED
+#endif
 
 // Tool Capabilities - what operations the tool supports
 enum class ToolCapability {
@@ -230,6 +233,9 @@ private:
     bool persist_tool_config(const ToolConfig& config);
     bool load_tool_configs();
 };
+#ifndef REGULENS_TOOL_REGISTRY_DEFINED
+#define REGULENS_TOOL_REGISTRY_DEFINED
+#endif
 
 // Tool Factory - Creates tool instances from configuration
 class ToolFactory {

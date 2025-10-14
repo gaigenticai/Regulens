@@ -199,6 +199,8 @@ public:
     HTTPResponse handle_risk_export(const HTTPRequest& request);
 
     // Multi-Agent Communication handlers
+    HTTPResponse handle_communication_overview(const HTTPRequest& request);
+    HTTPResponse handle_communication_consensus(const HTTPRequest& request);
     HTTPResponse handle_multi_agent_dashboard(const HTTPRequest& request);
     HTTPResponse handle_agent_message_send(const HTTPRequest& request);
     HTTPResponse handle_agent_message_receive(const HTTPRequest& request);
@@ -387,6 +389,8 @@ private:
     std::string generate_config_json() const;
     std::string generate_metrics_json() const;
     std::string generate_health_json() const;
+
+    nlohmann::json build_consensus_sessions_snapshot(int limit);
 
     // Audit data collection
     nlohmann::json collect_audit_data() const;

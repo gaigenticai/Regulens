@@ -68,6 +68,9 @@ public:
     bool ping();
     nlohmann::json get_connection_stats() const;
     
+    // Raw connection access for advanced operations
+    PGconn* get_connection();
+    
     // Pool-style methods for health monitoring (when used with ConnectionPool)
     int get_pool_size() const;
     int get_active_connections() const;

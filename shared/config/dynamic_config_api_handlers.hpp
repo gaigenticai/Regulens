@@ -9,9 +9,11 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <nlohmann/json.hpp>
 #include "dynamic_config_manager.hpp"
 #include "../database/postgresql_connection.hpp"
+#include "../security/access_control_service.hpp"
 
 namespace regulens {
 
@@ -69,6 +71,7 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<DynamicConfigManager> config_manager_;
+    AccessControlService access_control_;
 
     // Helper methods
     ConfigScope parse_scope_param(const std::string& scope_str);

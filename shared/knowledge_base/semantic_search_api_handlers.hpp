@@ -8,9 +8,11 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 #include <nlohmann/json.hpp>
 #include "vector_knowledge_base.hpp"
 #include "../database/postgresql_connection.hpp"
+#include "../security/access_control_service.hpp"
 
 namespace regulens {
 
@@ -43,11 +45,17 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<VectorKnowledgeBase> knowledge_base_;
+    AccessControlService access_control_;
 
     // Helper methods
     SemanticQuery parse_search_request(const nlohmann::json& request);
     nlohmann::json format_search_results(const std::vector<QueryResult>& results);
     nlohmann::json format_search_result(const QueryResult& result);
+    KnowledgeDomain domain_from_string(const std::string& domain_str) const;
+    KnowledgeType knowledge_type_from_string(const std::string& type_str) const;
+    std::vector<std::string> parse_tag_array(const std::string& tags_str) const;
+    std::vector<std::string> extract_keyword_matches(const std::string& query, const std::string& content) const;
+    std::vector<QueryResult> perform_keyword_search(const SemanticQuery& query_config);
 
     // Validation methods
     bool validate_search_request(const nlohmann::json& request, std::string& error_message);

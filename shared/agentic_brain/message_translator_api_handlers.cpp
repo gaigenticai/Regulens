@@ -12,7 +12,7 @@ namespace regulens {
 MessageTranslatorAPIHandlers::MessageTranslatorAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<MessageTranslator> translator
-) : db_conn_(db_conn), translator_(translator) {
+) : db_conn_(db_conn), translator_(translator), access_control_(db_conn) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for MessageTranslatorAPIHandlers");
@@ -485,13 +485,35 @@ bool MessageTranslatorAPIHandlers::validate_batch_request(const nlohmann::json& 
 }
 
 bool MessageTranslatorAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation) {
-    // TODO: Implement proper access control based on user roles and permissions
-    return !user_id.empty();
+    if (user_id.empty() || operation.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    std::vector<AccessControlService::PermissionQuery> queries = {
+        {operation, "message_translation", "", 0},
+        {operation, "protocol_translation", "", 0},
+        {operation, "translation_rule", "", 0},
+        {"manage_message_translation", "", "", 0},
+        {"manage_translation_rules", "", "", 0},
+        {operation, "", "", 0}
+    };
+
+    if (operation.find("rule") != std::string::npos) {
+        queries.push_back({"manage_translation_rules", "message_translation", "", 0});
+    }
+    if (operation.find("stats") != std::string::npos) {
+        queries.push_back({"view_translation_metrics", "", "", 0});
+    }
+
+    return access_control_.has_any_permission(user_id, queries);
 }
 
 bool MessageTranslatorAPIHandlers::is_admin_user(const std::string& user_id) {
-    // TODO: Implement proper admin user checking
-    return user_id == "admin" || user_id == "system";
+    return access_control_.is_admin(user_id);
 }
 
 nlohmann::json MessageTranslatorAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {

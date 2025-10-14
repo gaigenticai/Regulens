@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 #include "communication_mediator.hpp"
 #include "../../database/postgresql_connection.hpp"
+#include "../../security/access_control_service.hpp"
 
 namespace regulens {
 
@@ -65,6 +66,7 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<CommunicationMediator> mediator_;
+    AccessControlService access_control_;
 
     // Helper methods
     ConversationContext parse_conversation_context(const nlohmann::json& request);

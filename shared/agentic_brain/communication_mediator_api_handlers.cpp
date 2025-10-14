@@ -6,13 +6,17 @@
 #include "communication_mediator_api_handlers.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 namespace regulens {
 
 CommunicationMediatorAPIHandlers::CommunicationMediatorAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<CommunicationMediator> mediator
-) : db_conn_(db_conn), mediator_(mediator) {
+) : db_conn_(db_conn), mediator_(mediator), access_control_(db_conn) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for CommunicationMediatorAPIHandlers");
@@ -288,11 +292,22 @@ std::string CommunicationMediatorAPIHandlers::handle_get_conversation_stats(cons
         auto agent_metrics = mediator_->get_agent_participation_metrics();
         auto conflict_stats = mediator_->get_conflict_resolution_stats();
 
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+        std::tm utc_tm{};
+#if defined(_WIN32)
+        gmtime_s(&utc_tm, &now_time);
+#else
+        gmtime_r(&now_time, &utc_tm);
+#endif
+        std::ostringstream timestamp_stream;
+        timestamp_stream << std::put_time(&utc_tm, "%Y-%m-%dT%H:%M:%SZ");
+
         nlohmann::json response_data = {
             {"conversation_stats", format_conversation_stats(stats)},
             {"agent_participation", format_agent_metrics(agent_metrics)},
             {"conflict_resolution", format_conflict_stats(conflict_stats)},
-            {"generated_at", "2024-01-15T10:30:00Z"}
+            {"generated_at", timestamp_stream.str()}
         };
 
         return create_success_response(response_data).dump();
@@ -518,23 +533,45 @@ bool CommunicationMediatorAPIHandlers::validate_message_request(const nlohmann::
 }
 
 bool CommunicationMediatorAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation, const std::string& resource_id) {
-    // TODO: Implement proper access control based on user roles and permissions
-    return !user_id.empty();
+    if (user_id.empty() || operation.empty()) {
+        return false;
+    }
+
+    if (access_control_.is_admin(user_id)) {
+        return true;
+    }
+
+    std::vector<AccessControlService::PermissionQuery> queries = {
+        {operation, "conversation", resource_id, 0},
+        {operation, "conversation", "*", 0},
+        {operation, "communication_mediator", "", 0},
+        {"manage_conversations", "", "", 0},
+        {operation, "", "", 0}
+    };
+
+    if (operation.find("message") != std::string::npos) {
+        queries.push_back({"send_conversation_message", "conversation", resource_id, 0});
+    }
+    if (operation.find("participant") != std::string::npos) {
+        queries.push_back({"manage_conversation_participants", "conversation", resource_id, 0});
+    }
+    if (operation.find("conflict") != std::string::npos || operation.find("mediate") != std::string::npos) {
+        queries.push_back({"resolve_conversation_conflicts", "conversation", resource_id, 0});
+    }
+
+    return access_control_.has_any_permission(user_id, queries);
 }
 
 bool CommunicationMediatorAPIHandlers::is_admin_user(const std::string& user_id) {
-    // TODO: Implement proper admin user checking
-    return user_id == "admin" || user_id == "system";
+    return access_control_.is_admin(user_id);
 }
 
 bool CommunicationMediatorAPIHandlers::is_conversation_participant(const std::string& user_id, const std::string& conversation_id) {
-    // TODO: Check if user is a registered participant in the conversation
-    return !user_id.empty();
+    return access_control_.is_conversation_participant(user_id, conversation_id);
 }
 
 bool CommunicationMediatorAPIHandlers::is_conversation_facilitator(const std::string& user_id, const std::string& conversation_id) {
-    // TODO: Check if user has facilitator role in the conversation
-    return is_admin_user(user_id);
+    return access_control_.is_conversation_facilitator(user_id, conversation_id);
 }
 
 bool CommunicationMediatorAPIHandlers::can_initiate_conversation(const std::string& user_id) {
@@ -542,15 +579,20 @@ bool CommunicationMediatorAPIHandlers::can_initiate_conversation(const std::stri
 }
 
 bool CommunicationMediatorAPIHandlers::can_manage_conversation(const std::string& user_id, const std::string& conversation_id) {
-    return is_conversation_facilitator(user_id, conversation_id) || is_admin_user(user_id);
+    return validate_user_access(user_id, "manage_conversation", conversation_id) ||
+           is_conversation_facilitator(user_id, conversation_id) ||
+           is_admin_user(user_id);
 }
 
 bool CommunicationMediatorAPIHandlers::can_send_message(const std::string& user_id, const std::string& conversation_id) {
-    return is_conversation_participant(user_id, conversation_id);
+    return validate_user_access(user_id, "send_message", conversation_id) &&
+           is_conversation_participant(user_id, conversation_id);
 }
 
 bool CommunicationMediatorAPIHandlers::can_resolve_conflicts(const std::string& user_id, const std::string& conversation_id) {
-    return can_manage_conversation(user_id, conversation_id);
+    return validate_user_access(user_id, "resolve_conflict", conversation_id) ||
+           is_conversation_facilitator(user_id, conversation_id) ||
+           is_admin_user(user_id);
 }
 
 nlohmann::json CommunicationMediatorAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {

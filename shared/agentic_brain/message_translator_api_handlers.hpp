@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 #include "message_translator.hpp"
 #include "../../database/postgresql_connection.hpp"
+#include "../../security/access_control_service.hpp"
 
 namespace regulens {
 
@@ -59,6 +60,7 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<MessageTranslator> translator_;
+    AccessControlService access_control_;
 
     // Helper methods
     MessageHeader parse_message_header(const nlohmann::json& request);

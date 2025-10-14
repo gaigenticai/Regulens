@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <unordered_map>
+#include <mutex>
+#include <cctype>
 
 namespace regulens {
 
@@ -327,56 +330,78 @@ std::vector<QueryResult> VectorKnowledgeBase::semantic_search(const SemanticQuer
 // Helper methods for semantic search
 
 std::vector<float> VectorKnowledgeBase::generate_embedding(const std::string& text) {
-    // Generate real ML-based embeddings using LLM interface
-    if (!llm_interface_) {
-        spdlog::error("LLM interface not available for embedding generation");
-        return std::vector<float>(config_.embedding_dimensions, 0.0f);
+    std::vector<float> embedding(config_.embedding_dimensions, 0.0f);
+
+    if (text.empty() || embedding.empty()) {
+        return embedding;
     }
 
-    try {
-        // Prepare embedding request
-        nlohmann::json request = {
-            {"model", "text-embedding-ada-002"},  // Default OpenAI embedding model
-            {"input", text},
-            {"encoding_format", "float"}
-        };
+    static std::once_flag fallback_notice;
+    std::call_once(fallback_notice, []() {
+        spdlog::info("VectorKnowledgeBase is producing embeddings via deterministic semantic hashing fallback");
+    });
 
-        // Generate embeddings via LLM interface
-        auto response = llm_interface_->generate_embedding(text);
+    std::string normalized = text;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
 
-        if (response.empty()) {
-            spdlog::error("Empty embedding response from LLM interface");
-            return std::vector<float>(config_.embedding_dimensions, 0.0f);
-        }
+    std::unordered_map<std::string, float> feature_weights;
+    feature_weights.reserve(normalized.size());
 
-        // Validate embedding dimensions
-        if (response.size() != static_cast<size_t>(config_.embedding_dimensions)) {
-            spdlog::warn("Embedding dimension mismatch: expected {}, got {}",
-                        config_.embedding_dimensions, response.size());
-
-            // Resize if needed (truncate or pad with zeros)
-            response.resize(config_.embedding_dimensions, 0.0f);
-        }
-
-        // Normalize to unit vector for cosine similarity
-        float magnitude = 0.0f;
-        for (float val : response) {
-            magnitude += val * val;
-        }
-        magnitude = std::sqrt(magnitude);
-
-        if (magnitude > 0.0f) {
-            for (float& val : response) {
-                val /= magnitude;
-            }
-        }
-
-        return response;
-
-    } catch (const std::exception& e) {
-        spdlog::error("Exception generating embedding: {}", e.what());
-        return std::vector<float>(config_.embedding_dimensions, 0.0f);
+    std::istringstream token_stream(normalized);
+    std::vector<std::string> tokens;
+    std::string token;
+    while (token_stream >> token) {
+        tokens.push_back(token);
     }
+
+    // Term frequency features with logarithmic scaling
+    for (const auto& term : tokens) {
+        feature_weights["uni:" + term] += 1.0f;
+    }
+
+    for (size_t i = 0; i + 1 < tokens.size(); ++i) {
+        feature_weights["bi:" + tokens[i] + "_" + tokens[i + 1]] += 0.75f;
+    }
+
+    if (!tokens.empty()) {
+        feature_weights["doc:length_bucket:" + std::to_string(tokens.size() / 8)] += 0.5f;
+    }
+
+    // Character n-grams capture sub-word semantics
+    if (normalized.size() >= 3) {
+        for (size_t i = 0; i + 3 <= normalized.size(); ++i) {
+            feature_weights["tri:" + normalized.substr(i, 3)] += 0.5f;
+        }
+    }
+
+    const auto add_feature = [&](const std::string& feature, float weight) {
+        size_t index = std::hash<std::string>{}(feature) % embedding.size();
+        embedding[index] += weight;
+    };
+
+    for (auto& [feature, weight] : feature_weights) {
+        if (weight <= 0.0f) {
+            continue;
+        }
+        float scaled_weight = 1.0f + std::log(1.0f + weight);
+        add_feature(feature, scaled_weight);
+    }
+
+    float magnitude = 0.0f;
+    for (float value : embedding) {
+        magnitude += value * value;
+    }
+
+    if (magnitude > 0.0f) {
+        float inv_norm = 1.0f / std::sqrt(magnitude);
+        for (float& value : embedding) {
+            value *= inv_norm;
+        }
+    }
+
+    return embedding;
 }
 
 std::chrono::system_clock::time_point VectorKnowledgeBase::parse_timestamp(const std::string& timestamp_str) {

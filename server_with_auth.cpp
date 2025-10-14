@@ -83,7 +83,9 @@ public:
     }
 
     bool validate_token(const std::string& token) {
-        // Basic validation - check if token has 3 parts and is not expired
+        // PRODUCTION-GRADE JWT VALIDATION: Verify signature using HMAC-SHA256
+        // No fallbacks or simplified validation - proper cryptographic verification required
+
         size_t first_dot = token.find('.');
         size_t second_dot = token.find('.', first_dot + 1);
 
@@ -91,19 +93,48 @@ public:
             return false;
         }
 
-        // Check expiration (basic check)
-        std::string payload = token.substr(first_dot + 1, second_dot - first_dot - 1);
-        std::string decoded = base64_url_decode(payload);
+        // Extract header, payload, and signature
+        std::string header_b64 = token.substr(0, first_dot);
+        std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+        std::string signature_b64 = token.substr(second_dot + 1);
 
-        size_t exp_pos = decoded.find("\"exp\":");
+        // Decode signature from base64url
+        std::string expected_signature = base64_url_decode(signature_b64);
+
+        // Create the signing input (header.payload)
+        std::string signing_input = header_b64 + "." + payload_b64;
+
+        // Calculate expected signature using HMAC-SHA256
+        std::string calculated_signature = hmac_sha256(secret_key_, signing_input);
+
+        // Compare signatures (constant-time comparison to prevent timing attacks)
+        if (expected_signature.length() != calculated_signature.length()) {
+            return false;
+        }
+
+        bool signatures_match = true;
+        for (size_t i = 0; i < expected_signature.length(); ++i) {
+            if (expected_signature[i] != calculated_signature[i]) {
+                signatures_match = false;
+            }
+        }
+
+        if (!signatures_match) {
+            return false; // Invalid signature
+        }
+
+        // Verify token hasn't expired
+        std::string payload_json = base64_url_decode(payload_b64);
+
+        size_t exp_pos = payload_json.find("\"exp\":");
         if (exp_pos != std::string::npos) {
             exp_pos += 6;
-            size_t end_pos = decoded.find(",}", exp_pos);
-            if (end_pos == std::string::npos) end_pos = decoded.find("}", exp_pos);
+            size_t end_pos = payload_json.find(",}", exp_pos);
+            if (end_pos == std::string::npos) end_pos = payload_json.find("}", exp_pos);
 
             if (end_pos != std::string::npos) {
                 try {
-                    int64_t exp_time = std::stoll(decoded.substr(exp_pos, end_pos - exp_pos));
+                    int64_t exp_time = std::stoll(payload_json.substr(exp_pos, end_pos - exp_pos));
                     int64_t current_time = std::time(nullptr);
                     if (current_time >= exp_time) {
                         return false; // Token expired
@@ -114,7 +145,7 @@ public:
             }
         }
 
-        return true;
+        return true; // Token is cryptographically valid and not expired
     }
 
 private:
@@ -1251,22 +1282,26 @@ public:
         jwt_secret = jwt_secret_env;
         std::cout << "✅ JWT secret loaded successfully (length: " << strlen(jwt_secret_env) << " chars)" << std::endl;
 
-        // Validate OpenAI API Key
-        const char* openai_key = std::getenv("OPENAI_API_KEY");
-        if (!openai_key || strlen(openai_key) == 0) {
-            std::cerr << "⚠️  WARNING: OPENAI_API_KEY environment variable not set" << std::endl;
-            std::cerr << "   GPT-4 text analysis and policy generation features will not work" << std::endl;
-            std::cerr << "   Set it with: export OPENAI_API_KEY='sk-...'" << std::endl;
-            // Don't exit - allow system to start but log warning
-        } else {
-            // Validate API key format (should start with sk- for OpenAI)
-            std::string key_str(openai_key);
-            if (key_str.substr(0, 3) != "sk-") {
-                std::cerr << "⚠️  WARNING: OPENAI_API_KEY doesn't look like a valid OpenAI key (should start with 'sk-')" << std::endl;
-            } else {
-                std::cout << "✅ OpenAI API key loaded (length: " << key_str.length() << " chars)" << std::endl;
-            }
+        // Initialize OpenAI API key - PRODUCTION-GRADE VALIDATION (Rule 1 compliance - NO FALLBACKS)
+        const char* openai_api_key_env = std::getenv("OPENAI_API_KEY");
+        if (!openai_api_key_env || strlen(openai_api_key_env) == 0) {
+            std::cerr << "❌ FATAL ERROR: OPENAI_API_KEY environment variable not set" << std::endl;
+            std::cerr << "   Get your API key from: https://platform.openai.com/api-keys" << std::endl;
+            std::cerr << "   Set it with: export OPENAI_API_KEY='your-openai-api-key'" << std::endl;
+            throw std::runtime_error("OPENAI_API_KEY environment variable not set");
         }
+
+        if (strlen(openai_api_key_env) < 20) {
+            std::cerr << "❌ FATAL ERROR: OPENAI_API_KEY appears to be too short (should start with 'sk-')" << std::endl;
+            throw std::runtime_error("OPENAI_API_KEY appears to be invalid");
+        }
+
+        if (std::string(openai_api_key_env).substr(0, 3) != "sk-") {
+            std::cerr << "❌ FATAL ERROR: OPENAI_API_KEY should start with 'sk-'" << std::endl;
+            throw std::runtime_error("OPENAI_API_KEY appears to be invalid");
+        }
+
+        std::cout << "✅ OpenAI API key loaded successfully (starts with: " << std::string(openai_api_key_env).substr(0, 6) << "...)" << std::endl;
 
         // Initialize regulatory monitor URL for microservice communication
         const char* monitor_url_env = std::getenv("REGULATORY_MONITOR_URL");
@@ -5056,7 +5091,7 @@ public:
                 std::string natural_language_input = req.value("natural_language_input", "");
                 std::string rule_name = req.value("rule_name", "Generated Rule");
                 std::string rule_type = req.value("rule_type", "compliance");
-                std::string created_by = req.value("created_by", "system");
+                std::string created_by = authenticated_user_id;
 
                 // Use real GPT-4 Policy Generation Service
                 if (!policy_generation_service) {
@@ -5357,7 +5392,7 @@ public:
                 nlohmann::json req = nlohmann::json::parse(body);
                 std::string name = req.value("name", "");
                 std::string simulation_type = req.value("simulation_type", "custom");
-                std::string created_by = req.value("created_by", "system");
+                std::string created_by = authenticated_user_id;
                 
                 std::stringstream uuid_ss;
                 std::random_device rd;
@@ -5568,7 +5603,7 @@ public:
                 std::string provider = req.value("provider", "");
                 std::string key_name = req.value("key_name", "");
                 std::string api_key = req.value("api_key", "");
-                std::string created_by = req.value("created_by", "system");
+                std::string created_by = authenticated_user_id;
                 int rate_limit = req.value("rate_limit_per_minute", 60);
                 
                 // Production: Encrypt the API key using AES-256-GCM
@@ -6234,7 +6269,7 @@ public:
                 std::string title = req.value("title", "");
                 std::string description = req.value("description", "");
                 std::string objective = req.value("objective", "");
-                std::string created_by = req.value("created_by", "system");
+                std::string created_by = authenticated_user_id;
                 
                 // Generate UUID
                 std::stringstream uuid_ss;
@@ -7794,11 +7829,89 @@ public:
             PQclear(context_result);
 
             // Production: Generate answer using LLM with context
-            // For now, provide a structured response format
-            std::string answer = "Based on the available knowledge base entries, " + question;
+            // Create OpenAI client for answer generation
+            auto config_manager = std::make_shared<regulens::ConfigurationManager>();
+            auto logger = std::make_shared<regulens::StructuredLogger>();
+            auto http_client = std::make_shared<regulens::HttpClient>();
+            auto redis_client = std::make_shared<regulens::RedisClient>();
+
+            auto openai_client = std::make_shared<regulens::OpenAIClient>(config_manager, logger, http_client, redis_client);
+            if (!openai_client->initialize()) {
+                PQfinish(conn);
+                return create_error_response(500, "LLM service initialization failed");
+            }
+
+            // Construct LLM prompt with context and question
+            std::string system_prompt = R"(
+You are a knowledgeable assistant specializing in regulatory compliance and risk assessment.
+Use the provided context from the knowledge base to answer the user's question accurately.
+If the context doesn't contain sufficient information to answer the question, clearly state this limitation.
+Provide well-structured, professional responses with specific references to the source materials when applicable.
+Be concise but comprehensive, and maintain a professional tone suitable for regulatory professionals.
+)";
+
+            regulens::OpenAICompletionRequest llm_request;
+            llm_request.model = "gpt-4-turbo-preview";
+            llm_request.temperature = 0.3;  // Lower temperature for more consistent, factual responses
+            llm_request.max_tokens = 1000;
+
+            // Add system message
+            llm_request.messages.push_back(regulens::OpenAIMessage("system", system_prompt));
+
+            // Add context information
+            std::string context_prompt = "Context from knowledge base:\n\n" + context_text + "\n\n";
+            llm_request.messages.push_back(regulens::OpenAIMessage("system", context_prompt));
+
+            // Add user question
+            llm_request.messages.push_back(regulens::OpenAIMessage("user", question));
+
+            // Generate answer using LLM
+            auto llm_response = openai_client->create_chat_completion(llm_request);
+            std::string answer;
             std::string answer_type = "SYNTHESIZED";
-            double confidence = 0.75;
-            std::string model_used = "internal-rag-v1";
+            double confidence = 0.5;  // Default confidence
+            std::string model_used = "gpt-4-turbo-preview";
+
+            if (llm_response.has_value() && !llm_response->choices.empty()) {
+                answer = llm_response->choices[0].message.content;
+
+                // Determine answer type based on content
+                if (answer.find("insufficient") != std::string::npos ||
+                    answer.find("limited") != std::string::npos ||
+                    answer.find("cannot determine") != std::string::npos) {
+                    answer_type = "INSUFFICIENT_CONTEXT";
+                    confidence = 0.3;
+                } else if (context_text.length() > 500 && answer.length() > 100) {
+                    answer_type = "WELL_SUPPORTED";
+                    confidence = 0.85;
+                } else {
+                    answer_type = "PARTIALLY_SUPPORTED";
+                    confidence = 0.6;
+                }
+
+                // Adjust confidence based on context relevance
+                if (!sources.empty()) {
+                    double avg_similarity = 0.0;
+                    for (const auto& source : sources) {
+                        avg_similarity += source["similarity"].get<double>();
+                    }
+                    avg_similarity /= sources.size();
+
+                    // Boost confidence if context is highly relevant
+                    if (avg_similarity > 0.8) {
+                        confidence = std::min(confidence + 0.1, 0.95);
+                    }
+                }
+            } else {
+                // Fallback if LLM fails
+                answer = "I apologize, but I'm currently unable to generate a response due to a technical issue with the language model service. The knowledge base search found " +
+                        std::to_string(sources.size()) + " relevant entries, but I cannot process them at this time.";
+                answer_type = "SERVICE_UNAVAILABLE";
+                confidence = 0.0;
+            }
+
+            // Cleanup LLM client
+            openai_client->shutdown();
 
             // Store Q&A session
             std::string session_id = generate_uuid_v4();
@@ -10150,6 +10263,349 @@ public:
                 {"success", true},
                 {"total_memories", total_memories},
                 {"by_type", stats}
+            };
+
+            return response.dump();
+
+        } catch (const std::exception& e) {
+            nlohmann::json error_response = {
+                {"success", false},
+                {"error", e.what()}
+            };
+            return error_response.dump();
+        }
+    }
+
+    std::string create_memory_entry(const std::string& request_body, const std::string& authenticated_user_id) {
+        try {
+            // Authentication check
+            if (authenticated_user_id.empty()) {
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Unauthorized"}
+                };
+                return error_response.dump();
+            }
+
+            auto json_body = nlohmann::json::parse(request_body);
+
+            // Validate required fields
+            if (!json_body.contains("agent_name") || !json_body.contains("conversation_topic") ||
+                !json_body.contains("memory_type") || !json_body.contains("content")) {
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Missing required fields: agent_name, conversation_topic, memory_type, content"}
+                };
+                return error_response.dump();
+            }
+
+            PGconn *conn = PQconnectdb(db_conn_string.c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Database connection failed"}
+                };
+                return error_response.dump();
+            }
+
+            // Generate conversation ID and prepare data
+            std::string conversation_id = generate_uuid_v4();
+            std::string agent_name = json_body["agent_name"];
+            std::string agent_type = json_body.value("agent_type", "unknown");
+            std::string context_type = json_body.value("context_type", "conversation");
+            std::string conversation_topic = json_body["conversation_topic"];
+            std::string memory_type = json_body["memory_type"];
+            std::string content = json_body["content"];
+            double importance_score = json_body.value("importance_score", 0.5);
+
+            const char* paramValues[9] = {
+                conversation_id.c_str(),
+                agent_type.c_str(),
+                agent_name.c_str(),
+                context_type.c_str(),
+                conversation_topic.c_str(),
+                memory_type.c_str(),
+                std::to_string(importance_score).c_str(),
+                content.c_str(),
+                authenticated_user_id.c_str()
+            };
+
+            PGresult *result = PQexecParams(conn,
+                "INSERT INTO conversation_memory "
+                "(conversation_id, agent_type, agent_name, context_type, conversation_topic, "
+                "memory_type, importance_score, content, user_id, created_at, last_accessed, access_count) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), 0) "
+                "RETURNING conversation_id, created_at",
+                9, NULL, paramValues, NULL, NULL, 0);
+
+            if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+                std::string error_msg = PQerrorMessage(conn);
+                PQclear(result);
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Failed to create memory entry: " + error_msg}
+                };
+                return error_response.dump();
+            }
+
+            std::string created_at = PQntuples(result) > 0 ? PQgetvalue(result, 0, 1) : "NOW()";
+            PQclear(result);
+            PQfinish(conn);
+
+            nlohmann::json response = {
+                {"success", true},
+                {"conversation_id", conversation_id},
+                {"created_at", created_at}
+            };
+
+            return response.dump();
+
+        } catch (const std::exception& e) {
+            nlohmann::json error_response = {
+                {"success", false},
+                {"error", e.what()}
+            };
+            return error_response.dump();
+        }
+    }
+
+    std::string update_memory_entry(const std::string& conversation_id, const std::string& request_body, const std::string& authenticated_user_id) {
+        try {
+            // Authentication check
+            if (authenticated_user_id.empty()) {
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Unauthorized"}
+                };
+                return error_response.dump();
+            }
+
+            auto json_body = nlohmann::json::parse(request_body);
+
+            PGconn *conn = PQconnectdb(db_conn_string.c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Database connection failed"}
+                };
+                return error_response.dump();
+            }
+
+            // Build dynamic update query
+            std::string update_query = "UPDATE conversation_memory SET last_accessed = NOW(), access_count = access_count + 1";
+            std::vector<std::string> param_values;
+            int param_count = 1;
+
+            if (json_body.contains("importance_score")) {
+                update_query += ", importance_score = $" + std::to_string(param_count++);
+                param_values.push_back(std::to_string(json_body["importance_score"].get<double>()));
+            }
+
+            if (json_body.contains("content")) {
+                update_query += ", content = $" + std::to_string(param_count++);
+                param_values.push_back(json_body["content"]);
+            }
+
+            update_query += " WHERE conversation_id = $" + std::to_string(param_count++) + " AND user_id = $" + std::to_string(param_count++);
+            param_values.push_back(conversation_id);
+            param_values.push_back(authenticated_user_id);
+
+            update_query += " RETURNING conversation_id, last_accessed, access_count";
+
+            // Execute update
+            std::vector<const char*> paramValues;
+            for (const auto& val : param_values) {
+                paramValues.push_back(val.c_str());
+            }
+
+            PGresult *result = PQexecParams(conn, update_query.c_str(), paramValues.size(),
+                                          NULL, paramValues.data(), NULL, NULL, 0);
+
+            if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+                std::string error_msg = PQerrorMessage(conn);
+                PQclear(result);
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Failed to update memory entry: " + error_msg}
+                };
+                return error_response.dump();
+            }
+
+            bool updated = PQntuples(result) > 0;
+            PQclear(result);
+            PQfinish(conn);
+
+            nlohmann::json response = {
+                {"success", true},
+                {"updated", updated}
+            };
+
+            return response.dump();
+
+        } catch (const std::exception& e) {
+            nlohmann::json error_response = {
+                {"success", false},
+                {"error", e.what()}
+            };
+            return error_response.dump();
+        }
+    }
+
+    std::string delete_memory_entry(const std::string& conversation_id, const std::string& authenticated_user_id) {
+        try {
+            // Authentication check
+            if (authenticated_user_id.empty()) {
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Unauthorized"}
+                };
+                return error_response.dump();
+            }
+
+            PGconn *conn = PQconnectdb(db_conn_string.c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Database connection failed"}
+                };
+                return error_response.dump();
+            }
+
+            const char* paramValues[2] = { conversation_id.c_str(), authenticated_user_id.c_str() };
+
+            PGresult *result = PQexecParams(conn,
+                "DELETE FROM conversation_memory WHERE conversation_id = $1 AND user_id = $2",
+                2, NULL, paramValues, NULL, NULL, 0);
+
+            if (PQresultStatus(result) != PGRES_COMMAND_OK) {
+                std::string error_msg = PQerrorMessage(conn);
+                PQclear(result);
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Failed to delete memory entry: " + error_msg}
+                };
+                return error_response.dump();
+            }
+
+            std::string affected_rows = PQcmdTuples(result);
+            bool deleted = affected_rows != "0";
+
+            PQclear(result);
+            PQfinish(conn);
+
+            nlohmann::json response = {
+                {"success", true},
+                {"deleted", deleted}
+            };
+
+            return response.dump();
+
+        } catch (const std::exception& e) {
+            nlohmann::json error_response = {
+                {"success", false},
+                {"error", e.what()}
+            };
+            return error_response.dump();
+        }
+    }
+
+    std::string cleanup_memory_entries(const std::string& request_body, const std::string& authenticated_user_id) {
+        try {
+            // Authentication check
+            if (authenticated_user_id.empty()) {
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Unauthorized"}
+                };
+                return error_response.dump();
+            }
+
+            auto json_body = nlohmann::json::parse(request_body);
+            int max_age_days = json_body.value("max_age_days", 30);
+            double min_importance = json_body.value("min_importance", 0.3);
+            int max_entries = json_body.value("max_entries", 1000);
+
+            PGconn *conn = PQconnectdb(db_conn_string.c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Database connection failed"}
+                };
+                return error_response.dump();
+            }
+
+            // First, get count before cleanup
+            PGresult *count_result = PQexecParams(conn,
+                "SELECT COUNT(*) FROM conversation_memory WHERE user_id = $1",
+                1, NULL, (const char*[]){authenticated_user_id.c_str()}, NULL, NULL, 0);
+
+            int count_before = 0;
+            if (PQresultStatus(count_result) == PGRES_TUPLES_OK && PQntuples(count_result) > 0) {
+                count_before = std::stoi(PQgetvalue(count_result, 0, 0));
+            }
+            PQclear(count_result);
+
+            // Perform cleanup: delete old, low-importance entries, keeping most recent max_entries
+            std::string cleanup_query = R"(
+                DELETE FROM conversation_memory
+                WHERE user_id = $1 AND conversation_id NOT IN (
+                    SELECT conversation_id FROM (
+                        SELECT conversation_id,
+                               ROW_NUMBER() OVER (ORDER BY importance_score DESC, last_accessed DESC) as rn
+                        FROM conversation_memory
+                        WHERE user_id = $1
+                        AND (importance_score < $2 OR created_at < NOW() - INTERVAL '1 day' * $3)
+                    ) ranked WHERE rn <= $4
+                )
+            )";
+
+            const char* paramValues[4] = {
+                authenticated_user_id.c_str(),
+                std::to_string(min_importance).c_str(),
+                std::to_string(max_age_days).c_str(),
+                std::to_string(max_entries).c_str()
+            };
+
+            PGresult *cleanup_result = PQexecParams(conn, cleanup_query.c_str(), 4, NULL, paramValues, NULL, NULL, 0);
+
+            if (PQresultStatus(cleanup_result) != PGRES_COMMAND_OK) {
+                std::string error_msg = PQerrorMessage(conn);
+                PQclear(cleanup_result);
+                PQfinish(conn);
+                nlohmann::json error_response = {
+                    {"success", false},
+                    {"error", "Cleanup failed: " + error_msg}
+                };
+                return error_response.dump();
+            }
+
+            std::string deleted_rows = PQcmdTuples(cleanup_result);
+            PQclear(cleanup_result);
+
+            // Get count after cleanup
+            PGresult *final_count_result = PQexecParams(conn,
+                "SELECT COUNT(*) FROM conversation_memory WHERE user_id = $1",
+                1, NULL, (const char*[]){authenticated_user_id.c_str()}, NULL, NULL, 0);
+
+            int count_after = 0;
+            if (PQresultStatus(final_count_result) == PGRES_TUPLES_OK && PQntuples(final_count_result) > 0) {
+                count_after = std::stoi(PQgetvalue(final_count_result, 0, 0));
+            }
+            PQclear(final_count_result);
+            PQfinish(conn);
+
+            nlohmann::json response = {
+                {"success", true},
+                {"count_before", count_before},
+                {"count_after", count_after},
+                {"deleted_count", count_before - count_after}
             };
 
             return response.dump();
@@ -15253,8 +15709,37 @@ public:
                 // Production-grade: Get function call statistics
                 response_body = get_function_call_stats();
             } else if (path_without_query == "/memory" || path_without_query == "/api/memory") {
-                // Production-grade: Get conversation memory
-                response_body = get_memory_data(query_params, authenticated_user_id);
+                if (method == "GET") {
+                    // Production-grade: Get conversation memory
+                    response_body = get_memory_data(query_params, authenticated_user_id);
+                } else if (method == "POST") {
+                    // Production-grade: Create memory entry
+                    response_body = create_memory_entry(request_body, authenticated_user_id);
+                } else if (method == "DELETE") {
+                    // Production-grade: Cleanup memory entries
+                    response_body = cleanup_memory_entries(request_body, authenticated_user_id);
+                } else {
+                    response_body = "{\"error\":\"Method not allowed\"}";
+                }
+            } else if ((path_without_query.find("/memory/") == 0 || path_without_query.find("/api/memory/") == 0) &&
+                       path_without_query != "/memory/stats" && path_without_query != "/api/memory/stats") {
+                // Handle /memory/{conversation_id} routes
+                std::string conversation_id;
+                if (path_without_query.find("/api/memory/") == 0) {
+                    conversation_id = path_without_query.substr(std::string("/api/memory/").length());
+                } else {
+                    conversation_id = path_without_query.substr(std::string("/memory/").length());
+                }
+
+                if (method == "PUT") {
+                    // Production-grade: Update memory entry
+                    response_body = update_memory_entry(conversation_id, request_body, authenticated_user_id);
+                } else if (method == "DELETE") {
+                    // Production-grade: Delete memory entry
+                    response_body = delete_memory_entry(conversation_id, authenticated_user_id);
+                } else {
+                    response_body = "{\"error\":\"Method not allowed\"}";
+                }
             } else if (path_without_query == "/memory/stats" || path_without_query == "/api/memory/stats") {
                 // Production-grade: Get memory statistics
                 response_body = get_memory_stats(authenticated_user_id);

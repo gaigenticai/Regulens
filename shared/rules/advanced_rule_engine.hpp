@@ -16,6 +16,7 @@
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
 #include "../config/dynamic_config_manager.hpp"
+#include "../agentic_brain/llm_interface.hpp"
 
 namespace regulens {
 
@@ -121,7 +122,8 @@ public:
     AdvancedRuleEngine(
         std::shared_ptr<PostgreSQLConnection> db_conn,
         std::shared_ptr<StructuredLogger> logger,
-        std::shared_ptr<DynamicConfigManager> config_manager
+        std::shared_ptr<DynamicConfigManager> config_manager,
+        std::shared_ptr<LLMInterface> llm_interface = nullptr
     );
 
     ~AdvancedRuleEngine();
@@ -182,6 +184,7 @@ private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<StructuredLogger> logger_;
     std::shared_ptr<DynamicConfigManager> config_manager_;
+    std::shared_ptr<LLMInterface> llm_interface_;
 
     // In-memory rule cache
     std::unordered_map<std::string, RuleDefinition> rule_cache_;

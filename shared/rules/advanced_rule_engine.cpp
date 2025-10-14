@@ -16,8 +16,9 @@ namespace regulens {
 AdvancedRuleEngine::AdvancedRuleEngine(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<StructuredLogger> logger,
-    std::shared_ptr<DynamicConfigManager> config_manager
-) : db_conn_(db_conn), logger_(logger), config_manager_(config_manager) {
+    std::shared_ptr<DynamicConfigManager> config_manager,
+    std::shared_ptr<LLMInterface> llm_interface
+) : db_conn_(db_conn), logger_(logger), config_manager_(config_manager), llm_interface_(llm_interface) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for AdvancedRuleEngine");
@@ -34,6 +35,11 @@ AdvancedRuleEngine::AdvancedRuleEngine(
 
     if (logger_) {
         logger_->info("AdvancedRuleEngine initialized with fraud detection capabilities");
+        if (llm_interface_) {
+            logger_->info("AdvancedRuleEngine: ML-based fraud detection enabled via LLM interface");
+        } else {
+            logger_->warn("AdvancedRuleEngine: ML-based fraud detection disabled (no LLM interface provided)");
+        }
     }
 }
 
@@ -394,18 +400,110 @@ RuleExecutionResultDetail AdvancedRuleEngine::execute_ml_rule(
     result.rule_id = rule.rule_id;
     result.rule_name = rule.name;
 
-    // Placeholder for machine learning-based rule execution
-    // In a real implementation, this would integrate with ML models
-    result.result = RuleExecutionResult::PASS;
-    result.confidence_score = 0.5;
-    result.rule_output = {
-        {"ml_model", "placeholder"},
-        {"prediction", "low_risk"},
-        {"confidence", 0.5}
-    };
+    try {
+        // Check if LLM interface is available
+        if (!llm_interface_) {
+            result.result = RuleExecutionResult::ERROR;
+            result.error_message = "ML rule execution requires LLM interface which is not configured";
+            if (logger_) {
+                logger_->error("ML rule execution failed: LLM interface not available for rule '{}'", rule.rule_id);
+            }
+            return result;
+        }
 
-    // TODO: Implement actual ML model integration
-    result.error_message = "ML rule execution not yet implemented";
+        // Extract model configuration from rule logic
+        const auto& logic = rule.rule_logic;
+        std::string model_type = logic.value("model_type", "fraud_detection");
+        double risk_threshold = logic.value("risk_threshold", 0.5);
+
+        // Prepare comprehensive fraud analysis data
+        nlohmann::json ml_analysis_data = {
+            {"transaction_id", context.transaction_id},
+            {"user_id", context.user_id},
+            {"session_id", context.session_id},
+            {"transaction_data", context.transaction_data},
+            {"user_profile", context.user_profile},
+            {"historical_data", context.historical_data},
+            {"execution_time", std::chrono::duration_cast<std::chrono::seconds>(
+                context.execution_time.time_since_epoch()).count()},
+            {"source_system", context.source_system},
+            {"metadata", context.metadata},
+            {"rule_parameters", rule.parameters}
+        };
+
+        // Use LLM to perform ML-based fraud risk assessment
+        auto llm_response = llm_interface_->assess_risk(ml_analysis_data, model_type);
+
+        if (!llm_response.success) {
+            result.result = RuleExecutionResult::ERROR;
+            result.error_message = "LLM risk assessment failed: " + llm_response.error_message;
+            if (logger_) {
+                logger_->error("ML rule '{}' failed: {}", rule.rule_id, llm_response.error_message);
+            }
+            return result;
+        }
+
+        // Parse LLM response for fraud indicators
+        result.confidence_score = llm_response.confidence_score;
+
+        // Extract risk factors from LLM reasoning
+        std::vector<std::string> detected_patterns;
+        std::unordered_map<std::string, double> risk_factors;
+
+        // Parse LLM content for risk factors
+        if (!llm_response.reasoning.empty()) {
+            // The reasoning contains detailed analysis from the LLM
+            result.triggered_conditions.push_back(llm_response.reasoning);
+
+            // Extract risk factors if present in raw_response
+            if (llm_response.raw_response.contains("risk_factors") &&
+                llm_response.raw_response["risk_factors"].is_object()) {
+                for (auto& [key, value] : llm_response.raw_response["risk_factors"].items()) {
+                    if (value.is_number()) {
+                        risk_factors[key] = value.get<double>();
+                    }
+                }
+            }
+        }
+
+        // Determine if fraud detected based on confidence threshold
+        if (result.confidence_score >= risk_threshold) {
+            result.result = RuleExecutionResult::FAIL;
+            detected_patterns.push_back("ML model confidence above threshold");
+        } else {
+            result.result = RuleExecutionResult::PASS;
+        }
+
+        // Build comprehensive output
+        result.rule_output = {
+            {"ml_model", model_type},
+            {"prediction", result.result == RuleExecutionResult::FAIL ? "fraud_detected" : "no_fraud"},
+            {"confidence", result.confidence_score},
+            {"risk_threshold", risk_threshold},
+            {"llm_reasoning", llm_response.reasoning},
+            {"detected_patterns", detected_patterns},
+            {"risk_factors", risk_factors},
+            {"tokens_used", llm_response.tokens_used},
+            {"model_used", static_cast<int>(llm_response.model_used)}
+        };
+
+        result.risk_factors = risk_factors;
+
+        if (logger_) {
+            logger_->info("ML rule '{}' executed: result={}, confidence={:.3f}, threshold={:.3f}",
+                         rule.rule_id,
+                         result.result == RuleExecutionResult::FAIL ? "FAIL" : "PASS",
+                         result.confidence_score,
+                         risk_threshold);
+        }
+
+    } catch (const std::exception& e) {
+        result.result = RuleExecutionResult::ERROR;
+        result.error_message = std::string("ML rule execution exception: ") + e.what();
+        if (logger_) {
+            logger_->error("Exception in ML rule '{}': {}", rule.rule_id, e.what());
+        }
+    }
 
     return result;
 }

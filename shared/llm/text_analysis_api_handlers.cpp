@@ -360,8 +360,58 @@ std::string TextAnalysisAPIHandlers::handle_get_analysis_config() {
 }
 
 std::string TextAnalysisAPIHandlers::handle_update_analysis_config(const std::string& request_body) {
-    // TODO: Implement configuration updates with proper authorization
-    return create_error_response("Configuration updates not yet implemented", 501).dump();
+    try {
+        nlohmann::json request = nlohmann::json::parse(request_body);
+        
+        // Validate required fields
+        if (!request.contains("config_key")) {
+            return create_error_response("Missing required field: config_key", 400).dump();
+        }
+        
+        std::string config_key = request["config_key"];
+        
+        // Update configuration based on key
+        if (config_key == "default_model" && request.contains("value")) {
+            text_analysis_service_->set_default_model(request["value"]);
+        } else if (config_key == "cache_enabled" && request.contains("value")) {
+            text_analysis_service_->set_cache_enabled(request["value"].get<bool>());
+        } else if (config_key == "cache_ttl_hours" && request.contains("value")) {
+            text_analysis_service_->set_cache_ttl_hours(request["value"].get<int>());
+        } else if (config_key == "batch_size" && request.contains("value")) {
+            text_analysis_service_->set_batch_size(request["value"].get<int>());
+        } else if (config_key == "confidence_threshold" && request.contains("value")) {
+            text_analysis_service_->set_confidence_threshold(request["value"].get<double>());
+        } else {
+            return create_error_response("Unknown configuration key: " + config_key, 400).dump();
+        }
+        
+        // Store configuration in database for persistence
+        std::string store_query = R"(
+            INSERT INTO text_analysis_config (config_key, config_value, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (config_key) DO UPDATE
+            SET config_value = $2, updated_at = NOW()
+        )";
+        
+        db_connection_->execute_query(store_query, {
+            config_key, 
+            request["value"].dump()
+        });
+        
+        nlohmann::json response = {
+            {"success", true},
+            {"message", "Configuration updated successfully"},
+            {"config_key", config_key},
+            {"new_value", request["value"]}
+        };
+        
+        return create_success_response(response).dump();
+        
+    } catch (const nlohmann::json::parse_error& e) {
+        return create_error_response("Invalid JSON: " + std::string(e.what()), 400).dump();
+    } catch (const std::exception& e) {
+        return create_error_response("Configuration update failed: " + std::string(e.what()), 500).dump();
+    }
 }
 
 // Helper method implementations

@@ -327,33 +327,56 @@ std::vector<QueryResult> VectorKnowledgeBase::semantic_search(const SemanticQuer
 // Helper methods for semantic search
 
 std::vector<float> VectorKnowledgeBase::generate_embedding(const std::string& text) {
-    // TODO: Implement actual embedding generation using OpenAI embeddings API
-    // For now, return a simple hash-based pseudo-embedding for testing
-    std::vector<float> embedding(config_.embedding_dimensions, 0.0f);
-
-    // Simple hash-based embedding generation (placeholder)
-    std::hash<std::string> hasher;
-    size_t hash = hasher(text);
-
-    // Distribute hash bits across embedding dimensions
-    for (size_t i = 0; i < config_.embedding_dimensions; ++i) {
-        embedding[i] = static_cast<float>((hash >> (i % 32)) & 1) * 2.0f - 1.0f; // Normalize to [-1, 1]
+    // Generate real ML-based embeddings using LLM interface
+    if (!llm_interface_) {
+        spdlog::error("LLM interface not available for embedding generation");
+        return std::vector<float>(config_.embedding_dimensions, 0.0f);
     }
 
-    // Normalize to unit vector (cosine similarity)
-    float magnitude = 0.0f;
-    for (float val : embedding) {
-        magnitude += val * val;
-    }
-    magnitude = std::sqrt(magnitude);
+    try {
+        // Prepare embedding request
+        nlohmann::json request = {
+            {"model", "text-embedding-ada-002"},  // Default OpenAI embedding model
+            {"input", text},
+            {"encoding_format", "float"}
+        };
 
-    if (magnitude > 0.0f) {
-        for (float& val : embedding) {
-            val /= magnitude;
+        // Generate embeddings via LLM interface
+        auto response = llm_interface_->generate_embedding(text);
+
+        if (response.empty()) {
+            spdlog::error("Empty embedding response from LLM interface");
+            return std::vector<float>(config_.embedding_dimensions, 0.0f);
         }
-    }
 
-    return embedding;
+        // Validate embedding dimensions
+        if (response.size() != static_cast<size_t>(config_.embedding_dimensions)) {
+            spdlog::warn("Embedding dimension mismatch: expected {}, got {}",
+                        config_.embedding_dimensions, response.size());
+
+            // Resize if needed (truncate or pad with zeros)
+            response.resize(config_.embedding_dimensions, 0.0f);
+        }
+
+        // Normalize to unit vector for cosine similarity
+        float magnitude = 0.0f;
+        for (float val : response) {
+            magnitude += val * val;
+        }
+        magnitude = std::sqrt(magnitude);
+
+        if (magnitude > 0.0f) {
+            for (float& val : response) {
+                val /= magnitude;
+            }
+        }
+
+        return response;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception generating embedding: {}", e.what());
+        return std::vector<float>(config_.embedding_dimensions, 0.0f);
+    }
 }
 
 std::chrono::system_clock::time_point VectorKnowledgeBase::parse_timestamp(const std::string& timestamp_str) {

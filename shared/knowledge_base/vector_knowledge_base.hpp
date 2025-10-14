@@ -107,9 +107,9 @@ struct VectorMemoryConfig {
     VectorSimilarity default_similarity = VectorSimilarity::COSINE;
     int max_results_per_query = 50;
     std::chrono::hours memory_cleanup_interval = std::chrono::hours(1);
-    std::chrono::days ephemeral_retention = std::chrono::days(1);
-    std::chrono::days session_retention = std::chrono::days(30);
-    std::chrono::days archival_retention = std::chrono::days(365 * 7); // 7 years
+    std::chrono::hours ephemeral_retention = std::chrono::hours(24); // 1 day
+    std::chrono::hours session_retention = std::chrono::hours(720); // 30 days
+    std::chrono::hours archival_retention = std::chrono::hours(61320); // 7 years
     int max_entities_per_domain = 100000;
     bool enable_auto_cleanup = true;
     bool enable_embedding_cache = true;

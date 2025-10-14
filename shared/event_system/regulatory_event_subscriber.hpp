@@ -25,6 +25,7 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
+#include <ctime>
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
 #include "../logging/structured_logger.hpp"
@@ -105,10 +106,10 @@ public:
         // Initialize libcurl
         curl_global_init(CURL_GLOBAL_DEFAULT);
         
-        logger_->log(LogLevel::INFO, "Regulatory Event Subscriber initialized", {
-            {"monitor_url", regulatory_monitor_url_},
-            {"poll_interval", poll_interval_seconds_}
-        });
+        nlohmann::json init_data;
+        init_data["monitor_url"] = regulatory_monitor_url_;
+        init_data["poll_interval"] = poll_interval_seconds_;
+        logger_->log(LogLevel::INFO, "Regulatory Event Subscriber initialized", init_data);
     }
     
     ~RegulatoryEventSubscriber() {
@@ -132,11 +133,11 @@ public:
         
         subscriptions_[agent_id] = {filter, callback};
         
-        logger_->log(LogLevel::INFO, "Agent subscribed to regulatory events", {
-            {"agent_id", agent_id},
-            {"sources", nlohmann::json(filter.sources).dump()},
-            {"change_types", nlohmann::json(filter.change_types).dump()}
-        });
+        nlohmann::json subscribe_data;
+        subscribe_data["agent_id"] = agent_id;
+        subscribe_data["sources"] = nlohmann::json(filter.sources).dump();
+        subscribe_data["change_types"] = nlohmann::json(filter.change_types).dump();
+        logger_->log(LogLevel::INFO, "Agent subscribed to regulatory events", subscribe_data);
         
         // Persist subscription to database
         persist_subscription(agent_id, filter);
@@ -149,9 +150,9 @@ public:
         std::lock_guard<std::mutex> lock(subscriptions_mutex_);
         
         if (subscriptions_.erase(agent_id) > 0) {
-            logger_->log(LogLevel::INFO, "Agent unsubscribed from regulatory events", {
-                {"agent_id", agent_id}
-            });
+            nlohmann::json unsubscribe_data;
+            unsubscribe_data["agent_id"] = agent_id;
+            logger_->log(LogLevel::INFO, "Agent unsubscribed from regulatory events", unsubscribe_data);
             
             // Remove from database
             remove_subscription(agent_id);
@@ -202,14 +203,17 @@ public:
     nlohmann::json get_statistics() const {
         std::lock_guard<std::mutex> lock(subscriptions_mutex_);
         
-        return {
-            {"total_subscriptions", subscriptions_.size()},
-            {"events_processed", events_processed_.load()},
-            {"events_notified", events_notified_.load()},
-            {"consecutive_failures", consecutive_failures_.load()},
-            {"last_poll_time", last_poll_time_},
-            {"monitor_url", regulatory_monitor_url_}
-        };
+        nlohmann::json stats;
+        stats["total_subscriptions"] = subscriptions_.size();
+        stats["events_processed"] = events_processed_.load();
+        stats["events_notified"] = events_notified_.load();
+        stats["consecutive_failures"] = consecutive_failures_.load();
+        std::time_t last_poll_time = std::chrono::system_clock::to_time_t(last_poll_time_);
+        char time_buffer[26];
+        std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&last_poll_time));
+        stats["last_poll_time"] = std::string(time_buffer);
+        stats["monitor_url"] = regulatory_monitor_url_;
+        return stats;
     }
     
 private:
@@ -236,17 +240,17 @@ private:
                 
             } catch (const std::exception& e) {
                 consecutive_failures_++;
-                logger_->log(LogLevel::ERROR, "Error in polling loop", {
-                    {"error", e.what()},
-                    {"consecutive_failures", consecutive_failures_.load()}
-                });
-                
+                nlohmann::json poll_error_data;
+                poll_error_data["error"] = e.what();
+                poll_error_data["consecutive_failures"] = consecutive_failures_.load();
+                logger_->log(LogLevel::ERROR, "Error in polling loop", poll_error_data);
+
                 // Exponential backoff on failures
                 if (consecutive_failures_ > 3) {
                     int backoff_seconds = std::min(300, (int)std::pow(2, consecutive_failures_ - 3) * 10);
-                    logger_->log(LogLevel::WARN, "Backing off due to failures", {
-                        {"backoff_seconds", backoff_seconds}
-                    });
+                    nlohmann::json backoff_data;
+                    backoff_data["backoff_seconds"] = backoff_seconds;
+                    logger_->log(LogLevel::WARN, "Backing off due to failures", backoff_data);
                     std::this_thread::sleep_for(std::chrono::seconds(backoff_seconds));
                 }
             }
@@ -315,9 +319,9 @@ private:
             }
             
         } catch (const std::exception& e) {
-            logger_->log(LogLevel::ERROR, "Failed to parse regulatory monitor response", {
-                {"error", e.what()}
-            });
+            nlohmann::json error_data;
+            error_data["error"] = e.what();
+            logger_->log(LogLevel::ERROR, "Failed to parse regulatory monitor response", error_data);
         }
         
         return events;
@@ -345,17 +349,17 @@ private:
                         subscription.second(event); // Call callback
                         events_notified_++;
                         
-                        logger_->log(LogLevel::DEBUG, "Notified agent of regulatory event", {
-                            {"agent_id", agent_id},
-                            {"event_id", event.event_id},
-                            {"source", event.source_name}
-                        });
+                        nlohmann::json notify_data;
+                        notify_data["agent_id"] = agent_id;
+                        notify_data["event_id"] = event.event_id;
+                        notify_data["source"] = event.source_name;
+                        logger_->log(LogLevel::DEBUG, "Notified agent of regulatory event", notify_data);
                         
                     } catch (const std::exception& e) {
-                        logger_->log(LogLevel::ERROR, "Error in event callback", {
-                            {"agent_id", agent_id},
-                            {"error", e.what()}
-                        });
+                        nlohmann::json callback_error_data;
+                        callback_error_data["agent_id"] = agent_id;
+                        callback_error_data["error"] = e.what();
+                        logger_->log(LogLevel::ERROR, "Error in event callback", callback_error_data);
                     }
                 }
             }
@@ -516,7 +520,7 @@ private:
     // State tracking
     std::string last_event_id_;
     std::chrono::system_clock::time_point last_poll_time_;
-    std::set<std::string> processed_event_ids_; // For deduplication
+    std::unordered_set<std::string> processed_event_ids_; // For deduplication
     
     // Statistics
     std::atomic<uint64_t> events_processed_{0};

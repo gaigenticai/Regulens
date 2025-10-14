@@ -2088,8 +2088,11 @@ public:
 
             // Initialize AgentLifecycleManager if not already done
             if (!agent_lifecycle_manager) {
-                agent_lifecycle_manager = std::make_shared<AgentLifecycleManager>(
-                    db_pool, config_manager, logger
+                // Create Anthropic LLM client for agents
+                auto anthropic_client_local = std::make_shared<regulens::AnthropicClient>(config_manager, logger, nullptr);
+                
+                agent_lifecycle_manager = std::make_shared<regulens::AgentLifecycleManager>(
+                    config_manager, logger, db_pool, anthropic_client_local
                 );
             }
 
@@ -2180,8 +2183,11 @@ public:
             
             // Production: Use AgentLifecycleManager to stop the agent process
             if (!agent_lifecycle_manager) {
-                agent_lifecycle_manager = std::make_shared<AgentLifecycleManager>(
-                    db_pool, config_manager, logger
+                // Create Anthropic LLM client for agents
+                auto anthropic_client_local = std::make_shared<regulens::AnthropicClient>(config_manager, logger, nullptr);
+                
+                agent_lifecycle_manager = std::make_shared<regulens::AgentLifecycleManager>(
+                    config_manager, logger, db_pool, anthropic_client_local
                 );
             }
 
@@ -3766,6 +3772,427 @@ public:
                 }
             }
         }
+        
+        // ===================================================================
+        // CONSENSUS ENGINE API ROUTES
+        // Multi-agent decision making with voting algorithms
+        // ===================================================================
+        // POST /api/v1/consensus/initiate - Initiate consensus session
+        else if (path == "/api/v1/consensus/initiate" && method == "POST") {
+            if (!consensus_engine_api_handlers) {
+                response = "{\"error\":\"Consensus engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = consensus_engine_api_handlers->handle_initiate_consensus(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Consensus initiation error\"}";
+                }
+            }
+        }
+        // GET /api/v1/consensus/session/{session_id} - Get consensus session
+        else if (path.find("/api/v1/consensus/session/") == 0 && method == "GET") {
+            if (!consensus_engine_api_handlers) {
+                response = "{\"error\":\"Consensus engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        std::string session_id = path.substr(std::string("/api/v1/consensus/session/").length());
+                        response = consensus_engine_api_handlers->handle_get_session(session_id, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Consensus session retrieval error\"}";
+                }
+            }
+        }
+        // POST /api/v1/consensus/vote - Submit vote
+        else if (path == "/api/v1/consensus/vote" && method == "POST") {
+            if (!consensus_engine_api_handlers) {
+                response = "{\"error\":\"Consensus engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = consensus_engine_api_handlers->handle_submit_vote(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Vote submission error\"}";
+                }
+            }
+        }
+        // GET /api/v1/consensus/results/{session_id} - Get consensus results
+        else if (path.find("/api/v1/consensus/results/") == 0 && method == "GET") {
+            if (!consensus_engine_api_handlers) {
+                response = "{\"error\":\"Consensus engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        std::string session_id = path.substr(std::string("/api/v1/consensus/results/").length());
+                        response = consensus_engine_api_handlers->handle_get_results(session_id, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Results retrieval error\"}";
+                }
+            }
+        }
+        // GET /api/v1/consensus/stats - Get consensus statistics
+        else if (path == "/api/v1/consensus/stats" && method == "GET") {
+            if (!consensus_engine_api_handlers) {
+                response = "{\"error\":\"Consensus engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = consensus_engine_api_handlers->handle_get_consensus_stats(user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Stats retrieval error\"}";
+                }
+            }
+        }
+        
+        // ===================================================================
+        // ADVANCED RULE ENGINE API ROUTES
+        // Fraud detection and policy enforcement system
+        // ===================================================================
+        // POST /api/v1/rules/execute - Execute rule against data
+        else if (path == "/api/v1/rules/execute" && method == "POST") {
+            if (!rule_engine_api_handlers) {
+                response = "{\"error\":\"Rule engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = rule_engine_api_handlers->handle_execute_rule(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Rule execution error\"}";
+                }
+            }
+        }
+        // POST /api/v1/rules/create - Create new rule
+        else if (path == "/api/v1/rules/create" && method == "POST") {
+            if (!rule_engine_api_handlers) {
+                response = "{\"error\":\"Rule engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = rule_engine_api_handlers->handle_create_rule(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Rule creation error\"}";
+                }
+            }
+        }
+        // GET /api/v1/rules/list - List all rules
+        else if (path == "/api/v1/rules/list" && method == "GET") {
+            if (!rule_engine_api_handlers) {
+                response = "{\"error\":\"Rule engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = rule_engine_api_handlers->handle_list_rules(query_string, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Rule listing error\"}";
+                }
+            }
+        }
+        // GET /api/v1/rules/stats - Get rule execution statistics
+        else if (path == "/api/v1/rules/stats" && method == "GET") {
+            if (!rule_engine_api_handlers) {
+                response = "{\"error\":\"Rule engine not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = rule_engine_api_handlers->handle_get_rule_stats(user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Stats retrieval error\"}";
+                }
+            }
+        }
+        
+        // ===================================================================
+        // MESSAGE TRANSLATOR API ROUTES
+        // Protocol conversion between agents (JSON-RPC, gRPC, REST)
+        // ===================================================================
+        // POST /api/v1/translator/translate - Translate message between protocols
+        else if (path == "/api/v1/translator/translate" && method == "POST") {
+            if (!message_translator_api_handlers) {
+                response = "{\"error\":\"Message translator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = message_translator_api_handlers->handle_translate_message(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Message translation error\"}";
+                }
+            }
+        }
+        // POST /api/v1/translator/batch - Batch translate messages
+        else if (path == "/api/v1/translator/batch" && method == "POST") {
+            if (!message_translator_api_handlers) {
+                response = "{\"error\":\"Message translator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = message_translator_api_handlers->handle_batch_translate(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Batch translation error\"}";
+                }
+            }
+        }
+        // POST /api/v1/translator/detect - Detect message protocol
+        else if (path == "/api/v1/translator/detect" && method == "POST") {
+            if (!message_translator_api_handlers) {
+                response = "{\"error\":\"Message translator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = message_translator_api_handlers->handle_detect_protocol(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Protocol detection error\"}";
+                }
+            }
+        }
+        // GET /api/v1/translator/stats - Get translation statistics
+        else if (path == "/api/v1/translator/stats" && method == "GET") {
+            if (!message_translator_api_handlers) {
+                response = "{\"error\":\"Message translator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = message_translator_api_handlers->handle_get_translation_stats(user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Stats retrieval error\"}";
+                }
+            }
+        }
+        
+        // ===================================================================
+        // COMMUNICATION MEDIATOR API ROUTES
+        // Complex conversation orchestration and conflict resolution
+        // ===================================================================
+        // POST /api/v1/communication/initiate - Initiate conversation
+        else if (path == "/api/v1/communication/initiate" && method == "POST") {
+            if (!communication_mediator_api_handlers) {
+                response = "{\"error\":\"Communication mediator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = communication_mediator_api_handlers->handle_initiate_conversation(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Conversation initiation error\"}";
+                }
+            }
+        }
+        // GET /api/v1/communication/conversation/{conversation_id} - Get conversation
+        else if (path.find("/api/v1/communication/conversation/") == 0 && method == "GET") {
+            if (!communication_mediator_api_handlers) {
+                response = "{\"error\":\"Communication mediator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        std::string conversation_id = path.substr(std::string("/api/v1/communication/conversation/").length());
+                        response = communication_mediator_api_handlers->handle_get_conversation(conversation_id, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Conversation retrieval error\"}";
+                }
+            }
+        }
+        // POST /api/v1/communication/send - Send message in conversation
+        else if (path == "/api/v1/communication/send" && method == "POST") {
+            if (!communication_mediator_api_handlers) {
+                response = "{\"error\":\"Communication mediator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = communication_mediator_api_handlers->handle_send_message("", body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Message sending error\"}";
+                }
+            }
+        }
+        // POST /api/v1/communication/mediate/{conversation_id} - Mediate conversation
+        else if (path.find("/api/v1/communication/mediate/") == 0 && method == "POST") {
+            if (!communication_mediator_api_handlers) {
+                response = "{\"error\":\"Communication mediator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        std::string conversation_id = path.substr(std::string("/api/v1/communication/mediate/").length());
+                        response = communication_mediator_api_handlers->handle_mediate_conversation(conversation_id, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Mediation error\"}";
+                }
+            }
+        }
+        // GET /api/v1/communication/stats - Get communication statistics
+        else if (path == "/api/v1/communication/stats" && method == "GET") {
+            if (!communication_mediator_api_handlers) {
+                response = "{\"error\":\"Communication mediator not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = communication_mediator_api_handlers->handle_get_conversation_stats(user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Stats retrieval error\"}";
+                }
+            }
+        }
+        
+        // ===================================================================
+        // TOOL CATEGORIES API ROUTES
+        // Analytics, Workflow, Security, and Monitoring Tools
+        // ===================================================================
+        // GET /api/v1/tools/available - Get available tools
+        else if (path == "/api/v1/tools/available" && method == "GET") {
+            if (!tool_categories_api_handlers) {
+                response = "{\"error\":\"Tool categories not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = tool_categories_api_handlers->handle_get_available_tools(user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Tool listing error\"}";
+                }
+            }
+        }
+        // POST /api/v1/tools/analytics/analyze - Run analytics tool
+        else if (path == "/api/v1/tools/analytics/analyze" && method == "POST") {
+            if (!tool_categories_api_handlers) {
+                response = "{\"error\":\"Tool categories not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = tool_categories_api_handlers->handle_analyze_dataset(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Analytics execution error\"}";
+                }
+            }
+        }
+        // POST /api/v1/tools/workflow/automate - Run workflow automation
+        else if (path == "/api/v1/tools/workflow/automate" && method == "POST") {
+            if (!tool_categories_api_handlers) {
+                response = "{\"error\":\"Tool categories not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = tool_categories_api_handlers->handle_automate_task(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Workflow execution error\"}";
+                }
+            }
+        }
+        // POST /api/v1/tools/security/scan - Run security scan
+        else if (path == "/api/v1/tools/security/scan" && method == "POST") {
+            if (!tool_categories_api_handlers) {
+                response = "{\"error\":\"Tool categories not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = tool_categories_api_handlers->handle_scan_vulnerabilities(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Security scan error\"}";
+                }
+            }
+        }
+        // POST /api/v1/tools/monitoring/check - Run monitoring check
+        else if (path == "/api/v1/tools/monitoring/check" && method == "POST") {
+            if (!tool_categories_api_handlers) {
+                response = "{\"error\":\"Tool categories not available\"}";
+            } else {
+                try {
+                    std::string user_id = authenticate_and_get_user_id(headers);
+                    if (user_id.empty()) {
+                        response = "{\"error\":\"Unauthorized: Invalid or missing authentication token\"}";
+                    } else {
+                        response = tool_categories_api_handlers->handle_check_health(body, user_id);
+                    }
+                } catch (const std::exception& e) {
+                    response = "{\"error\":\"Monitoring check error\"}";
+                }
+            }
+        }
+        
         // GET /api/v1/config/{key}?scope={scope} - Get configuration value
         else if (path.find("/api/v1/config/") == 0 && method == "GET" && path.find("?") != std::string::npos) {
             if (!config_api_handlers) {

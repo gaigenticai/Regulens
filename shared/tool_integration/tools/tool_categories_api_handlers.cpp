@@ -286,8 +286,52 @@ bool ToolCategoriesAPIHandlers::validate_tool_request(const nlohmann::json& requ
 }
 
 bool ToolCategoriesAPIHandlers::validate_user_access(const std::string& user_id, const std::string& tool_name, const std::string& operation) {
-    // TODO: Implement proper access control based on user roles and permissions
-    return !user_id.empty();
+    if (user_id.empty()) {
+        spdlog::warn("Access denied: empty user_id");
+        return false;
+    }
+
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for access validation");
+            return false;
+        }
+
+        // Query user permissions from database
+        std::string query = R"(
+            SELECT p.operation, p.resource_type, p.resource_id, p.permission_level
+            FROM user_permissions p
+            INNER JOIN users u ON u.id = p.user_id
+            WHERE u.user_id = $1 AND u.is_active = true AND p.is_active = true
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {user_id});
+
+        // Check if user has permission for this tool/operation
+        for (const auto& row : results) {
+            std::string perm_operation = row.at("operation");
+            std::string perm_resource_id = row.at("resource_id");
+            std::string perm_resource_type = row.at("resource_type");
+
+            // Check for wildcard permission or exact match
+            if (perm_operation == operation || perm_operation == "*" || perm_operation == "execute_tool") {
+                // Check resource-specific permissions (tool name match)
+                if (perm_resource_type == "tool" && (perm_resource_id == tool_name || perm_resource_id == "*")) {
+                    spdlog::debug("Access granted for user: {} tool: {} operation: {}",
+                                 user_id, tool_name, operation);
+                    return true;
+                }
+            }
+        }
+
+        spdlog::warn("Access denied for user: {} tool: {} operation: {}",
+                    user_id, tool_name, operation);
+        return false;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Access validation error: {}", e.what());
+        return false; // Fail closed on errors
+    }
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_analytics_tool(const std::string& tool_name, const nlohmann::json& parameters) {
@@ -435,8 +479,48 @@ bool ToolCategoriesAPIHandlers::store_tool_execution_result(const std::string& t
 }
 
 bool ToolCategoriesAPIHandlers::is_admin_user(const std::string& user_id) {
-    // TODO: Implement proper admin user checking
-    return user_id == "admin" || user_id == "system";
+    if (user_id.empty()) {
+        return false;
+    }
+
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for admin check");
+            return false;
+        }
+
+        // Query user role from database
+        std::string query = R"(
+            SELECT r.role_name, r.role_level
+            FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
+            INNER JOIN users u ON u.id = ur.user_id
+            WHERE u.user_id = $1 AND ur.is_active = true AND u.is_active = true
+            ORDER BY r.role_level DESC
+            LIMIT 1
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {user_id});
+
+        if (!results.empty()) {
+            const auto& row = results[0];
+            std::string role_name = row.at("role_name");
+            int role_level = std::stoi(row.at("role_level"));
+
+            // Admin role has highest privilege level (level >= 90)
+            // Or role name is explicitly "administrator" or "super_admin"
+            if (role_name == "administrator" || role_name == "super_admin" || role_level >= 90) {
+                spdlog::debug("Admin access confirmed for user: {} role: {}", user_id, role_name);
+                return true;
+            }
+        }
+
+        return false;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Admin check error: {}", e.what());
+        return false; // Fail closed on errors
+    }
 }
 
 } // namespace regulens

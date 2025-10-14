@@ -49,12 +49,11 @@ enum class ConsensusState {
     CANCELLED         // Process was cancelled
 };
 
-enum class DecisionConfidence {
-    VERY_LOW = 1,
-    LOW = 2,
-    MEDIUM = 3,
-    HIGH = 4,
-    VERY_HIGH = 5
+enum class ConsensusDecisionConfidence {
+    LOW,
+    MEDIUM,
+    HIGH,
+    VERY_HIGH
 };
 
 struct Agent {
@@ -95,7 +94,7 @@ struct ConsensusResult {
     std::string consensus_id;
     std::string topic;
     std::string final_decision;
-    DecisionConfidence confidence_level;
+    ConsensusDecisionConfidence confidence_level;
     VotingAlgorithm algorithm_used;
     std::vector<VotingRound> rounds;
     ConsensusState final_state;

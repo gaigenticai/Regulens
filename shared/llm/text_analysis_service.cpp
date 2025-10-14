@@ -736,9 +736,76 @@ std::optional<TextAnalysisResult> TextAnalysisService::get_cached_result(
     const std::string& text_hash,
     const std::string& tasks_hash
 ) {
-    // Implementation would check Redis/database cache
-    // For now, return empty (no caching)
-    return std::nullopt;
+    if (!redis_client_) {
+        return std::nullopt;
+    }
+
+    try {
+        std::string cache_key = "text_analysis:" + text_hash + ":" + tasks_hash;
+
+        auto cached_data = redis_client_->get(cache_key);
+        if (!cached_data) {
+            return std::nullopt;
+        }
+
+        // Parse cached JSON data
+        nlohmann::json cached_json = nlohmann::json::parse(*cached_data);
+
+        // Reconstruct TextAnalysisResult from cached data
+        TextAnalysisResult result;
+        result.request_id = cached_json["request_id"];
+        result.text_hash = cached_json["text_hash"];
+
+        // Parse timestamp
+        if (cached_json.contains("analyzed_at")) {
+            std::string timestamp_str = cached_json["analyzed_at"];
+            // Simple timestamp parsing - in production, use proper parsing
+            result.analyzed_at = std::chrono::system_clock::now(); // Fallback
+        }
+
+        if (cached_json.contains("processing_time_ms")) {
+            result.processing_time = std::chrono::milliseconds(cached_json["processing_time_ms"]);
+        }
+
+        // Parse sentiment if present
+        if (cached_json.contains("sentiment")) {
+            SentimentResult sentiment;
+            sentiment.label = cached_json["sentiment"]["label"];
+            sentiment.confidence = cached_json["sentiment"]["confidence"];
+            if (cached_json["sentiment"].contains("scores")) {
+                for (auto& [key, value] : cached_json["sentiment"]["scores"].items()) {
+                    sentiment.scores[key] = value;
+                }
+            }
+            result.sentiment = sentiment;
+        }
+
+        // Parse entities if present
+        if (cached_json.contains("entities")) {
+            for (auto& entity_json : cached_json["entities"]) {
+                Entity entity;
+                entity.text = entity_json["text"];
+                entity.type = entity_json["type"];
+                entity.category = entity_json.value("category", "");
+                entity.confidence = entity_json.value("confidence", 0.0);
+                entity.start_pos = entity_json.value("start_pos", 0);
+                entity.end_pos = entity_json.value("end_pos", 0);
+                result.entities.push_back(entity);
+            }
+        }
+
+        // Parse other fields as needed
+        result.success = cached_json.value("success", true);
+        result.total_tokens = cached_json.value("total_tokens", 0);
+        result.total_cost = cached_json.value("total_cost", 0.0);
+
+        spdlog::info("Retrieved cached text analysis result for hash: {}", text_hash);
+        return result;
+
+    } catch (const std::exception& e) {
+        spdlog::warn("Failed to retrieve cached result: {}", e.what());
+        return std::nullopt;
+    }
 }
 
 void TextAnalysisService::cache_result(
@@ -746,22 +813,206 @@ void TextAnalysisService::cache_result(
     const std::string& tasks_hash,
     const TextAnalysisResult& result
 ) {
-    // Implementation would store in Redis/database cache
-    // For now, do nothing
+    if (!redis_client_) {
+        return;
+    }
+
+    try {
+        std::string cache_key = "text_analysis:" + text_hash + ":" + tasks_hash;
+
+        // Build JSON representation for caching
+        nlohmann::json cache_json;
+        cache_json["request_id"] = result.request_id;
+        cache_json["text_hash"] = result.text_hash;
+        cache_json["analyzed_at"] = std::to_string(
+            std::chrono::duration_cast<std::chrono::seconds>(
+                result.analyzed_at.time_since_epoch()).count());
+        cache_json["processing_time_ms"] = result.processing_time.count();
+        cache_json["success"] = result.success;
+        cache_json["total_tokens"] = result.total_tokens;
+        cache_json["total_cost"] = result.total_cost;
+
+        // Cache sentiment
+        if (result.sentiment) {
+            nlohmann::json sentiment_json;
+            sentiment_json["label"] = result.sentiment->label;
+            sentiment_json["confidence"] = result.sentiment->confidence;
+            nlohmann::json scores_json;
+            for (auto& [key, value] : result.sentiment->scores) {
+                scores_json[key] = value;
+            }
+            sentiment_json["scores"] = scores_json;
+            cache_json["sentiment"] = sentiment_json;
+        }
+
+        // Cache entities
+        if (!result.entities.empty()) {
+            nlohmann::json entities_json = nlohmann::json::array();
+            for (const auto& entity : result.entities) {
+                nlohmann::json entity_json;
+                entity_json["text"] = entity.text;
+                entity_json["type"] = entity.type;
+                entity_json["category"] = entity.category;
+                entity_json["confidence"] = entity.confidence;
+                entity_json["start_pos"] = entity.start_pos;
+                entity_json["end_pos"] = entity.end_pos;
+                entities_json.push_back(entity_json);
+            }
+            cache_json["entities"] = entities_json;
+        }
+
+        // Cache other results as needed
+        if (result.summary) {
+            nlohmann::json summary_json;
+            summary_json["summary"] = result.summary->summary;
+            summary_json["compression_ratio"] = result.summary->compression_ratio;
+            cache_json["summary"] = summary_json;
+        }
+
+        std::string cache_data = cache_json.dump();
+
+        // Set cache with TTL (24 hours by default)
+        int ttl_seconds = cache_ttl_hours_ * 3600;
+        redis_client_->setex(cache_key, ttl_seconds, cache_data);
+
+        spdlog::info("Cached text analysis result for hash: {}", text_hash);
+
+    } catch (const std::exception& e) {
+        spdlog::warn("Failed to cache result: {}", e.what());
+    }
 }
 
 // Database operations
 void TextAnalysisService::store_analysis_result(const TextAnalysisResult& result) {
-    // Implementation would store analysis result in database
-    // For now, do nothing (could be added later for analytics)
+    if (!db_conn_) {
+        spdlog::warn("No database connection available for storing analysis result");
+        return;
+    }
+
+    try {
+        // Prepare JSON data for storage
+        nlohmann::json result_json;
+        result_json["request_id"] = result.request_id;
+        result_json["text_hash"] = result.text_hash;
+        result_json["processing_time_ms"] = result.processing_time.count();
+        result_json["success"] = result.success;
+        result_json["total_tokens"] = result.total_tokens;
+        result_json["total_cost"] = result.total_cost;
+
+        // Store task confidences
+        nlohmann::json confidences_json;
+        for (auto& [task, confidence] : result.task_confidences) {
+            confidences_json[task] = confidence;
+        }
+        result_json["task_confidences"] = confidences_json;
+
+        std::string result_data = result_json.dump();
+
+        // SQL to insert analysis result
+        const char* query = R"(
+            INSERT INTO text_analysis_results (
+                request_id, text_hash, result_data, analyzed_at, processing_time_ms,
+                total_tokens, total_cost, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            ON CONFLICT (text_hash) DO UPDATE SET
+                result_data = EXCLUDED.result_data,
+                analyzed_at = EXCLUDED.analyzed_at,
+                processing_time_ms = EXCLUDED.processing_time_ms,
+                total_tokens = EXCLUDED.total_tokens,
+                total_cost = EXCLUDED.total_cost
+        )";
+
+        // Convert timestamp to string
+        auto analyzed_time = std::chrono::system_clock::to_time_t(result.analyzed_at);
+        char time_buffer[26];
+        std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&analyzed_time));
+        std::string analyzed_at_str = time_buffer;
+
+        const char* param_values[7] = {
+            result.request_id.c_str(),
+            result.text_hash.c_str(),
+            result_data.c_str(),
+            analyzed_at_str.c_str(),
+            std::to_string(result.processing_time.count()).c_str(),
+            std::to_string(result.total_tokens).c_str(),
+            std::to_string(result.total_cost).c_str()
+        };
+
+        PGresult* pg_result = PQexecParams(db_conn_->get_connection(), query, 7, NULL, param_values, NULL, NULL, 0);
+
+        if (PQresultStatus(pg_result) != PGRES_COMMAND_OK) {
+            spdlog::error("Failed to store analysis result: {}", PQerrorMessage(db_conn_->get_connection()));
+        } else {
+            spdlog::info("Stored analysis result for request: {}", result.request_id);
+        }
+
+        PQclear(pg_result);
+
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to store analysis result: {}", e.what());
+    }
 }
 
 std::optional<TextAnalysisResult> TextAnalysisService::load_analysis_result(
     const std::string& text_hash,
     const std::string& tasks_hash
 ) {
-    // Implementation would load from database
-    return std::nullopt;
+    if (!db_conn_) {
+        return std::nullopt;
+    }
+
+    try {
+        const char* query = R"(
+            SELECT request_id, result_data, analyzed_at, processing_time_ms,
+                   total_tokens, total_cost
+            FROM text_analysis_results
+            WHERE text_hash = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+        )";
+
+        const char* param_values[1] = {text_hash.c_str()};
+        PGresult* pg_result = PQexecParams(db_conn_->get_connection(), query, 1, NULL, param_values, NULL, NULL, 0);
+
+        if (PQresultStatus(pg_result) != PGRES_TUPLES_OK || PQntuples(pg_result) == 0) {
+            PQclear(pg_result);
+            return std::nullopt;
+        }
+
+        // Parse database result
+        TextAnalysisResult result;
+        result.request_id = PQgetvalue(pg_result, 0, 0);
+        result.text_hash = text_hash;
+
+        std::string result_data = PQgetvalue(pg_result, 0, 1);
+        nlohmann::json result_json = nlohmann::json::parse(result_data);
+
+        result.success = result_json.value("success", true);
+        result.total_tokens = result_json.value("total_tokens", 0);
+        result.total_cost = result_json.value("total_cost", 0.0);
+
+        if (result_json.contains("task_confidences")) {
+            for (auto& [task, confidence] : result_json["task_confidences"].items()) {
+                result.task_confidences[task] = confidence;
+            }
+        }
+
+        result.analyzed_at = std::chrono::system_clock::now(); // Fallback timestamp
+
+        if (PQgetvalue(pg_result, 0, 3)) {
+            result.processing_time = std::chrono::milliseconds(
+                std::stoll(PQgetvalue(pg_result, 0, 3)));
+        }
+
+        PQclear(pg_result);
+
+        spdlog::info("Loaded analysis result from database for hash: {}", text_hash);
+        return result;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to load analysis result: {}", e.what());
+        return std::nullopt;
+    }
 }
 
 } // namespace regulens

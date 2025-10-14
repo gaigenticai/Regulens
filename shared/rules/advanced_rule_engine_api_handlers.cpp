@@ -515,13 +515,96 @@ bool AdvancedRuleEngineAPIHandlers::validate_rule_request(const nlohmann::json& 
 }
 
 bool AdvancedRuleEngineAPIHandlers::validate_user_access(const std::string& user_id, const std::string& operation, const std::string& resource_id) {
-    // TODO: Implement proper access control
-    return !user_id.empty();
+    if (user_id.empty()) {
+        spdlog::warn("Access denied: empty user_id");
+        return false;
+    }
+
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for access validation");
+            return false;
+        }
+
+        // Query user permissions from database
+        std::string query = R"(
+            SELECT p.operation, p.resource_type, p.resource_id, p.permission_level
+            FROM user_permissions p
+            INNER JOIN users u ON u.id = p.user_id
+            WHERE u.user_id = $1 AND u.is_active = true AND p.is_active = true
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {user_id});
+
+        // Check if user has permission for this operation
+        for (const auto& row : results) {
+            std::string perm_operation = row.at("operation");
+            std::string perm_resource_id = row.at("resource_id");
+
+            // Check for wildcard permission or exact match
+            if (perm_operation == operation || perm_operation == "*") {
+                // Check resource-specific permissions
+                if (resource_id.empty() || perm_resource_id == resource_id || perm_resource_id == "*") {
+                    spdlog::debug("Access granted for user: {} operation: {} resource: {}",
+                                 user_id, operation, resource_id);
+                    return true;
+                }
+            }
+        }
+
+        spdlog::warn("Access denied for user: {} operation: {} resource: {}",
+                    user_id, operation, resource_id);
+        return false;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Access validation error: {}", e.what());
+        return false; // Fail closed on errors
+    }
 }
 
 bool AdvancedRuleEngineAPIHandlers::is_admin_user(const std::string& user_id) {
-    // TODO: Implement proper admin user checking
-    return user_id == "admin" || user_id == "system";
+    if (user_id.empty()) {
+        return false;
+    }
+
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for admin check");
+            return false;
+        }
+
+        // Query user role from database
+        std::string query = R"(
+            SELECT r.role_name, r.role_level
+            FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
+            INNER JOIN users u ON u.id = ur.user_id
+            WHERE u.user_id = $1 AND ur.is_active = true AND u.is_active = true
+            ORDER BY r.role_level DESC
+            LIMIT 1
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {user_id});
+
+        if (!results.empty()) {
+            const auto& row = results[0];
+            std::string role_name = row.at("role_name");
+            int role_level = std::stoi(row.at("role_level"));
+
+            // Admin role has highest privilege level (level >= 90)
+            // Or role name is explicitly "administrator" or "super_admin"
+            if (role_name == "administrator" || role_name == "super_admin" || role_level >= 90) {
+                spdlog::debug("Admin access confirmed for user: {} role: {}", user_id, role_name);
+                return true;
+            }
+        }
+
+        return false;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Admin check error: {}", e.what());
+        return false; // Fail closed on errors
+    }
 }
 
 nlohmann::json AdvancedRuleEngineAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {
@@ -565,32 +648,136 @@ std::unordered_map<std::string, FraudDetectionResult> AdvancedRuleEngineAPIHandl
 }
 
 nlohmann::json AdvancedRuleEngineAPIHandlers::get_fraud_detection_summary(const std::string& start_date, const std::string& end_date) {
-    // Simplified implementation - in production this would query the database
-    return {
-        {"total_transactions", 1000},
-        {"fraudulent_transactions", 25},
-        {"fraud_rate", 0.025},
-        {"average_processing_time_ms", 150.5},
-        {"most_common_fraud_type", "suspicious_amount"}
-    };
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available");
+            return {};
+        }
+
+        std::string query = R"(
+            SELECT
+                COUNT(*) as total_transactions,
+                SUM(CASE WHEN is_fraudulent = true THEN 1 ELSE 0 END) as fraudulent_transactions,
+                AVG(EXTRACT(EPOCH FROM (detection_time - created_at)) * 1000) as avg_processing_time_ms,
+                MODE() WITHIN GROUP (ORDER BY fraud_type) FILTER (WHERE is_fraudulent = true) as most_common_fraud_type
+            FROM fraud_detection_results
+            WHERE detection_time >= $1::timestamp AND detection_time <= $2::timestamp
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {start_date, end_date});
+
+        if (results.empty()) {
+            return {
+                {"total_transactions", 0},
+                {"fraudulent_transactions", 0},
+                {"fraud_rate", 0.0},
+                {"average_processing_time_ms", 0.0},
+                {"most_common_fraud_type", ""}
+            };
+        }
+
+        const auto& row = results[0];
+        int total = std::stoi(row.at("total_transactions"));
+        int fraudulent = std::stoi(row.at("fraudulent_transactions"));
+        double fraud_rate = total > 0 ? static_cast<double>(fraudulent) / total : 0.0;
+
+        return {
+            {"total_transactions", total},
+            {"fraudulent_transactions", fraudulent},
+            {"fraud_rate", fraud_rate},
+            {"average_processing_time_ms", std::stod(row.at("avg_processing_time_ms"))},
+            {"most_common_fraud_type", row.at("most_common_fraud_type")}
+        };
+
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to get fraud detection summary: {}", e.what());
+        return {};
+    }
 }
 
 std::vector<nlohmann::json> AdvancedRuleEngineAPIHandlers::get_top_fraud_rules(int limit) {
-    // Simplified implementation
-    return {
-        {{"rule_id", "rule_001"}, {"rule_name", "High Amount Check"}, {"fraud_detections", 15}},
-        {{"rule_id", "rule_002"}, {"rule_name", "Velocity Check"}, {"fraud_detections", 8}},
-        {{"rule_id", "rule_003"}, {"rule_name", "Location Anomaly"}, {"fraud_detections", 5}}
-    };
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available");
+            return {};
+        }
+
+        std::string query = R"(
+            SELECT
+                r.rule_id,
+                r.name as rule_name,
+                COUNT(fdr.id) as fraud_detections,
+                AVG(fdr.fraud_score) as avg_fraud_score
+            FROM fraud_detection_rules r
+            INNER JOIN fraud_detection_results fdr
+                ON fdr.rule_results::jsonb @> jsonb_build_array(
+                    jsonb_build_object('rule_id', r.rule_id, 'result', 'FAIL')
+                )
+            WHERE fdr.is_fraudulent = true
+            GROUP BY r.rule_id, r.name
+            ORDER BY fraud_detections DESC
+            LIMIT $1
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {std::to_string(limit)});
+
+        std::vector<nlohmann::json> top_rules;
+        for (const auto& row : results) {
+            top_rules.push_back({
+                {"rule_id", row.at("rule_id")},
+                {"rule_name", row.at("rule_name")},
+                {"fraud_detections", std::stoi(row.at("fraud_detections"))},
+                {"avg_fraud_score", std::stod(row.at("avg_fraud_score"))}
+            });
+        }
+
+        return top_rules;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to get top fraud rules: {}", e.what());
+        return {};
+    }
 }
 
 std::unordered_map<std::string, int> AdvancedRuleEngineAPIHandlers::get_fraud_detection_by_risk_level() {
-    return {
-        {"LOW", 50},
-        {"MEDIUM", 30},
-        {"HIGH", 15},
-        {"CRITICAL", 5}
-    };
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available");
+            return {};
+        }
+
+        std::string query = R"(
+            SELECT
+                overall_risk as risk_level,
+                COUNT(*) as count
+            FROM fraud_detection_results
+            WHERE is_fraudulent = true
+            GROUP BY overall_risk
+            ORDER BY
+                CASE overall_risk
+                    WHEN 'CRITICAL' THEN 1
+                    WHEN 'HIGH' THEN 2
+                    WHEN 'MEDIUM' THEN 3
+                    WHEN 'LOW' THEN 4
+                    ELSE 5
+                END
+        )";
+
+        auto results = db_conn_->execute_query_multi(query, {});
+
+        std::unordered_map<std::string, int> risk_distribution;
+        for (const auto& row : results) {
+            std::string risk_level = row.at("risk_level");
+            int count = std::stoi(row.at("count"));
+            risk_distribution[risk_level] = count;
+        }
+
+        return risk_distribution;
+
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to get fraud detection by risk level: {}", e.what());
+        return {};
+    }
 }
 
 // Utility string conversion methods

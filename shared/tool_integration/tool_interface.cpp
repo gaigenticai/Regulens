@@ -420,15 +420,203 @@ bool ToolRegistry::reload_tool_configs() {
 }
 
 bool ToolRegistry::persist_tool_config(const ToolConfig& config) {
-    // In production, this would save to database
     logger_->log(LogLevel::DEBUG, "Persisting configuration for tool: " + config.tool_id);
-    return true;
+
+    try {
+        if (!db_pool_) {
+            logger_->log(LogLevel::ERROR, "Database pool not available for persisting tool config");
+            return false;
+        }
+
+        auto db_conn = db_pool_->get_connection();
+        if (!db_conn || !db_conn->is_connected()) {
+            logger_->log(LogLevel::ERROR, "Failed to get database connection for persisting tool config");
+            return false;
+        }
+
+        // Convert capabilities to JSON array
+        nlohmann::json capabilities_json = nlohmann::json::array();
+        for (const auto& cap : config.capabilities) {
+            capabilities_json.push_back(tool_capability_to_string(cap));
+        }
+
+        // Convert timeout from seconds to integer
+        int timeout_seconds = static_cast<int>(config.timeout.count());
+        int retry_delay_ms = static_cast<int>(config.retry_delay.count());
+
+        // UPSERT query - insert or update if tool_id already exists
+        std::string query = R"(
+            INSERT INTO tool_configurations (
+                tool_id, tool_name, description, category, capabilities,
+                auth_type, auth_config, connection_config, timeout_seconds,
+                max_retries, retry_delay_ms, rate_limit_per_minute,
+                enabled, metadata, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5::jsonb,
+                $6, $7::jsonb, $8::jsonb, $9,
+                $10, $11, $12,
+                $13, $14::jsonb, NOW()
+            )
+            ON CONFLICT (tool_id) DO UPDATE SET
+                tool_name = EXCLUDED.tool_name,
+                description = EXCLUDED.description,
+                category = EXCLUDED.category,
+                capabilities = EXCLUDED.capabilities,
+                auth_type = EXCLUDED.auth_type,
+                auth_config = EXCLUDED.auth_config,
+                connection_config = EXCLUDED.connection_config,
+                timeout_seconds = EXCLUDED.timeout_seconds,
+                max_retries = EXCLUDED.max_retries,
+                retry_delay_ms = EXCLUDED.retry_delay_ms,
+                rate_limit_per_minute = EXCLUDED.rate_limit_per_minute,
+                enabled = EXCLUDED.enabled,
+                metadata = EXCLUDED.metadata,
+                updated_at = NOW()
+        )";
+
+        std::vector<std::string> params = {
+            config.tool_id,
+            config.tool_name,
+            config.description,
+            tool_category_to_string(config.category),
+            capabilities_json.dump(),
+            auth_type_to_string(config.auth_type),
+            config.auth_config.dump(),
+            config.connection_config.dump(),
+            std::to_string(timeout_seconds),
+            std::to_string(config.max_retries),
+            std::to_string(retry_delay_ms),
+            std::to_string(config.rate_limit_per_minute),
+            config.enabled ? "true" : "false",
+            config.metadata.dump()
+        };
+
+        bool success = db_conn->execute_command(query, params);
+
+        db_pool_->return_connection(db_conn);
+
+        if (success) {
+            logger_->log(LogLevel::INFO, "Successfully persisted tool config: " + config.tool_id);
+        } else {
+            logger_->log(LogLevel::ERROR, "Failed to execute persist query for tool: " + config.tool_id);
+        }
+
+        return success;
+    }
+    catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception persisting tool config: " + std::string(e.what()));
+        return false;
+    }
 }
 
 bool ToolRegistry::load_tool_configs() {
-    // In production, this would load from database
     logger_->log(LogLevel::DEBUG, "Loading tool configurations from database");
-    return true;
+
+    try {
+        if (!db_pool_) {
+            logger_->log(LogLevel::ERROR, "Database pool not available for loading tool configs");
+            return false;
+        }
+
+        auto db_conn = db_pool_->get_connection();
+        if (!db_conn || !db_conn->is_connected()) {
+            logger_->log(LogLevel::ERROR, "Failed to get database connection for loading tool configs");
+            return false;
+        }
+
+        // Query all enabled tool configurations
+        std::string query = R"(
+            SELECT
+                tool_id, tool_name, description, category, capabilities,
+                auth_type, auth_config, connection_config, timeout_seconds,
+                max_retries, retry_delay_ms, rate_limit_per_minute,
+                enabled, metadata
+            FROM tool_configurations
+            ORDER BY tool_id
+        )";
+
+        auto results = db_conn->execute_query_multi(query);
+        db_pool_->return_connection(db_conn);
+
+        if (results.empty()) {
+            logger_->log(LogLevel::INFO, "No tool configurations found in database");
+            return true; // Not an error, just no configs yet
+        }
+
+        int loaded_count = 0;
+        int failed_count = 0;
+
+        for (const auto& row_json : results) {
+            try {
+                // Convert JSON row to ToolConfig struct
+                ToolConfig config;
+                config.tool_id = row_json.value("tool_id", "");
+                config.tool_name = row_json.value("tool_name", "");
+                config.description = row_json.value("description", "");
+
+                // Parse category
+                std::string category_str = row_json.value("category", "INTEGRATION");
+                config.category = string_to_tool_category(category_str);
+
+                // Parse capabilities JSON array
+                if (row_json.contains("capabilities") && row_json["capabilities"].is_array()) {
+                    for (const auto& cap_str : row_json["capabilities"]) {
+                        if (cap_str.is_string()) {
+                            config.capabilities.push_back(string_to_tool_capability(cap_str.get<std::string>()));
+                        }
+                    }
+                }
+
+                // Parse auth type
+                std::string auth_type_str = row_json.value("auth_type", "NONE");
+                config.auth_type = string_to_auth_type(auth_type_str);
+
+                // Parse JSON fields
+                config.auth_config = row_json.value("auth_config", nlohmann::json::object());
+                config.connection_config = row_json.value("connection_config", nlohmann::json::object());
+                config.metadata = row_json.value("metadata", nlohmann::json::object());
+
+                // Parse numeric fields
+                int timeout_seconds = row_json.value("timeout_seconds", 30);
+                config.timeout = std::chrono::seconds(timeout_seconds);
+
+                config.max_retries = row_json.value("max_retries", 3);
+
+                int retry_delay_ms = row_json.value("retry_delay_ms", 1000);
+                config.retry_delay = std::chrono::milliseconds(retry_delay_ms);
+
+                config.rate_limit_per_minute = row_json.value("rate_limit_per_minute", 60);
+                config.enabled = row_json.value("enabled", true);
+
+                // Create tool instance from config
+                auto tool = ToolFactory::create_tool(config, logger_);
+                if (tool) {
+                    // Register the tool
+                    std::lock_guard<std::mutex> lock(registry_mutex_);
+                    tools_[config.tool_id] = std::move(tool);
+                    loaded_count++;
+                    logger_->log(LogLevel::DEBUG, "Loaded tool from database: " + config.tool_id);
+                } else {
+                    // Tool factory couldn't create this tool (may be unsupported type)
+                    logger_->log(LogLevel::WARN, "Failed to create tool instance for: " + config.tool_id);
+                    failed_count++;
+                }
+            }
+            catch (const std::exception& e) {
+                logger_->log(LogLevel::ERROR, "Exception processing tool config row: " + std::string(e.what()));
+                failed_count++;
+            }
+        }
+
+        logger_->log(LogLevel::INFO, "Loaded " + std::to_string(loaded_count) +
+                     " tool configurations from database (" + std::to_string(failed_count) + " failed)");
+
+        return failed_count == 0; // Success only if all configs loaded successfully
+    }
+    catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception loading tool configs: " + std::string(e.what()));
+        return false;
+    }
 }
 
 // Utility Functions

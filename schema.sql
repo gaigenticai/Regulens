@@ -95,6 +95,94 @@ CREATE TABLE IF NOT EXISTS feedback_events (
     applied_at TIMESTAMP WITH TIME ZONE
 );
 
+-- Text Analysis Service tables
+CREATE TABLE IF NOT EXISTS text_analysis_results (
+    analysis_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    request_id VARCHAR(255) NOT NULL UNIQUE,
+    text_hash VARCHAR(64) NOT NULL, -- SHA-256 hash for deduplication
+    result_data JSONB NOT NULL, -- Full analysis result as JSON
+    analyzed_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    processing_time_ms INTEGER,
+    total_tokens INTEGER DEFAULT 0,
+    total_cost DECIMAL(10,6) DEFAULT 0.0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_text_analysis_text_hash ON text_analysis_results(text_hash);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_request_id ON text_analysis_results(request_id);
+CREATE INDEX IF NOT EXISTS idx_text_analysis_created_at ON text_analysis_results(created_at);
+
+-- Policy Generation Service tables
+CREATE TABLE IF NOT EXISTS policy_generation_results (
+    generation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    request_id VARCHAR(255) NOT NULL UNIQUE,
+    policy_id VARCHAR(255) NOT NULL UNIQUE,
+    natural_language_input TEXT NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    domain VARCHAR(50) NOT NULL,
+    output_format VARCHAR(20) NOT NULL,
+    generated_rule JSONB NOT NULL,
+    alternative_rules JSONB,
+    validation_result JSONB,
+    confidence_score DECIMAL(3,2),
+    tokens_used INTEGER DEFAULT 0,
+    cost DECIMAL(10,6) DEFAULT 0.0,
+    processing_time_ms INTEGER,
+    success BOOLEAN DEFAULT true,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for policy generation
+CREATE INDEX IF NOT EXISTS idx_policy_generation_policy_id ON policy_generation_results(policy_id);
+CREATE INDEX IF NOT EXISTS idx_policy_generation_domain ON policy_generation_results(domain);
+CREATE INDEX IF NOT EXISTS idx_policy_generation_rule_type ON policy_generation_results(rule_type);
+CREATE INDEX IF NOT EXISTS idx_policy_generation_created_at ON policy_generation_results(created_at);
+
+-- Advanced Rule Engine tables
+CREATE TABLE IF NOT EXISTS advanced_rules (
+    rule_id VARCHAR(255) PRIMARY KEY,
+    rule_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    category VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    conditions JSONB NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    threshold_score DECIMAL(3,2) DEFAULT 0.5,
+    tags TEXT[],
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS rule_evaluation_results (
+    evaluation_id VARCHAR(255) PRIMARY KEY,
+    rule_id VARCHAR(255) NOT NULL REFERENCES advanced_rules(rule_id),
+    entity_id VARCHAR(255) NOT NULL,
+    entity_type VARCHAR(50),
+    score DECIMAL(5,4),
+    triggered BOOLEAN DEFAULT false,
+    action VARCHAR(20),
+    matched_conditions TEXT[],
+    condition_scores JSONB,
+    processing_time_ms INTEGER,
+    evaluated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    source_system VARCHAR(100),
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for rule engine
+CREATE INDEX IF NOT EXISTS idx_advanced_rules_category ON advanced_rules(category);
+CREATE INDEX IF NOT EXISTS idx_advanced_rules_enabled ON advanced_rules(enabled);
+CREATE INDEX IF NOT EXISTS idx_rule_evaluation_rule_id ON rule_evaluation_results(rule_id);
+CREATE INDEX IF NOT EXISTS idx_rule_evaluation_entity_id ON rule_evaluation_results(entity_id);
+CREATE INDEX IF NOT EXISTS idx_rule_evaluation_triggered ON rule_evaluation_results(triggered);
+CREATE INDEX IF NOT EXISTS idx_rule_evaluation_evaluated_at ON rule_evaluation_results(evaluated_at);
+
 CREATE TABLE IF NOT EXISTS learning_models (
     model_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_id VARCHAR(255) NOT NULL,
@@ -6237,3 +6325,135 @@ CREATE INDEX idx_data_pipeline_executions_status ON data_pipeline_executions(sta
 -- Comments
 COMMENT ON TABLE data_pipelines IS 'Data ingestion pipeline definitions and orchestration';
 COMMENT ON TABLE data_pipeline_executions IS 'Historical record of pipeline execution runs';
+
+-- =============================================================================
+-- CONSENSUS ENGINE TABLES
+-- =============================================================================
+
+-- Consensus agents table
+CREATE TABLE IF NOT EXISTS consensus_agents (
+    agent_id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('EXPERT', 'REVIEWER', 'DECISION_MAKER', 'FACILITATOR', 'OBSERVER')),
+    voting_weight DECIMAL(3,2) DEFAULT 1.0 CHECK (voting_weight >= 0.0 AND voting_weight <= 5.0),
+    domain_expertise VARCHAR(255),
+    confidence_threshold DECIMAL(3,2) DEFAULT 0.7 CHECK (confidence_threshold >= 0.0 AND confidence_threshold <= 1.0),
+    is_active BOOLEAN DEFAULT true,
+    last_active TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Consensus sessions table
+CREATE TABLE IF NOT EXISTS consensus_sessions (
+    consensus_id VARCHAR(255) PRIMARY KEY,
+    topic TEXT NOT NULL,
+    description TEXT,
+    algorithm VARCHAR(50) NOT NULL CHECK (algorithm IN ('UNANIMOUS', 'MAJORITY', 'WEIGHTED_MAJORITY', 'RANKED_CHOICE', 'QUORUM')),
+    participants TEXT[] NOT NULL, -- Array of agent IDs
+    consensus_threshold DECIMAL(3,2) DEFAULT 0.7 CHECK (consensus_threshold >= 0.0 AND consensus_threshold <= 1.0),
+    max_rounds INTEGER DEFAULT 3 CHECK (max_rounds > 0),
+    timeout_per_round_minutes INTEGER DEFAULT 10 CHECK (timeout_per_round_minutes > 0),
+    custom_rules JSONB, -- Additional configuration rules
+    state VARCHAR(50) NOT NULL DEFAULT 'INITIALIZING' CHECK (state IN ('INITIALIZING', 'COLLECTING_OPINIONS', 'DISCUSSING', 'VOTING', 'RESOLVING_CONFLICTS', 'REACHED_CONSENSUS', 'DEADLOCK', 'TIMEOUT', 'CANCELLED')),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Consensus rounds table
+CREATE TABLE IF NOT EXISTS consensus_rounds (
+    consensus_id VARCHAR(255) NOT NULL REFERENCES consensus_sessions(consensus_id) ON DELETE CASCADE,
+    round_number INTEGER NOT NULL,
+    topic TEXT,
+    description TEXT,
+    state VARCHAR(50) NOT NULL DEFAULT 'COLLECTING_OPINIONS' CHECK (state IN ('INITIALIZING', 'COLLECTING_OPINIONS', 'DISCUSSING', 'VOTING', 'RESOLVING_CONFLICTS', 'REACHED_CONSENSUS', 'DEADLOCK', 'TIMEOUT', 'CANCELLED')),
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    ended_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    PRIMARY KEY (consensus_id, round_number)
+);
+
+-- Agent opinions table
+CREATE TABLE IF NOT EXISTS agent_opinions (
+    opinion_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    consensus_id VARCHAR(255) NOT NULL REFERENCES consensus_sessions(consensus_id) ON DELETE CASCADE,
+    round_number INTEGER NOT NULL,
+    agent_id VARCHAR(255) NOT NULL,
+    decision TEXT NOT NULL, -- The agent's proposed decision
+    confidence_score DECIMAL(3,2) NOT NULL CHECK (confidence_score >= 0.0 AND confidence_score <= 1.0),
+    reasoning TEXT,
+    supporting_data JSONB, -- Evidence or data supporting the decision
+    concerns TEXT[], -- Potential issues or risks
+    submitted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (consensus_id, round_number) REFERENCES consensus_rounds(consensus_id, round_number) ON DELETE CASCADE
+);
+
+-- Consensus results table
+CREATE TABLE IF NOT EXISTS consensus_results (
+    consensus_id VARCHAR(255) PRIMARY KEY REFERENCES consensus_sessions(consensus_id) ON DELETE CASCADE,
+    final_decision TEXT NOT NULL,
+    confidence_level VARCHAR(20) NOT NULL CHECK (confidence_level IN ('VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH')),
+    algorithm_used VARCHAR(50) NOT NULL,
+    agreement_percentage DECIMAL(5,4) CHECK (agreement_percentage >= 0.0 AND agreement_percentage <= 1.0),
+    rounds_used INTEGER NOT NULL DEFAULT 1,
+    total_participants INTEGER NOT NULL,
+    success BOOLEAN NOT NULL DEFAULT false,
+    error_message TEXT,
+    processing_time_ms INTEGER,
+    reached_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Vote counts per round (for analytics)
+CREATE TABLE IF NOT EXISTS consensus_vote_counts (
+    consensus_id VARCHAR(255) NOT NULL REFERENCES consensus_sessions(consensus_id) ON DELETE CASCADE,
+    round_number INTEGER NOT NULL,
+    decision TEXT NOT NULL,
+    vote_count INTEGER NOT NULL DEFAULT 0,
+    confidence_sum DECIMAL(10,4) DEFAULT 0.0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (consensus_id, round_number, decision),
+    FOREIGN KEY (consensus_id, round_number) REFERENCES consensus_rounds(consensus_id, round_number) ON DELETE CASCADE
+);
+
+-- Create indexes for consensus engine tables
+CREATE INDEX IF NOT EXISTS idx_consensus_agents_active ON consensus_agents(is_active, last_active DESC);
+CREATE INDEX IF NOT EXISTS idx_consensus_sessions_state ON consensus_sessions(state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consensus_sessions_participants ON consensus_sessions USING GIN(participants);
+CREATE INDEX IF NOT EXISTS idx_consensus_rounds_state ON consensus_rounds(state, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_opinions_consensus_round ON agent_opinions(consensus_id, round_number);
+CREATE INDEX IF NOT EXISTS idx_agent_opinions_agent ON agent_opinions(agent_id, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consensus_results_success ON consensus_results(success, reached_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consensus_vote_counts_round ON consensus_vote_counts(consensus_id, round_number);
+
+-- Comments for consensus engine tables
+COMMENT ON TABLE consensus_agents IS 'Registered agents participating in consensus processes';
+COMMENT ON TABLE consensus_sessions IS 'Consensus process sessions and their configurations';
+COMMENT ON TABLE consensus_rounds IS 'Individual voting rounds within consensus processes';
+COMMENT ON TABLE agent_opinions IS 'Agent opinions and decisions submitted during consensus rounds';
+COMMENT ON TABLE consensus_results IS 'Final results and outcomes of completed consensus processes';
+COMMENT ON TABLE consensus_vote_counts IS 'Aggregated vote counts per decision per round for analytics';
+
+
+-- ============================================================================
+-- ADDITIONAL TABLES FOR AGENT ORCHESTRATOR COMMUNICATION SYSTEM
+-- ============================================================================
+
+-- Consensus contributions table (used by AgentOrchestrator)
+-- This provides an alternative interface to agent_opinions for simpler consensus workflows
+CREATE TABLE IF NOT EXISTS consensus_contributions (
+    contribution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL,
+    agent_id VARCHAR(255) NOT NULL,
+    decision_content JSONB NOT NULL,
+    confidence_score DECIMAL(5,2) NOT NULL CHECK (confidence_score >= 0 AND confidence_score <= 1),
+    submitted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(session_id, agent_id)  -- One contribution per agent per session
+);
+
+CREATE INDEX IF NOT EXISTS idx_consensus_contributions_session ON consensus_contributions(session_id, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consensus_contributions_agent ON consensus_contributions(agent_id, submitted_at DESC);
+
+COMMENT ON TABLE consensus_contributions IS 'Simplified consensus contributions for agent orchestrator workflows';
+

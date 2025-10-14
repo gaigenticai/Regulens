@@ -27,7 +27,7 @@
 #include <nlohmann/json.hpp>
 #include "../logging/structured_logger.hpp"
 #include "../config/configuration_manager.hpp"
-#include "../database/connection_pool.hpp"
+#include "../database/postgresql_connection.hpp"
 #include "../network/http_client.hpp"
 
 namespace regulens {
@@ -120,10 +120,10 @@ public:
         // Initialize default routing rules
         initialize_routing_rules();
         
-        logger_->log(LogLevel::INFO, "Agent Output Router initialized", {
-            {"max_queue_size", max_queue_size_},
-            {"batch_size", batch_size_}
-        });
+        nlohmann::json init_data;
+        init_data["max_queue_size"] = max_queue_size_;
+        init_data["batch_size"] = batch_size_;
+        logger_->log(LogLevel::INFO, "Agent Output Router initialized", init_data);
     }
     
     ~AgentOutputRouter() {
@@ -158,10 +158,10 @@ public:
         
         // Check queue capacity
         if (output_queue_.size() >= max_queue_size_) {
-            logger_->log(LogLevel::ERROR, "Output queue full, dropping output", {
-                {"agent_id", output.agent_id},
-                {"output_type", output_type_to_string(output.output_type)}
-            });
+            nlohmann::json queue_full_data;
+            queue_full_data["agent_id"] = output.agent_id;
+            queue_full_data["output_type"] = output_type_to_string(output.output_type);
+            logger_->log(LogLevel::ERROR, "Output queue full, dropping output", queue_full_data);
             return false;
         }
         
@@ -169,11 +169,11 @@ public:
         output_queue_.push(output);
         queue_cv_.notify_one();
         
-        logger_->log(LogLevel::DEBUG, "Output queued for routing", {
-            {"agent_id", output.agent_id},
-            {"output_type", output_type_to_string(output.output_type)},
-            {"queue_size", output_queue_.size()}
-        });
+        nlohmann::json queued_data;
+        queued_data["agent_id"] = output.agent_id;
+        queued_data["output_type"] = output_type_to_string(output.output_type);
+        queued_data["queue_size"] = output_queue_.size();
+        logger_->log(LogLevel::DEBUG, "Output queued for routing", queued_data);
         
         return true;
     }
@@ -190,10 +190,10 @@ public:
         
         subscriptions_[output_type][subscriber_id] = callback;
         
-        logger_->log(LogLevel::INFO, "Subscriber added", {
-            {"subscriber_id", subscriber_id},
-            {"output_type", output_type_to_string(output_type)}
-        });
+        nlohmann::json subscriber_data;
+        subscriber_data["subscriber_id"] = subscriber_id;
+        subscriber_data["output_type"] = output_type_to_string(output_type);
+        logger_->log(LogLevel::INFO, "Subscriber added", subscriber_data);
     }
     
     /**
@@ -266,10 +266,10 @@ public:
             processing_thread_.join();
         }
         
-        logger_->log(LogLevel::INFO, "Agent Output Router shutdown complete", {
-            {"outputs_processed", outputs_processed_.load()},
-            {"outputs_failed", outputs_failed_.load()}
-        });
+        nlohmann::json shutdown_data;
+        shutdown_data["outputs_processed"] = outputs_processed_.load();
+        shutdown_data["outputs_failed"] = outputs_failed_.load();
+        logger_->log(LogLevel::INFO, "Agent Output Router shutdown complete", shutdown_data);
     }
     
 private:
@@ -307,10 +307,10 @@ private:
                     outputs_processed_++;
                 } catch (const std::exception& e) {
                     outputs_failed_++;
-                    logger_->log(LogLevel::ERROR, "Failed to process output", {
-                        {"agent_id", output.agent_id},
-                        {"error", e.what()}
-                    });
+                    nlohmann::json process_error_data;
+                    process_error_data["agent_id"] = output.agent_id;
+                    process_error_data["error"] = e.what();
+                    logger_->log(LogLevel::ERROR, "Failed to process output", process_error_data);
                     
                     // Add to dead letter queue for retry
                     dead_letter_queue_.push(output);
@@ -467,15 +467,15 @@ private:
 
             conn->execute_query_multi(insert_query, params);
             
-            logger_->log(LogLevel::DEBUG, "Output persisted to database", {
-                {"table", table_name},
-                {"output_id", output.output_id}
-            });
-            
+            nlohmann::json persist_data;
+            persist_data["table"] = table_name;
+            persist_data["output_id"] = output.output_id;
+            logger_->log(LogLevel::DEBUG, "Output persisted to database", persist_data);
+
         } catch (const std::exception& e) {
-            logger_->log(LogLevel::ERROR, "Database persistence failed", {
-                {"error", e.what()}
-            });
+            nlohmann::json persist_error_data;
+            persist_error_data["error"] = e.what();
+            logger_->log(LogLevel::ERROR, "Database persistence failed", persist_error_data);
         }
         
         db_pool_->return_connection(conn);
@@ -527,22 +527,22 @@ private:
             });
 
             if (response.status_code >= 200 && response.status_code < 300) {
-                logger_->log(LogLevel::DEBUG, "WebSocket push successful", {
-                    {"output_id", output.output_id},
-                    {"ws_server", ws_server_url}
-                });
+                nlohmann::json ws_success_data;
+                ws_success_data["output_id"] = output.output_id;
+                ws_success_data["ws_server"] = ws_server_url;
+                logger_->log(LogLevel::DEBUG, "WebSocket push successful", ws_success_data);
             } else {
-                logger_->log(LogLevel::WARN, "WebSocket push failed", {
-                    {"output_id", output.output_id},
-                    {"status_code", response.status_code}
-                });
+                nlohmann::json ws_fail_data;
+                ws_fail_data["output_id"] = output.output_id;
+                ws_fail_data["status_code"] = response.status_code;
+                logger_->log(LogLevel::WARN, "WebSocket push failed", ws_fail_data);
             }
 
         } catch (const std::exception& e) {
-            logger_->log(LogLevel::ERROR, "WebSocket push exception", {
-                {"output_id", output.output_id},
-                {"error", e.what()}
-            });
+            nlohmann::json ws_error_data;
+            ws_error_data["output_id"] = output.output_id;
+            ws_error_data["error"] = e.what();
+            logger_->log(LogLevel::ERROR, "WebSocket push exception", ws_error_data);
         }
     }
     
@@ -574,26 +574,26 @@ private:
             });
 
             if (response.status_code >= 200 && response.status_code < 300) {
-                logger_->log(LogLevel::INFO, "Webhook notification sent successfully", {
-                    {"webhook_url", webhook_url},
-                    {"output_id", output.output_id},
-                    {"status_code", response.status_code}
-                });
+                nlohmann::json webhook_success_data;
+                webhook_success_data["webhook_url"] = webhook_url;
+                webhook_success_data["output_id"] = output.output_id;
+                webhook_success_data["status_code"] = response.status_code;
+                logger_->log(LogLevel::INFO, "Webhook notification sent successfully", webhook_success_data);
             } else {
-                logger_->log(LogLevel::WARN, "Webhook notification failed", {
-                    {"webhook_url", webhook_url},
-                    {"output_id", output.output_id},
-                    {"status_code", response.status_code},
-                    {"response_body", response.body}
-                });
+                nlohmann::json webhook_fail_data;
+                webhook_fail_data["webhook_url"] = webhook_url;
+                webhook_fail_data["output_id"] = output.output_id;
+                webhook_fail_data["status_code"] = response.status_code;
+                webhook_fail_data["response_body"] = response.body;
+                logger_->log(LogLevel::WARN, "Webhook notification failed", webhook_fail_data);
             }
 
         } catch (const std::exception& e) {
-            logger_->log(LogLevel::ERROR, "Webhook notification exception", {
-                {"webhook_url", webhook_url},
-                {"output_id", output.output_id},
-                {"error", e.what()}
-            });
+            nlohmann::json webhook_error_data;
+            webhook_error_data["webhook_url"] = webhook_url;
+            webhook_error_data["output_id"] = output.output_id;
+            webhook_error_data["error"] = e.what();
+            logger_->log(LogLevel::ERROR, "Webhook notification exception", webhook_error_data);
         }
     }
     
@@ -611,10 +611,10 @@ private:
             try {
                 callback(output);
             } catch (const std::exception& e) {
-                logger_->log(LogLevel::ERROR, "Subscriber callback failed", {
-                    {"subscriber_id", subscriber_id},
-                    {"error", e.what()}
-                });
+                nlohmann::json callback_error_data;
+                callback_error_data["subscriber_id"] = subscriber_id;
+                callback_error_data["error"] = e.what();
+                logger_->log(LogLevel::ERROR, "Subscriber callback failed", callback_error_data);
             }
         }
     }

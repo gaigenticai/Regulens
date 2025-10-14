@@ -11106,20 +11106,81 @@ HTTPResponse WebUIHandlers::handle_communication_stats(const HTTPRequest& reques
     }
 
     nlohmann::json stats = {
-        {"communication_enabled", false}, // Not yet implemented
+        {"communication_enabled", communication_mediator_ != nullptr && inter_agent_communicator_ != nullptr},
         {"translation_enabled", message_translator_ != nullptr},
         {"consensus_enabled", consensus_engine_ != nullptr}
     };
 
-    // Inter-agent communication stats - not yet implemented
-    stats["communication_stats"] = {{"status", "not_implemented"}};
-
-    if (consensus_engine_) {
-        stats["consensus_stats"] = {{"status", "implemented"}};
+    // Inter-agent communication stats - production-grade implementation
+    if (inter_agent_communicator_ && db_connection_) {
+        try {
+            // Get communication statistics from database
+            std::string query = R"(
+                SELECT 
+                    COUNT(*) as total_messages,
+                    COUNT(DISTINCT from_agent) as active_senders,
+                    COUNT(DISTINCT to_agent) as active_receivers,
+                    AVG(CASE WHEN delivered_at IS NOT NULL THEN 
+                        EXTRACT(EPOCH FROM (delivered_at - created_at)) ELSE NULL END) as avg_delivery_time_seconds
+                FROM agent_messages
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+            )";
+            
+            auto result = db_connection_->execute_query(query);
+            if (result.has_value()) {
+                stats["communication_stats"] = {
+                    {"status", "active"},
+                    {"total_messages_24h", result->get<int>("total_messages", 0)},
+                    {"active_senders", result->get<int>("active_senders", 0)},
+                    {"active_receivers", result->get<int>("active_receivers", 0)},
+                    {"avg_delivery_time_seconds", result->get<double>("avg_delivery_time_seconds", 0.0)}
+                };
+            } else {
+                stats["communication_stats"] = {{"status", "no_data"}};
+            }
+        } catch (const std::exception& e) {
+            stats["communication_stats"] = {
+                {"status", "error"},
+                {"error", e.what()}
+            };
+        }
+    } else {
+        stats["communication_stats"] = {{"status", "not_available"}};
     }
 
+    // Consensus engine stats
+    if (consensus_engine_) {
+        try {
+            auto consensus_stats = consensus_engine_->get_consensus_stats();
+            stats["consensus_stats"] = {
+                {"status", "active"},
+                {"total_sessions", consensus_stats["total_sessions"]},
+                {"successful_consensus", consensus_stats["successful_consensus"]},
+                {"failed_consensus", consensus_stats["failed_consensus"]},
+                {"avg_rounds_to_consensus", consensus_stats["avg_rounds"]}
+            };
+        } catch (const std::exception& e) {
+            stats["consensus_stats"] = {{"status", "error"}, {"error", e.what()}};
+        }
+    } else {
+        stats["consensus_stats"] = {{"status", "not_available"}};
+    }
+
+    // Message translator stats
     if (message_translator_) {
-        stats["translation_stats"] = {{"status", "not_implemented"}};
+        try {
+            auto translation_stats = message_translator_->get_translation_stats();
+            stats["translation_stats"] = {
+                {"status", "active"},
+                {"translations_performed", translation_stats["total_translations"]},
+                {"avg_translation_time_ms", translation_stats["avg_time_ms"]},
+                {"success_rate", translation_stats["success_rate"]}
+            };
+        } catch (const std::exception& e) {
+            stats["translation_stats"] = {{"status", "error"}, {"error", e.what()}};
+        }
+    } else {
+        stats["translation_stats"] = {{"status", "not_available"}};
     }
 
     return create_json_response(stats);

@@ -69,6 +69,7 @@ add_library(regulens_shared STATIC
     agentic_brain/message_translator_api_handlers.cpp
     agentic_brain/communication_mediator.cpp
     agentic_brain/communication_mediator_api_handlers.cpp
+    tool_integration/tools/enterprise_connectors.cpp
     fraud_detection/fraud_api_handlers.cpp
     fraud_detection/fraud_scan_worker.cpp
     data_ingestion/ingestion_api_handlers.cpp

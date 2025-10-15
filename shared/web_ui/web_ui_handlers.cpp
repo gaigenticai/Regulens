@@ -186,7 +186,7 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
                 db_connection_ = db_pool_->get_connection();
 
                 // Initialize Dynamic Configuration Manager
-                dynamic_config_manager_ = std::make_shared<DynamicConfigManager>(db_connection_->get_pg_conn(), logger_);
+                dynamic_config_manager_ = std::make_shared<DynamicConfigManager>(db_connection_, logger_);
                 dynamic_config_manager_->initialize();
 
                 // Initialize Memory System components (requires database)

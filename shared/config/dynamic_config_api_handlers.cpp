@@ -6,8 +6,9 @@
 #include "dynamic_config_api_handlers.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
-#include <sstream>
+#include <chrono>
 #include <fstream>
+#include <sstream>
 
 namespace regulens {
 
@@ -70,6 +71,24 @@ std::string DynamicConfigAPIHandlers::handle_set_config(const std::string& reque
         nlohmann::json value = request["value"];
         std::string module_name = request.value("module_name", "");
         std::string change_reason = request.value("change_reason", "");
+        bool is_encrypted = request.value("is_encrypted", false);
+        bool requires_restart = request.value("requires_restart", false);
+        std::string description = request.value("description", "");
+
+        std::vector<std::string> tags;
+        if (request.contains("tags") && request["tags"].is_array()) {
+            for (const auto& tag : request["tags"]) {
+                if (tag.is_string()) {
+                    tags.push_back(tag.get<std::string>());
+                }
+            }
+        }
+
+        nlohmann::json validation_rules = request.value("validation_rules", nlohmann::json::object());
+        std::optional<ConfigDataType> data_type_override;
+        if (request.contains("data_type") && request["data_type"].is_string()) {
+            data_type_override = config_manager_->parse_data_type(request["data_type"].get<std::string>());
+        }
 
         if (!validate_user_access(user_id, "set_config", key)) {
             return create_error_response("Access denied", 403).dump();
@@ -79,7 +98,18 @@ std::string DynamicConfigAPIHandlers::handle_set_config(const std::string& reque
             return create_error_response("Scope access denied", 403).dump();
         }
 
-        bool success = config_manager_->set_config(key, value, scope, module_name, user_id, change_reason);
+        bool success = config_manager_->set_config(key,
+                                                  value,
+                                                  scope,
+                                                  module_name,
+                                                  user_id,
+                                                  change_reason,
+                                                  is_encrypted,
+                                                  requires_restart,
+                                                  description,
+                                                  tags,
+                                                  validation_rules,
+                                                  data_type_override);
 
         if (!success) {
             return create_error_response("Failed to set configuration").dump();
@@ -119,8 +149,37 @@ std::string DynamicConfigAPIHandlers::handle_update_config(const std::string& ke
         nlohmann::json value = request["value"];
         std::string module_name = request.value("module_name", "");
         std::string change_reason = request.value("change_reason", "Updated via API");
+        bool is_encrypted = request.value("is_encrypted", false);
+        bool requires_restart = request.value("requires_restart", false);
+        std::string description = request.value("description", "");
 
-        bool success = config_manager_->set_config(key, value, scope, module_name, user_id, change_reason);
+        std::vector<std::string> tags;
+        if (request.contains("tags") && request["tags"].is_array()) {
+            for (const auto& tag : request["tags"]) {
+                if (tag.is_string()) {
+                    tags.push_back(tag.get<std::string>());
+                }
+            }
+        }
+
+        nlohmann::json validation_rules = request.value("validation_rules", nlohmann::json::object());
+        std::optional<ConfigDataType> data_type_override;
+        if (request.contains("data_type") && request["data_type"].is_string()) {
+            data_type_override = config_manager_->parse_data_type(request["data_type"].get<std::string>());
+        }
+
+        bool success = config_manager_->set_config(key,
+                                                  value,
+                                                  scope,
+                                                  module_name,
+                                                  user_id,
+                                                  change_reason,
+                                                  is_encrypted,
+                                                  requires_restart,
+                                                  description,
+                                                  tags,
+                                                  validation_rules,
+                                                  data_type_override);
 
         if (!success) {
             return create_error_response("Failed to update configuration").dump();
@@ -187,7 +246,8 @@ std::string DynamicConfigAPIHandlers::handle_get_configs_by_scope(const std::str
         auto configs = config_manager_->get_configs_by_scope(scope);
 
         std::vector<nlohmann::json> formatted_configs;
-        for (const auto& [key, config] : configs) {
+        formatted_configs.reserve(configs.size());
+        for (const auto& config : configs) {
             formatted_configs.push_back(format_config_value(config));
         }
 
@@ -214,7 +274,8 @@ std::string DynamicConfigAPIHandlers::handle_get_configs_by_module(const std::st
         auto configs = config_manager_->get_configs_by_module(module);
 
         std::vector<nlohmann::json> formatted_configs;
-        for (const auto& [key, config] : configs) {
+        formatted_configs.reserve(configs.size());
+        for (const auto& config : configs) {
             formatted_configs.push_back(format_config_value(config));
         }
 
@@ -250,26 +311,32 @@ std::string DynamicConfigAPIHandlers::handle_register_config_schema(const std::s
         std::string scope_str = request.value("scope", "GLOBAL");
         ConfigScope scope = parse_scope_param(scope_str);
 
-        ConfigDataType data_type = ConfigDataType::STRING;
-        if (data_type_str == "INTEGER") data_type = ConfigDataType::INTEGER;
-        else if (data_type_str == "FLOAT") data_type = ConfigDataType::FLOAT;
-        else if (data_type_str == "BOOLEAN") data_type = ConfigDataType::BOOLEAN;
-        else if (data_type_str == "JSON") data_type = ConfigDataType::JSON;
-        else if (data_type_str == "ARRAY") data_type = ConfigDataType::ARRAY;
-        else if (data_type_str == "SECRET") data_type = ConfigDataType::SECRET;
+        ConfigDataType data_type = config_manager_->parse_data_type(data_type_str);
 
-        std::optional<std::string> validation_regex;
-        if (request.contains("validation_regex")) {
-            validation_regex = request["validation_regex"];
+        nlohmann::json validation_rules = nlohmann::json::object();
+        if (request.contains("validation_regex") && request["validation_regex"].is_string()) {
+            validation_rules["pattern"] = request["validation_regex"].get<std::string>();
+        }
+        if (request.contains("allowed_values") && request["allowed_values"].is_array()) {
+            validation_rules["allowed_values"] = request["allowed_values"];
+        }
+        if (request.contains("numeric_constraints") && request["numeric_constraints"].is_object()) {
+            validation_rules["numeric"] = request["numeric_constraints"];
+        }
+        if (request.contains("length_constraints") && request["length_constraints"].is_object()) {
+            validation_rules["length"] = request["length_constraints"];
         }
 
-        std::optional<nlohmann::json> allowed_values;
-        if (request.contains("allowed_values")) {
-            allowed_values = request["allowed_values"];
-        }
+        std::string module_name = request.value("module_name", "");
 
         bool success = config_manager_->register_config_schema(
-            key, data_type, description, scope, validation_regex, allowed_values
+            key,
+            data_type,
+            validation_rules,
+            description,
+            scope,
+            module_name,
+            user_id
         );
 
         if (!success) {
@@ -306,7 +373,12 @@ std::string DynamicConfigAPIHandlers::handle_validate_config_value(const std::st
         std::string key = request["key"];
         nlohmann::json value = request["value"];
 
-        auto validation_result = config_manager_->validate_config_value(key, value);
+        std::optional<ConfigDataType> type_override;
+        if (request.contains("data_type") && request["data_type"].is_string()) {
+            type_override = config_manager_->parse_data_type(request["data_type"].get<std::string>());
+        }
+
+        auto validation_result = config_manager_->validate_config_value(key, value, type_override);
 
         nlohmann::json response_data = format_validation_result(validation_result);
         response_data["key"] = key;
@@ -340,16 +412,20 @@ std::string DynamicConfigAPIHandlers::handle_get_config_history(const std::strin
             }
         }
 
+        ConfigScope history_scope = parse_scope_param(scope_str);
         auto history = config_manager_->get_config_history(key, since, limit);
 
         std::vector<nlohmann::json> formatted_history;
+        formatted_history.reserve(history.size());
         for (const auto& change : history) {
-            formatted_history.push_back(format_config_change(change));
+            if (change.scope == history_scope) {
+                formatted_history.push_back(format_config_change(change));
+            }
         }
 
         nlohmann::json response_data = create_paginated_response(
             formatted_history,
-            formatted_history.size(),
+            static_cast<int>(formatted_history.size()),
             1,
             limit
         );
@@ -416,12 +492,14 @@ nlohmann::json DynamicConfigAPIHandlers::format_config_value(const ConfigValue& 
     return {
         {"key", config.key},
         {"value", config.value},
-        {"data_type", config_manager_->data_type_to_string(config.data_type)},
-        {"scope", config_manager_->scope_to_string(config.scope)},
-        {"module_name", config.module_name},
-        {"description", config.description},
+        {"data_type", config_manager_->data_type_to_string(config.metadata.data_type)},
+        {"scope", config_manager_->scope_to_string(config.metadata.scope)},
+        {"module_name", config.metadata.module_name},
+        {"description", config.metadata.description},
         {"is_encrypted", config.is_encrypted},
-        {"version", config.version},
+        {"version", config.metadata.version},
+        {"requires_restart", config.metadata.requires_restart},
+        {"tags", config.metadata.tags},
         {"updated_by", config.updated_by.value_or("")},
         {"created_at", std::chrono::duration_cast<std::chrono::seconds>(
             config.created_at.time_since_epoch()).count()},
@@ -433,12 +511,14 @@ nlohmann::json DynamicConfigAPIHandlers::format_config_value(const ConfigValue& 
 nlohmann::json DynamicConfigAPIHandlers::format_config_change(const ConfigChangeLog& change) {
     return {
         {"change_id", change.change_id},
-        {"config_key", change.config_key},
+        {"config_key", change.key},
         {"old_value", change.old_value},
         {"new_value", change.new_value},
         {"changed_by", change.changed_by},
         {"change_reason", change.change_reason},
-        {"change_type", change.change_type},
+        {"change_source", change.change_source},
+        {"scope", config_manager_->scope_to_string(change.scope)},
+        {"version", change.version},
         {"changed_at", std::chrono::duration_cast<std::chrono::seconds>(
             change.changed_at.time_since_epoch()).count()}
     };

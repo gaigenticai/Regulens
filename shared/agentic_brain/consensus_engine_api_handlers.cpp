@@ -1,8 +1,32 @@
 #include "consensus_engine_api_handlers.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <stdexcept>
 
 namespace regulens {
+
+namespace {
+
+std::string agent_role_to_string(AgentRole role) {
+    switch (role) {
+        case AgentRole::EXPERT: return "EXPERT";
+        case AgentRole::REVIEWER: return "REVIEWER";
+        case AgentRole::DECISION_MAKER: return "DECISION_MAKER";
+        case AgentRole::FACILITATOR: return "FACILITATOR";
+        case AgentRole::OBSERVER: return "OBSERVER";
+        default: return "OBSERVER";
+    }
+}
+
+AgentRole parse_agent_role(const std::string& role_str) {
+    if (role_str == "EXPERT") return AgentRole::EXPERT;
+    if (role_str == "REVIEWER") return AgentRole::REVIEWER;
+    if (role_str == "DECISION_MAKER") return AgentRole::DECISION_MAKER;
+    if (role_str == "FACILITATOR") return AgentRole::FACILITATOR;
+    return AgentRole::OBSERVER;
+}
+
+} // namespace
 
 ConsensusEngineAPIHandlers::ConsensusEngineAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -54,10 +78,20 @@ std::string ConsensusEngineAPIHandlers::handle_initiate_consensus(const std::str
         return create_success_response(response_data, "Consensus process initiated successfully").dump();
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "initiate_consensus"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "initiate_consensus"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("consensus_initiation_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "consensus_initiation_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to initiate consensus: " + std::string(e.what()), 500).dump();
     }
 }
@@ -77,7 +111,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_consensus_result(const std::s
         return create_success_response(format_consensus_result_to_json(result), "Consensus result retrieved successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("get_consensus_result_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "get_consensus_result_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to retrieve consensus result", 500).dump();
     }
 }
@@ -111,7 +150,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_consensus_state(const std::st
         return create_success_response(response_data, "Consensus state retrieved successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("get_consensus_state_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "get_consensus_state_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to retrieve consensus state", 500).dump();
     }
 }
@@ -140,10 +184,20 @@ std::string ConsensusEngineAPIHandlers::handle_submit_opinion(const std::string&
         }
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "submit_opinion"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "submit_opinion"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("submit_opinion_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "submit_opinion_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to submit opinion", 500).dump();
     }
 }
@@ -173,7 +227,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_agent_opinions(const std::str
         return create_success_response(response_data, "Agent opinions retrieved successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("get_agent_opinions_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "get_agent_opinions_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to retrieve agent opinions", 500).dump();
     }
 }
@@ -206,10 +265,20 @@ std::string ConsensusEngineAPIHandlers::handle_update_opinion(const std::string&
         }
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "update_opinion"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "update_opinion"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("update_opinion_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "update_opinion_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to update opinion", 500).dump();
     }
 }
@@ -231,7 +300,12 @@ std::string ConsensusEngineAPIHandlers::handle_start_voting_round(const std::str
         }
 
     } catch (const std::exception& e) {
-        logger_->log("start_voting_round_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "start_voting_round_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to start voting round", 500).dump();
     }
 }
@@ -252,7 +326,12 @@ std::string ConsensusEngineAPIHandlers::handle_end_voting_round(const std::strin
         }
 
     } catch (const std::exception& e) {
-        logger_->log("end_voting_round_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "end_voting_round_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to end voting round", 500).dump();
     }
 }
@@ -268,7 +347,12 @@ std::string ConsensusEngineAPIHandlers::handle_calculate_consensus(const std::st
         return create_success_response(format_consensus_result_to_json(result), "Consensus calculated successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("calculate_consensus_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "calculate_consensus_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to calculate consensus", 500).dump();
     }
 }
@@ -296,10 +380,20 @@ std::string ConsensusEngineAPIHandlers::handle_register_agent(const std::string&
         }
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "register_agent"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "register_agent"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("register_agent_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "register_agent_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to register agent", 500).dump();
     }
 }
@@ -327,10 +421,20 @@ std::string ConsensusEngineAPIHandlers::handle_update_agent(const std::string& a
         }
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "update_agent"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "update_agent"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("update_agent_error", {{"error", e.what()}, {"agent_id", agent_id}}, spdlog::level::error);
+        logger_->error(
+            "update_agent_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"agent_id", agent_id}}
+        );
         return create_error_response("Failed to update agent", 500).dump();
     }
 }
@@ -350,7 +454,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_agent(const std::string& agen
         }
 
     } catch (const std::exception& e) {
-        logger_->log("get_agent_error", {{"error", e.what()}, {"agent_id", agent_id}}, spdlog::level::error);
+        logger_->error(
+            "get_agent_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"agent_id", agent_id}}
+        );
         return create_error_response("Failed to retrieve agent", 500).dump();
     }
 }
@@ -375,7 +484,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_active_agents(const std::stri
         return create_success_response(response_data, "Active agents retrieved successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("get_active_agents_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "get_active_agents_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to retrieve active agents", 500).dump();
     }
 }
@@ -396,7 +510,12 @@ std::string ConsensusEngineAPIHandlers::handle_deactivate_agent(const std::strin
         }
 
     } catch (const std::exception& e) {
-        logger_->log("deactivate_agent_error", {{"error", e.what()}, {"agent_id", agent_id}}, spdlog::level::error);
+        logger_->error(
+            "deactivate_agent_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"agent_id", agent_id}}
+        );
         return create_error_response("Failed to deactivate agent", 500).dump();
     }
 }
@@ -418,7 +537,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_consensus_statistics(const st
         return create_success_response(stats_json, "Consensus statistics retrieved successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("get_consensus_statistics_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "get_consensus_statistics_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to retrieve consensus statistics", 500).dump();
     }
 }
@@ -446,7 +570,12 @@ std::string ConsensusEngineAPIHandlers::handle_get_agent_performance_metrics(con
         return create_success_response(response_data, "Agent performance metrics retrieved successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("get_agent_performance_metrics_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "get_agent_performance_metrics_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to retrieve agent performance metrics", 500).dump();
     }
 }
@@ -475,10 +604,20 @@ std::string ConsensusEngineAPIHandlers::handle_calculate_decision_accuracy(const
         return create_success_response(response_data, "Decision accuracy calculated successfully").dump();
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "calculate_decision_accuracy"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "calculate_decision_accuracy"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("calculate_decision_accuracy_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "calculate_decision_accuracy_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to calculate decision accuracy", 500).dump();
     }
 }
@@ -513,10 +652,20 @@ std::string ConsensusEngineAPIHandlers::handle_set_default_algorithm(const std::
         return create_success_response(response_data, "Default algorithm updated successfully").dump();
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "set_default_algorithm"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "set_default_algorithm"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("set_default_algorithm_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "set_default_algorithm_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to set default algorithm", 500).dump();
     }
 }
@@ -546,10 +695,20 @@ std::string ConsensusEngineAPIHandlers::handle_set_max_rounds(const std::string&
         return create_success_response(response_data, "Max rounds updated successfully").dump();
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "set_max_rounds"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "set_max_rounds"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("set_max_rounds_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "set_max_rounds_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to set max rounds", 500).dump();
     }
 }
@@ -578,10 +737,20 @@ std::string ConsensusEngineAPIHandlers::handle_set_timeout_per_round(const std::
         return create_success_response(response_data, "Timeout per round updated successfully").dump();
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "set_timeout_per_round"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "set_timeout_per_round"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("set_timeout_per_round_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "set_timeout_per_round_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to set timeout per round", 500).dump();
     }
 }
@@ -608,10 +777,20 @@ std::string ConsensusEngineAPIHandlers::handle_optimize_for_scenario(const std::
         return create_success_response(response_data, "Consensus engine optimized for scenario successfully").dump();
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "optimize_for_scenario"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "optimize_for_scenario"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("optimize_for_scenario_error", {{"error", e.what()}, {"user_id", user_id}}, spdlog::level::error);
+        logger_->error(
+            "optimize_for_scenario_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"user_id", user_id}}
+        );
         return create_error_response("Failed to optimize for scenario", 500).dump();
     }
 }
@@ -640,7 +819,12 @@ std::string ConsensusEngineAPIHandlers::handle_identify_conflicts(const std::str
         return create_success_response(response_data, "Conflicts identified successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("identify_conflicts_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "identify_conflicts_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to identify conflicts", 500).dump();
     }
 }
@@ -667,7 +851,12 @@ std::string ConsensusEngineAPIHandlers::handle_suggest_resolution_strategies(con
         return create_success_response(response_data, "Resolution strategies suggested successfully").dump();
 
     } catch (const std::exception& e) {
-        logger_->log("suggest_resolution_strategies_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "suggest_resolution_strategies_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to suggest resolution strategies", 500).dump();
     }
 }
@@ -696,10 +885,20 @@ std::string ConsensusEngineAPIHandlers::handle_resolve_conflict(const std::strin
         }
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log("json_parsing_error", {{"error", e.what()}, {"endpoint", "resolve_conflict"}}, spdlog::level::error);
+        logger_->error(
+            "json_parsing_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"endpoint", "resolve_conflict"}}
+        );
         return create_error_response("Invalid JSON format", 400).dump();
     } catch (const std::exception& e) {
-        logger_->log("resolve_conflict_error", {{"error", e.what()}, {"consensus_id", consensus_id}}, spdlog::level::error);
+        logger_->error(
+            "resolve_conflict_error",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {{"error", e.what()}, {"consensus_id", consensus_id}}
+        );
         return create_error_response("Failed to resolve conflict", 500).dump();
     }
 }
@@ -713,13 +912,23 @@ bool ConsensusEngineAPIHandlers::validate_consensus_config(const nlohmann::json&
     }
 
     if (!config_json.contains("participants") || !config_json["participants"].is_array() || config_json["participants"].empty()) {
-        error_message = "Participants is required and must be a non-empty array of agent IDs";
+        error_message = "Participants is required and must be a non-empty array";
         return false;
+    }
+
+    for (const auto& participant : config_json["participants"]) {
+        if (!(participant.is_string() || (participant.is_object() && participant.contains("agent_id") && participant["agent_id"].is_string()))) {
+            error_message = "Each participant must be either an agent ID string or an object containing an 'agent_id' field";
+            return false;
+        }
     }
 
     if (config_json.contains("algorithm")) {
         std::string algorithm = config_json["algorithm"];
-        std::vector<std::string> valid_algorithms = {"UNANIMOUS", "MAJORITY", "WEIGHTED_MAJORITY", "RANKED_CHOICE", "QUORUM"};
+        std::vector<std::string> valid_algorithms = {
+            "UNANIMOUS", "MAJORITY", "SUPER_MAJORITY", "WEIGHTED_MAJORITY",
+            "RANKED_CHOICE", "QUORUM", "CONSENSUS", "PLURALITY"
+        };
         if (std::find(valid_algorithms.begin(), valid_algorithms.end(), algorithm) == valid_algorithms.end()) {
             error_message = "Invalid algorithm. Must be one of: UNANIMOUS, MAJORITY, WEIGHTED_MAJORITY, RANKED_CHOICE, QUORUM";
         return false;
@@ -742,18 +951,89 @@ ConsensusConfiguration ConsensusEngineAPIHandlers::parse_consensus_config_from_j
 
     config.topic = config_json["topic"];
     config.description = config_json.value("description", "");
-    config.participants = config_json["participants"].get<std::vector<std::string>>();
     config.consensus_threshold = config_json.value("consensus_threshold", 0.7);
     config.max_rounds = config_json.value("max_rounds", 3);
-    config.timeout_per_round_minutes = config_json.value("timeout_per_round_minutes", 10);
+    config.allow_discussion = config_json.value("allow_discussion", true);
+    config.require_justification = config_json.value("require_justification", true);
     config.custom_rules = config_json.value("custom_rules", nlohmann::json::object());
+    config.consensus_id = config_json.value("consensus_id", std::string{});
+    config.timeout_per_round = std::chrono::minutes(config_json.value("timeout_per_round_minutes", 10));
 
-    // Parse algorithm
-    std::string algorithm_str = config_json.value("algorithm", "MAJORITY");
+    const auto& participants_json = config_json["participants"];
+    config.participants.reserve(participants_json.size());
+
+    for (const auto& participant : participants_json) {
+        std::string participant_id;
+        if (participant.is_string()) {
+            participant_id = participant.get<std::string>();
+        } else if (participant.is_object()) {
+            participant_id = participant.value("agent_id", "");
+        }
+
+        if (participant_id.empty()) {
+            continue;
+        }
+
+        Agent agent;
+        if (auto existing_agent = consensus_engine_->get_agent(participant_id)) {
+            agent = *existing_agent;
+        } else {
+            agent.agent_id = participant_id;
+            agent.name = participant.is_object() ? participant.value("name", participant_id)
+                                                 : participant_id;
+            agent.role = participant.is_object()
+                ? parse_agent_role(participant.value("role", std::string("OBSERVER")))
+                : AgentRole::OBSERVER;
+            agent.voting_weight = participant.is_object() && participant.contains("voting_weight") && participant["voting_weight"].is_number()
+                ? participant["voting_weight"].get<double>()
+                : 1.0;
+            agent.domain_expertise = participant.is_object() && participant.contains("domain_expertise") && participant["domain_expertise"].is_string()
+                ? participant["domain_expertise"].get<std::string>()
+                : std::string{};
+            agent.confidence_threshold = participant.is_object() && participant.contains("confidence_threshold") && participant["confidence_threshold"].is_number()
+                ? participant["confidence_threshold"].get<double>()
+                : 0.7;
+            agent.is_active = participant.is_object() && participant.contains("is_active") && participant["is_active"].is_boolean()
+                ? participant["is_active"].get<bool>()
+                : true;
+            agent.last_active = std::chrono::system_clock::now();
+        }
+
+        if (participant.is_object()) {
+            if (participant.contains("role") && participant["role"].is_string()) {
+                agent.role = parse_agent_role(participant["role"].get<std::string>());
+            }
+            if (participant.contains("voting_weight") && participant["voting_weight"].is_number()) {
+                agent.voting_weight = participant["voting_weight"].get<double>();
+            }
+            if (participant.contains("confidence_threshold") && participant["confidence_threshold"].is_number()) {
+                agent.confidence_threshold = participant["confidence_threshold"].get<double>();
+            }
+            if (participant.contains("domain_expertise") && participant["domain_expertise"].is_string()) {
+                agent.domain_expertise = participant["domain_expertise"].get<std::string>();
+            }
+            if (participant.contains("is_active") && participant["is_active"].is_boolean()) {
+                agent.is_active = participant["is_active"].get<bool>();
+            }
+        }
+
+        config.participants.push_back(agent);
+    }
+
+    if (config.participants.empty()) {
+        throw std::runtime_error("Consensus configuration must include at least one valid participant");
+    }
+
+    config.min_participants = config_json.value("min_participants", static_cast<int>(config.participants.size()));
+
+    const std::string algorithm_str = config_json.value("algorithm", "MAJORITY");
     if (algorithm_str == "UNANIMOUS") config.algorithm = VotingAlgorithm::UNANIMOUS;
+    else if (algorithm_str == "SUPER_MAJORITY") config.algorithm = VotingAlgorithm::SUPER_MAJORITY;
     else if (algorithm_str == "WEIGHTED_MAJORITY") config.algorithm = VotingAlgorithm::WEIGHTED_MAJORITY;
     else if (algorithm_str == "RANKED_CHOICE") config.algorithm = VotingAlgorithm::RANKED_CHOICE;
     else if (algorithm_str == "QUORUM") config.algorithm = VotingAlgorithm::QUORUM;
+    else if (algorithm_str == "CONSENSUS") config.algorithm = VotingAlgorithm::CONSENSUS;
+    else if (algorithm_str == "PLURALITY") config.algorithm = VotingAlgorithm::PLURALITY;
     else config.algorithm = VotingAlgorithm::MAJORITY;
 
     return config;
@@ -862,11 +1142,10 @@ nlohmann::json ConsensusEngineAPIHandlers::format_consensus_result_to_json(const
     json["agreement_percentage"] = result.agreement_percentage;
     json["confidence_level"] = [result]() {
         switch (result.confidence_level) {
-            case DecisionConfidence::VERY_HIGH: return "VERY_HIGH";
-            case DecisionConfidence::HIGH: return "HIGH";
-            case DecisionConfidence::MEDIUM: return "MEDIUM";
-            case DecisionConfidence::LOW: return "LOW";
-            case DecisionConfidence::VERY_LOW: return "VERY_LOW";
+            case ConsensusDecisionConfidence::VERY_HIGH: return "VERY_HIGH";
+            case ConsensusDecisionConfidence::HIGH: return "HIGH";
+            case ConsensusDecisionConfidence::MEDIUM: return "MEDIUM";
+            case ConsensusDecisionConfidence::LOW: return "LOW";
             default: return "MEDIUM";
         }
     }();
@@ -932,21 +1211,44 @@ nlohmann::json ConsensusEngineAPIHandlers::format_consensus_config_to_json(const
     nlohmann::json json;
     json["topic"] = config.topic;
     json["description"] = config.description;
-    json["participants"] = config.participants;
+    nlohmann::json participants = nlohmann::json::array();
+    for (const auto& participant : config.participants) {
+        nlohmann::json participant_json;
+        participant_json["agent_id"] = participant.agent_id;
+        participant_json["name"] = participant.name;
+        participant_json["role"] = agent_role_to_string(participant.role);
+        participant_json["voting_weight"] = participant.voting_weight;
+        participant_json["domain_expertise"] = participant.domain_expertise;
+        participant_json["confidence_threshold"] = participant.confidence_threshold;
+        participant_json["is_active"] = participant.is_active;
+        participant_json["last_active"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+            participant.last_active.time_since_epoch()).count();
+        participants.push_back(participant_json);
+    }
+    json["participants"] = participants;
     json["algorithm"] = [config]() {
         switch (config.algorithm) {
             case VotingAlgorithm::UNANIMOUS: return "UNANIMOUS";
             case VotingAlgorithm::MAJORITY: return "MAJORITY";
+            case VotingAlgorithm::SUPER_MAJORITY: return "SUPER_MAJORITY";
             case VotingAlgorithm::WEIGHTED_MAJORITY: return "WEIGHTED_MAJORITY";
             case VotingAlgorithm::RANKED_CHOICE: return "RANKED_CHOICE";
             case VotingAlgorithm::QUORUM: return "QUORUM";
+            case VotingAlgorithm::CONSENSUS: return "CONSENSUS";
+            case VotingAlgorithm::PLURALITY: return "PLURALITY";
             default: return "MAJORITY";
         }
     }();
     json["consensus_threshold"] = config.consensus_threshold;
     json["max_rounds"] = config.max_rounds;
-    json["timeout_per_round_minutes"] = config.timeout_per_round_minutes;
+    json["min_participants"] = config.min_participants;
+    json["allow_discussion"] = config.allow_discussion;
+    json["require_justification"] = config.require_justification;
+    json["timeout_per_round_minutes"] = static_cast<int>(config.timeout_per_round.count());
     json["custom_rules"] = config.custom_rules;
+    if (!config.consensus_id.empty()) {
+        json["consensus_id"] = config.consensus_id;
+    }
     return json;
 }
 
@@ -981,11 +1283,16 @@ bool ConsensusEngineAPIHandlers::validate_user_access(const std::string& user_id
 
     // Log the access attempt
     if (logger_) {
-        nlohmann::json log_data;
-        log_data["user_id"] = user_id;
-        log_data["permission_scope"] = permission_scope;
-        log_data["granted"] = true;
-        logger_->log("permission_check", log_data, spdlog::level::debug);
+        logger_->debug(
+            "permission_check",
+            "ConsensusEngineAPIHandlers",
+            __func__,
+            {
+                {"user_id", user_id},
+                {"permission_scope", permission_scope},
+                {"granted", "true"}
+            }
+        );
     }
 
     return true;
@@ -1007,3 +1314,5 @@ bool ConsensusEngineAPIHandlers::can_participate_in_consensus(const std::string&
         return false;
     }
 }
+
+} // namespace regulens

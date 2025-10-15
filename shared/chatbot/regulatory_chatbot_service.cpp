@@ -7,12 +7,58 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <numeric>
+#include <unordered_map>
+#include <unordered_set>
+#include <cctype>
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 #include <regex>
+#include <ctime>
 
 namespace regulens {
 namespace chatbot {
+
+namespace {
+
+std::string format_double(double value, int precision = 6) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(precision) << value;
+    return oss.str();
+}
+
+std::vector<nlohmann::json> json_array_to_vector(const nlohmann::json& value) {
+    std::vector<nlohmann::json> result;
+    if (!value.is_array()) {
+        return result;
+    }
+    result.reserve(value.size());
+    for (const auto& item : value) {
+        result.push_back(item);
+    }
+    return result;
+}
+
+nlohmann::json safe_parse_json(const std::string& raw, const nlohmann::json& fallback = nlohmann::json::object()) {
+    if (raw.empty()) {
+        return fallback;
+    }
+    try {
+        return nlohmann::json::parse(raw);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+std::string to_lower_copy(const std::string& input) {
+    std::string lower = input;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return lower;
+}
+
+} // namespace
 
 RegulatoryChatbotService::RegulatoryChatbotService(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -112,31 +158,63 @@ RegulatoryChatbotResponse RegulatoryChatbotService::handle_regulatory_query(cons
             knowledge_context.relevant_documents
         );
 
-        // Store messages with audit trail
-        std::optional<nlohmann::json> citations;
-        if (citations_required_ && response.sources_used) {
-            citations = cite_sources("temp_" + generate_uuid(), response.sources_used.value());
+        // Prepare citation preview for response payload
+        std::optional<nlohmann::json> citation_payload;
+        std::vector<nlohmann::json> citation_sources;
+        if (citations_required_ && response.sources_used && response.sources_used->is_array()) {
+            citation_sources = json_array_to_vector(*response.sources_used);
+            auto previews = build_citation_previews(citation_sources);
+            if (!previews.empty()) {
+                citation_payload = previews;
+                response.citations = previews;
+            }
         }
 
+        // Persist user message
         store_regulatory_message(
-            session_id, "user", request.user_message, request.query_context,
-            response.tokens_used / 2, 0.0, 1.0, std::nullopt, std::nullopt, response.processing_time
+            session_id,
+            "user",
+            request.user_message,
+            request.query_context,
+            response.tokens_used / 2,
+            0.0,
+            1.0,
+            std::nullopt,
+            std::nullopt,
+            response.processing_time
         );
 
-        store_regulatory_message(
-            session_id, "assistant", response.response_text, request.query_context,
-            response.tokens_used / 2, response.cost, response.confidence_score,
-            response.sources_used, citations, response.processing_time
+        // Persist assistant response and citations
+        std::string assistant_message_id = store_regulatory_message(
+            session_id,
+            "assistant",
+            response.response_text,
+            request.query_context,
+            response.tokens_used / 2,
+            response.cost,
+            response.confidence_score,
+            response.sources_used,
+            citation_payload,
+            response.processing_time
         );
 
         // Store audit trail
-        if (audit_trail_enabled_) {
-            store_audit_trail(session_id, "temp_" + generate_uuid(), request, response);
+        if (audit_trail_enabled_ && !assistant_message_id.empty()) {
+            store_audit_trail(session_id, assistant_message_id, request, response);
         }
 
-        logger_->log(LogLevel::INFO,
-            "Regulatory chatbot response generated for user {} in session {} ({} tokens, confidence: {:.2f})",
-            request.user_id, session_id, response.tokens_used, response.confidence_score);
+        logger_->log(
+            LogLevel::INFO,
+            "Regulatory chatbot response generated",
+            "RegulatoryChatbotService",
+            "handle_regulatory_query",
+            {
+                {"user_id", request.user_id},
+                {"session_id", session_id},
+                {"tokens_used", std::to_string(response.tokens_used)},
+                {"confidence", format_double(response.confidence_score, 4)}
+            }
+        );
 
         return response;
 
@@ -167,22 +245,38 @@ KnowledgeContext RegulatoryChatbotService::search_regulatory_knowledge(
         semantic_query.similarity_threshold = 0.75f;
         semantic_query.domain_filter = KnowledgeDomain::REGULATORY_COMPLIANCE;
 
-        // Add regulatory domain filtering
-        nlohmann::json metadata_filter = {
-            {"regulatory_domain", context.regulatory_domain},
-            {"jurisdiction", context.jurisdiction}
-        };
-        semantic_query.metadata_filter = metadata_filter;
-
         // Search knowledge base
         auto search_results = knowledge_base_->semantic_search(semantic_query);
+
+        std::vector<regulens::QueryResult> filtered_results;
+        filtered_results.reserve(search_results.size());
+
+        for (const auto& result : search_results) {
+            const auto& metadata = result.entity.metadata;
+            std::string entity_domain = metadata.value("regulatory_domain", "");
+            std::string entity_jurisdiction = metadata.value("jurisdiction", "");
+
+            bool domain_match = context.regulatory_domain.empty() || entity_domain.empty() ||
+                                to_lower_copy(entity_domain) == to_lower_copy(context.regulatory_domain);
+            bool jurisdiction_match = context.jurisdiction.empty() || entity_jurisdiction.empty() ||
+                                      to_lower_copy(entity_jurisdiction) == to_lower_copy(context.jurisdiction);
+
+            if (domain_match && jurisdiction_match) {
+                filtered_results.push_back(result);
+            }
+        }
+
+        if (filtered_results.empty()) {
+            filtered_results = search_results;
+        }
 
         // Build context from regulatory results
         std::stringstream context_stream;
         context_stream << "Regulatory Context (" << context.regulatory_domain << " - " << context.jurisdiction << "):\n\n";
 
-        for (size_t i = 0; i < search_results.size(); ++i) {
-            const auto& result = search_results[i];
+        knowledge_context.relevance_scores.reserve(filtered_results.size());
+        for (size_t i = 0; i < filtered_results.size(); ++i) {
+            const auto& result = filtered_results[i];
 
             // Enhanced document entry with regulatory metadata
             nlohmann::json doc_entry = {
@@ -210,16 +304,24 @@ KnowledgeContext RegulatoryChatbotService::search_regulatory_knowledge(
         }
 
         knowledge_context.context_summary = context_stream.str();
-        knowledge_context.total_sources = search_results.size();
+        knowledge_context.total_sources = static_cast<int>(filtered_results.size());
 
         // Calculate regulatory confidence
         knowledge_context.relevance_scores.push_back(
             calculate_regulatory_confidence(knowledge_context.relevant_documents, context)
         );
 
-        logger_->log(LogLevel::INFO,
-            "Retrieved {} regulatory knowledge sources for domain: {} jurisdiction: {}",
-            knowledge_context.total_sources, context.regulatory_domain, context.jurisdiction);
+        logger_->log(
+            LogLevel::INFO,
+            "Regulatory knowledge retrieval completed",
+            "RegulatoryChatbotService",
+            "search_regulatory_knowledge",
+            {
+                {"domain", context.regulatory_domain},
+                {"jurisdiction", context.jurisdiction},
+                {"sources", std::to_string(knowledge_context.total_sources)}
+            }
+        );
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in search_regulatory_knowledge: " + std::string(e.what()));
@@ -241,73 +343,56 @@ RegulatoryChatbotResponse RegulatoryChatbotService::generate_regulatory_response
         std::string system_prompt = build_regulatory_system_prompt(request.query_context, knowledge_context);
 
         // Prepare messages for OpenAI API
-        std::vector<nlohmann::json> messages;
+        std::vector<OpenAIMessage> messages;
+        messages.emplace_back("system", system_prompt);
 
-        // System message
-        messages.push_back({
-            {"role", "system"},
-            {"content", system_prompt}
-        });
-
-        // Add conversation history (limited)
         int history_limit = std::min(static_cast<int>(conversation_history.size()), request.max_context_messages - 1);
-        for (int i = conversation_history.size() - history_limit; i < conversation_history.size(); ++i) {
-            messages.push_back({
-                {"role", conversation_history[i].role},
-                {"content", conversation_history[i].content}
-            });
+        size_t start_index = conversation_history.size() > static_cast<size_t>(history_limit)
+            ? conversation_history.size() - static_cast<size_t>(history_limit)
+            : 0;
+        for (size_t i = start_index; i < conversation_history.size(); ++i) {
+            messages.emplace_back(conversation_history[i].role, conversation_history[i].content);
         }
 
-        // Add current user message
-        messages.push_back({
-            {"role", "user"},
-            {"content", request.user_message}
-        });
+        messages.emplace_back("user", request.user_message);
 
-        // Prepare OpenAI request
-        nlohmann::json openai_request = {
-            {"model", request.model_override.value_or(default_model_)},
-            {"messages", messages},
-            {"temperature", 0.1}, // Lower temperature for regulatory accuracy
-            {"max_tokens", 2000},
-            {"presence_penalty", 0.0},
-            {"frequency_penalty", 0.0}
-        };
+        OpenAICompletionRequest completion_request;
+        completion_request.model = request.model_override.value_or(default_model_);
+        completion_request.messages = messages;
+        completion_request.temperature = 0.1;
+        completion_request.max_tokens = 2000;
+        completion_request.presence_penalty = 0.0;
+        completion_request.frequency_penalty = 0.0;
+        completion_request.user = request.user_id;
 
-        // Call OpenAI API
-        auto openai_response = openai_client_->chat_completion(openai_request);
-
-        if (openai_response.contains("error")) {
-            response.error_message = openai_response["error"]["message"];
+        auto openai_result = openai_client_->create_chat_completion(completion_request);
+        if (!openai_result) {
+            response.error_message = "OpenAI API request failed";
             response.success = false;
             return response;
         }
 
-        // Extract response
-        response.response_text = openai_response["choices"][0]["message"]["content"];
-        response.success = true;
-
-        // Extract usage information
-        if (openai_response.contains("usage")) {
-            response.tokens_used = openai_response["usage"]["total_tokens"];
-            response.cost = calculate_message_cost(
-                request.model_override.value_or(default_model_),
-                openai_response["usage"]["prompt_tokens"],
-                openai_response["usage"]["completion_tokens"]
-            );
+        const auto& openai_response = *openai_result;
+        if (openai_response.choices.empty()) {
+            response.error_message = "OpenAI returned no completion choices";
+            response.success = false;
+            return response;
         }
 
-        // Set sources and confidence
+        response.response_text = openai_response.choices.front().message.content;
+        response.success = true;
+        response.tokens_used = openai_response.usage.total_tokens;
+        response.cost = calculate_message_cost(
+            completion_request.model,
+            openai_response.usage.prompt_tokens,
+            openai_response.usage.completion_tokens
+        );
+
         response.sources_used = nlohmann::json(knowledge_context.relevant_documents);
         response.confidence_score = calculate_regulatory_confidence(
             knowledge_context.relevant_documents,
             request.query_context
         );
-
-        // Generate citations if required
-        if (citations_required_ && !knowledge_context.relevant_documents.empty()) {
-            response.citations = cite_sources("temp_" + generate_uuid(), knowledge_context.relevant_documents);
-        }
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in generate_regulatory_response: " + std::string(e.what()));
@@ -362,60 +447,77 @@ std::string RegulatoryChatbotService::build_regulatory_system_prompt(
     return prompt.str();
 }
 
+std::vector<nlohmann::json> RegulatoryChatbotService::build_citation_previews(const std::vector<nlohmann::json>& sources) const {
+    std::vector<nlohmann::json> previews;
+    previews.reserve(sources.size());
+
+    for (const auto& source : sources) {
+        nlohmann::json citation = {
+            {"knowledge_base_id", source.value("doc_id", source.value("entity_id", "unknown"))},
+            {"document_title", source.value("title", "Untitled Document")},
+            {"document_source", source.value("source_type", "knowledge_base")},
+            {"relevance_score", source.value("relevance_score", 0.0)},
+            {"metadata", source}
+        };
+
+        if (source.contains("jurisdiction")) {
+            citation["jurisdiction"] = source["jurisdiction"];
+        }
+        if (source.contains("regulatory_domain")) {
+            citation["regulatory_domain"] = source["regulatory_domain"];
+        }
+
+        previews.push_back(std::move(citation));
+    }
+
+    return previews;
+}
+
 std::vector<nlohmann::json> RegulatoryChatbotService::cite_sources(
     const std::string& message_id,
     const std::vector<nlohmann::json>& sources
 ) {
-    std::vector<nlohmann::json> citations;
+    std::vector<nlohmann::json> citations = build_citation_previews(sources);
 
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) {
-            logger_->log(LogLevel::ERROR, "Database connection failed in cite_sources");
-            return citations;
-        }
-
-        for (const auto& source : sources) {
+        for (auto& citation : citations) {
             std::string citation_id = generate_uuid();
+            nlohmann::json citation_metadata = citation.value("metadata", nlohmann::json::object());
 
-            const char* citation_params[8] = {
-                citation_id.c_str(),
-                message_id.c_str(),
-                source.value("doc_id", "unknown").c_str(),
-                source.value("title", "Untitled Document").c_str(),
-                source.value("source_type", "knowledge_base").c_str(),
-                std::to_string(source.value("relevance_score", 0.0)).c_str(),
-                std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count()).c_str(),
-                source.dump().c_str()
-            };
-
-            PGresult* result = PQexecParams(
-                conn,
+            bool success = db_conn_->execute_command(
                 "INSERT INTO chatbot_knowledge_citations "
-                "(citation_id, message_id, knowledge_base_id, document_title, document_source, "
-                "relevance_score, cited_at, citation_metadata) "
-                "VALUES ($1, $2, $3, $4, $5, $6::decimal, to_timestamp($7::bigint), $8::jsonb)",
-                8, nullptr, citation_params, nullptr, nullptr, 0
+                "(citation_id, message_id, knowledge_base_id, document_title, document_source, relevance_score, citation_metadata) "
+                "VALUES ($1, $2, $3, $4, $5, $6::decimal, $7::jsonb)",
+                {
+                    citation_id,
+                    message_id,
+                    citation.value("knowledge_base_id", "unknown"),
+                    citation.value("document_title", "Untitled Document"),
+                    citation.value("document_source", "knowledge_base"),
+                    format_double(citation.value("relevance_score", 0.0), 4),
+                    citation_metadata.dump()
+                }
             );
 
-            if (PQresultStatus(result) == PGRES_COMMAND_OK) {
-                nlohmann::json citation = {
-                    {"citation_id", citation_id},
-                    {"document_title", source.value("title", "Untitled Document")},
-                    {"document_source", source.value("source_type", "knowledge_base")},
-                    {"relevance_score", source.value("relevance_score", 0.0)},
-                    {"cited_at", std::chrono::system_clock::now().time_since_epoch().count()}
-                };
-                citations.push_back(citation);
+            if (success) {
+                citation["citation_id"] = citation_id;
             } else {
-                logger_->log(LogLevel::ERROR, "Failed to store citation: " + std::string(PQresultErrorMessage(result)));
+                logger_->log(
+                    LogLevel::WARN,
+                    "Failed to insert citation",
+                    "RegulatoryChatbotService",
+                    "cite_sources",
+                    {
+                        {"message_id", message_id},
+                        {"knowledge_base_id", citation.value("knowledge_base_id", "unknown")}
+                    }
+                );
             }
-
-            PQclear(result);
         }
 
-        logger_->log(LogLevel::INFO, "Stored {} citations for message {}", citations.size(), message_id);
+        if (!citations.empty()) {
+            log_citation_usage(message_id, citations);
+        }
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in cite_sources: " + std::string(e.what()));
@@ -436,15 +538,20 @@ bool RegulatoryChatbotService::store_audit_trail(
 
         // Log high-risk queries
         if (request.query_context.risk_level == "high" || request.query_context.risk_level == "critical") {
-            logger_->log(LogLevel::WARN, "High-risk regulatory query processed",
+            logger_->log(
+                LogLevel::WARN,
+                "High-risk regulatory query processed",
+                "RegulatoryChatbotService",
+                "store_audit_trail",
                 {
                     {"session_id", session_id},
                     {"user_id", request.user_id},
                     {"query_type", request.query_context.query_type},
                     {"regulatory_domain", request.query_context.regulatory_domain},
                     {"risk_level", request.query_context.risk_level},
-                    {"confidence_score", response.confidence_score}
-                });
+                    {"confidence_score", format_double(response.confidence_score, 4)}
+                }
+            );
         }
 
         return true;
@@ -457,14 +564,8 @@ bool RegulatoryChatbotService::store_audit_trail(
 
 std::string RegulatoryChatbotService::create_session(const std::string& user_id, const RegulatoryQueryContext& context) {
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) {
-            logger_->log(LogLevel::ERROR, "Database connection failed in create_session");
-            return "";
-        }
-
         std::string session_id = generate_uuid();
-        std::string title = "Regulatory Consultation: " + context.regulatory_domain + " (" + context.jurisdiction + ")";
+        std::string title = generate_session_title("Regulatory consultation", context);
 
         nlohmann::json metadata = {
             {"regulatory_domain", context.regulatory_domain},
@@ -475,32 +576,40 @@ std::string RegulatoryChatbotService::create_session(const std::string& user_id,
             {"model", default_model_}
         };
 
-        const char* session_params[6] = {
-            session_id.c_str(),
-            user_id.c_str(),
-            title.c_str(),
-            context.regulatory_domain.c_str(),
-            context.jurisdiction.c_str(),
-            metadata.dump().c_str()
-        };
-
-        PGresult* result = PQexecParams(
-            conn,
-            "INSERT INTO chatbot_sessions "
-            "(session_id, user_id, session_title, regulatory_domain, jurisdiction, session_metadata) "
-            "VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
-            6, nullptr, session_params, nullptr, nullptr, 0
+        bool success = db_conn_->execute_command(
+            "INSERT INTO chatbot_sessions (session_id, user_id, session_title, session_metadata) "
+            "VALUES ($1, $2, $3, $4::jsonb)",
+            {session_id, user_id, title, metadata.dump()}
         );
 
-        if (PQresultStatus(result) == PGRES_COMMAND_OK) {
-            logger_->log(LogLevel::INFO, "Created regulatory chatbot session {} for user {}", session_id, user_id);
-            PQclear(result);
+        if (success) {
+            logger_->log(
+                LogLevel::INFO,
+                "Created regulatory chatbot session",
+                "RegulatoryChatbotService",
+                "create_session",
+                {
+                    {"session_id", session_id},
+                    {"user_id", user_id},
+                    {"regulatory_domain", context.regulatory_domain},
+                    {"jurisdiction", context.jurisdiction}
+                }
+            );
             return session_id;
-        } else {
-            logger_->log(LogLevel::ERROR, "Failed to create session: " + std::string(PQresultErrorMessage(result)));
-            PQclear(result);
-            return "";
         }
+
+        logger_->log(
+            LogLevel::ERROR,
+            "Failed to create regulatory chatbot session",
+            "RegulatoryChatbotService",
+            "create_session",
+            {
+                {"user_id", user_id},
+                {"regulatory_domain", context.regulatory_domain},
+                {"jurisdiction", context.jurisdiction}
+            }
+        );
+        return "";
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in create_session: " + std::string(e.what()));
@@ -508,7 +617,7 @@ std::string RegulatoryChatbotService::create_session(const std::string& user_id,
     }
 }
 
-void RegulatoryChatbotService::store_regulatory_message(
+std::string RegulatoryChatbotService::store_regulatory_message(
     const std::string& session_id,
     const std::string& role,
     const std::string& content,
@@ -521,12 +630,6 @@ void RegulatoryChatbotService::store_regulatory_message(
     std::chrono::milliseconds processing_time
 ) {
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) {
-            logger_->log(LogLevel::ERROR, "Database connection failed in store_regulatory_message");
-            return;
-        }
-
         std::string message_id = generate_uuid();
         nlohmann::json message_metadata = {
             {"regulatory_domain", context.regulatory_domain},
@@ -538,37 +641,62 @@ void RegulatoryChatbotService::store_regulatory_message(
             {"processing_time_ms", processing_time.count()},
             {"model_used", default_model_}
         };
+        std::string sources_payload = (sources && !sources->is_null()) ? sources->dump() : "null";
 
-        std::string sources_str = sources ? sources->dump() : "null";
-        std::string citations_str = citations ? citations->dump() : "null";
-
-        const char* message_params[8] = {
-            message_id.c_str(),
-            session_id.c_str(),
-            role.c_str(),
-            content.c_str(),
-            std::to_string(confidence_score).c_str(),
-            sources_str.c_str(),
-            citations_str.c_str(),
-            message_metadata.dump().c_str()
-        };
-
-        PGresult* result = PQexecParams(
-            conn,
-            "INSERT INTO chatbot_messages "
-            "(message_id, session_id, role, content, confidence_score, sources, citations, message_metadata) "
-            "VALUES ($1, $2, $3, $4, $5::decimal, $6::jsonb, $7::jsonb, $8::jsonb)",
-            8, nullptr, message_params, nullptr, nullptr, 0
+        bool success = db_conn_->execute_command(
+            "INSERT INTO chatbot_messages (message_id, session_id, role, content, confidence_score, sources, message_metadata) "
+            "VALUES ($1, $2, $3, $4, $5::decimal, $6::jsonb, $7::jsonb)",
+            {
+                message_id,
+                session_id,
+                role,
+                content,
+                format_double(confidence_score, 4),
+                sources_payload,
+                message_metadata.dump()
+            }
         );
 
-        if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-            logger_->log(LogLevel::ERROR, "Failed to store message: " + std::string(PQresultErrorMessage(result)));
+        if (!success) {
+            logger_->log(
+                LogLevel::ERROR,
+                "Failed to store chatbot message",
+                "RegulatoryChatbotService",
+                "store_regulatory_message",
+                {
+                    {"session_id", session_id},
+                    {"role", role}
+                }
+            );
+            return "";
         }
 
-        PQclear(result);
+        if (citations && citations->is_array() && !citations->empty()) {
+            auto citation_vector = json_array_to_vector(*citations);
+            auto stored_citations = cite_sources(message_id, citation_vector);
+
+            if (!stored_citations.empty()) {
+                nlohmann::json citation_ids = nlohmann::json::array();
+                for (const auto& citation : stored_citations) {
+                    if (citation.contains("citation_id")) {
+                        citation_ids.push_back(citation["citation_id"]);
+                    }
+                }
+
+                if (!citation_ids.empty()) {
+                    db_conn_->execute_command(
+                        "UPDATE chatbot_messages SET message_metadata = message_metadata || $2::jsonb WHERE message_id = $1",
+                        {message_id, nlohmann::json{{"citation_ids", citation_ids}}.dump()}
+                    );
+                }
+            }
+        }
+
+        return message_id;
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in store_regulatory_message: " + std::string(e.what()));
+        return "";
     }
 }
 
@@ -730,10 +858,95 @@ std::vector<std::string> RegulatoryChatbotService::check_regulatory_warnings(
 }
 
 bool RegulatoryChatbotService::log_access_to_regulation(const std::string& session_id, const std::string& regulation_code) {
-    // Implementation for logging regulation access - could be extended for detailed audit trails
-    logger_->log(LogLevel::INFO, "Regulatory domain accessed in session",
-        {{"session_id", session_id}, {"regulation_code", regulation_code}});
+    logger_->log(
+        LogLevel::INFO,
+        "Regulatory domain accessed",
+        "RegulatoryChatbotService",
+        "log_access_to_regulation",
+        {
+            {"session_id", session_id},
+            {"regulation_code", regulation_code}
+        }
+    );
     return true;
+}
+
+std::string RegulatoryChatbotService::generate_session_title(const std::string& seed, const RegulatoryQueryContext& context) {
+    std::string normalized_seed = seed;
+    if (normalized_seed.size() > 60) {
+        normalized_seed = normalized_seed.substr(0, 57) + "...";
+    }
+
+    std::ostringstream oss;
+    oss << "Regulatory Consultation - " << context.regulatory_domain;
+    if (!context.jurisdiction.empty()) {
+        oss << " (" << context.jurisdiction << ")";
+    }
+    if (!normalized_seed.empty()) {
+        oss << " - " << normalized_seed;
+    }
+    return oss.str();
+}
+
+KnowledgeContext RegulatoryChatbotService::filter_regulatory_context(
+    const KnowledgeContext& context,
+    const RegulatoryQueryContext& query_context
+) {
+    KnowledgeContext filtered;
+    filtered.context_summary = context.context_summary;
+
+    for (size_t i = 0; i < context.relevant_documents.size(); ++i) {
+        const auto& doc = context.relevant_documents[i];
+        std::string domain = doc.value("regulatory_domain", "");
+        std::string jurisdiction = doc.value("jurisdiction", "");
+
+        bool domain_match = query_context.regulatory_domain.empty() || domain.empty() ||
+                            to_lower_copy(domain) == to_lower_copy(query_context.regulatory_domain);
+        bool jurisdiction_match = query_context.jurisdiction.empty() || jurisdiction.empty() ||
+                                  to_lower_copy(jurisdiction) == to_lower_copy(query_context.jurisdiction);
+
+        if (domain_match && jurisdiction_match) {
+            filtered.relevant_documents.push_back(doc);
+            if (i < context.relevance_scores.size()) {
+                filtered.relevance_scores.push_back(context.relevance_scores[i]);
+            }
+        }
+    }
+
+    filtered.total_sources = static_cast<int>(filtered.relevant_documents.size());
+    return filtered;
+}
+
+bool RegulatoryChatbotService::log_citation_usage(const std::string& message_id, const std::vector<nlohmann::json>& citations) {
+    logger_->log(
+        LogLevel::INFO,
+        "Stored regulator citations",
+        "RegulatoryChatbotService",
+        "log_citation_usage",
+        {
+            {"message_id", message_id},
+            {"citation_count", std::to_string(citations.size())}
+        }
+    );
+    return true;
+}
+
+std::string RegulatoryChatbotService::format_citations_for_display(const std::vector<nlohmann::json>& citations) {
+    if (citations.empty()) {
+        return "";
+    }
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < citations.size(); ++i) {
+        const auto& citation = citations[i];
+        oss << "[" << (i + 1) << "] "
+            << citation.value("document_title", "Untitled Document")
+            << " (" << citation.value("document_source", "knowledge_base") << ")";
+        if (i + 1 < citations.size()) {
+            oss << "; ";
+        }
+    }
+    return oss.str();
 }
 
 double RegulatoryChatbotService::calculate_message_cost(
@@ -741,32 +954,144 @@ double RegulatoryChatbotService::calculate_message_cost(
     int input_tokens,
     int output_tokens
 ) {
-    // Simplified cost calculation - should be updated with actual pricing
     double input_cost_per_token = 0.0000015;  // Approximate for GPT-4
     double output_cost_per_token = 0.000002;
 
     return (input_tokens * input_cost_per_token) + (output_tokens * output_cost_per_token);
 }
 
-// Placeholder implementations for remaining methods
 std::optional<RegulatoryChatbotSession> RegulatoryChatbotService::get_session(const std::string& session_id) {
-    // Implementation would query database for session details
-    return std::nullopt;
+    try {
+        auto row = db_conn_->execute_query_single(
+            "SELECT session_id, user_id, session_title, started_at, last_activity_at, is_active, session_metadata "
+            "FROM chatbot_sessions WHERE session_id = $1",
+            {session_id}
+        );
+
+        if (!row) {
+            return std::nullopt;
+        }
+
+        RegulatoryChatbotSession session;
+        session.session_id = row->value("session_id", "");
+        session.user_id = row->value("user_id", "");
+        session.title = row->value("session_title", "");
+        session.is_active = row->value("is_active", "t") == "t";
+        session.started_at = parse_timestamp(row->value("started_at", ""));
+        session.last_activity_at = parse_timestamp(row->value("last_activity_at", ""));
+
+        auto metadata = safe_parse_json(row->value("session_metadata", ""));
+        session.session_metadata = metadata;
+        session.regulatory_domain = metadata.value("regulatory_domain", "");
+        session.jurisdiction = metadata.value("jurisdiction", "");
+        session.audit_mode = metadata.value("audit_mode", audit_trail_enabled_);
+
+        if (metadata.contains("accessed_regulations") && metadata["accessed_regulations"].is_array()) {
+            for (const auto& item : metadata["accessed_regulations"]) {
+                if (item.is_string()) {
+                    session.accessed_regulations.push_back(item.get<std::string>());
+                }
+            }
+        }
+
+        return session;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in get_session: " + std::string(e.what()));
+        return std::nullopt;
+    }
 }
 
 std::vector<RegulatoryChatbotSession> RegulatoryChatbotService::get_user_sessions(const std::string& user_id, int limit) {
-    // Implementation would query database for user sessions
-    return {};
+    std::vector<RegulatoryChatbotSession> sessions;
+
+    try {
+        limit = std::clamp(limit, 1, 200);
+        auto rows = db_conn_->execute_query_multi(
+            "SELECT session_id, user_id, session_title, started_at, last_activity_at, is_active, session_metadata "
+            "FROM chatbot_sessions WHERE user_id = $1 ORDER BY last_activity_at DESC LIMIT $2::int",
+            {user_id, std::to_string(limit)}
+        );
+
+        sessions.reserve(rows.size());
+        for (const auto& row : rows) {
+            RegulatoryChatbotSession session;
+            session.session_id = row.value("session_id", "");
+            session.user_id = row.value("user_id", "");
+            session.title = row.value("session_title", "");
+            session.is_active = row.value("is_active", "t") == "t";
+            session.started_at = parse_timestamp(row.value("started_at", ""));
+            session.last_activity_at = parse_timestamp(row.value("last_activity_at", ""));
+
+            auto metadata = safe_parse_json(row.value("session_metadata", ""));
+            session.session_metadata = metadata;
+            session.regulatory_domain = metadata.value("regulatory_domain", "");
+            session.jurisdiction = metadata.value("jurisdiction", "");
+            sessions.push_back(std::move(session));
+        }
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in get_user_sessions: " + std::string(e.what()));
+    }
+
+    return sessions;
 }
 
 bool RegulatoryChatbotService::archive_session(const std::string& session_id) {
-    // Implementation would update session status in database
-    return true;
+    try {
+        bool success = db_conn_->execute_command(
+            "UPDATE chatbot_sessions SET is_active = false WHERE session_id = $1",
+            {session_id}
+        );
+        return success;
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in archive_session: " + std::string(e.what()));
+        return false;
+    }
 }
 
 bool RegulatoryChatbotService::update_session_activity(const std::string& session_id) {
-    // Implementation would update last_activity_at in database
-    return true;
+    try {
+        return db_conn_->execute_command(
+            "UPDATE chatbot_sessions SET last_activity_at = NOW() WHERE session_id = $1",
+            {session_id}
+        );
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in update_session_activity: " + std::string(e.what()));
+        return false;
+    }
+}
+
+std::vector<nlohmann::json> RegulatoryChatbotService::fetch_message_citations(const std::string& message_id) {
+    std::vector<nlohmann::json> result;
+
+    try {
+        auto rows = db_conn_->execute_query_multi(
+            "SELECT citation_id, knowledge_base_id, document_title, document_source, relevance_score, cited_at, citation_metadata "
+            "FROM chatbot_knowledge_citations WHERE message_id = $1 ORDER BY cited_at DESC",
+            {message_id}
+        );
+
+        result.reserve(rows.size());
+        for (const auto& row : rows) {
+            nlohmann::json citation = {
+                {"citation_id", row.value("citation_id", "")},
+                {"knowledge_base_id", row.value("knowledge_base_id", "")},
+                {"document_title", row.value("document_title", "")},
+                {"document_source", row.value("document_source", "")},
+                {"relevance_score", row.contains("relevance_score") ? std::stod(row.value("relevance_score", "0")) : 0.0},
+                {"cited_at", row.value("cited_at", "")}
+            };
+
+            citation["metadata"] = safe_parse_json(row.value("citation_metadata", ""));
+            result.push_back(std::move(citation));
+        }
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in fetch_message_citations: " + std::string(e.what()));
+    }
+
+    return result;
 }
 
 std::vector<RegulatoryChatbotMessage> RegulatoryChatbotService::get_session_messages(
@@ -774,8 +1099,59 @@ std::vector<RegulatoryChatbotMessage> RegulatoryChatbotService::get_session_mess
     int limit,
     int offset
 ) {
-    // Implementation would query database for session messages
-    return {};
+    std::vector<RegulatoryChatbotMessage> messages;
+
+    try {
+        limit = std::clamp(limit, 1, 200);
+        offset = std::max(0, offset);
+
+        auto rows = db_conn_->execute_query_multi(
+            "SELECT message_id, session_id, role, content, timestamp, sources, confidence_score, feedback, message_metadata "
+            "FROM chatbot_messages WHERE session_id = $1 ORDER BY timestamp DESC LIMIT $2::int OFFSET $3::int",
+            {session_id, std::to_string(limit), std::to_string(offset)}
+        );
+
+        messages.reserve(rows.size());
+        for (const auto& row : rows) {
+            RegulatoryChatbotMessage message;
+            message.message_id = row.value("message_id", "");
+            message.session_id = row.value("session_id", session_id);
+            message.role = row.value("role", "assistant");
+            message.content = row.value("content", "");
+            message.timestamp = parse_timestamp(row.value("timestamp", ""));
+            message.feedback = row.value("feedback", "");
+
+            try {
+                message.confidence_score = std::stod(row.value("confidence_score", "0"));
+            } catch (...) {
+                message.confidence_score = 0.0;
+            }
+
+            auto sources_json = safe_parse_json(row.value("sources", ""), nlohmann::json::array());
+            if (!sources_json.is_null() && !sources_json.empty()) {
+                message.sources = sources_json;
+            }
+
+            auto metadata = safe_parse_json(row.value("message_metadata", ""));
+            message.context.regulatory_domain = metadata.value("regulatory_domain", "");
+            message.context.jurisdiction = metadata.value("jurisdiction", "");
+            message.context.query_type = metadata.value("query_type", "");
+            message.context.risk_level = metadata.value("risk_level", "");
+            message.context.requires_citation = metadata.value("requires_citation", true);
+            message.context.audit_trail_required = metadata.value("audit_mode", audit_trail_enabled_);
+
+            auto citations_vec = fetch_message_citations(message.message_id);
+            if (!citations_vec.empty()) {
+                message.citations = citations_vec;
+            }
+            messages.push_back(std::move(message));
+        }
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in get_session_messages: " + std::string(e.what()));
+    }
+
+    return messages;
 }
 
 bool RegulatoryChatbotService::submit_feedback(
@@ -783,8 +1159,96 @@ bool RegulatoryChatbotService::submit_feedback(
     const std::string& feedback_type,
     const std::optional<std::string>& comments
 ) {
-    // Implementation would update message feedback in database
-    return true;
+    try {
+        bool success = db_conn_->execute_command(
+            "UPDATE chatbot_messages SET feedback = $2 WHERE message_id = $1",
+            {message_id, feedback_type}
+        );
+
+        if (success && comments && !comments->empty()) {
+            db_conn_->execute_command(
+                "UPDATE chatbot_messages SET message_metadata = message_metadata || $2::jsonb WHERE message_id = $1",
+                {message_id, nlohmann::json{{"feedback_comment", *comments}}.dump()}
+            );
+        }
+
+        return success;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in submit_feedback: " + std::string(e.what()));
+        return false;
+    }
+}
+
+std::chrono::system_clock::time_point RegulatoryChatbotService::parse_timestamp(const std::string& timestamp) const {
+    if (timestamp.empty()) {
+        return std::chrono::system_clock::now();
+    }
+
+    std::tm tm{};
+    std::istringstream ss(timestamp);
+    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    if (ss.fail()) {
+        ss.clear();
+        ss.str(timestamp);
+        ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    }
+
+#if defined(_WIN32)
+    time_t time_value = _mkgmtime(&tm);
+#else
+    time_t time_value = timegm(&tm);
+#endif
+    if (time_value == -1) {
+        return std::chrono::system_clock::now();
+    }
+    return std::chrono::system_clock::from_time_t(time_value);
+}
+
+std::vector<std::string> RegulatoryChatbotService::extract_regulatory_entities(const std::string& text) {
+    static const std::vector<std::string> entities = {
+        "aml", "kyc", "gdpr", "ccpa", "basel", "sox", "hipaa", "finra", "sec", "fca"
+    };
+
+    std::vector<std::string> matches;
+    std::string lower = to_lower_copy(text);
+    for (const auto& entity : entities) {
+        if (lower.find(entity) != std::string::npos) {
+            matches.push_back(entity);
+        }
+    }
+    return matches;
+}
+
+std::vector<std::string> RegulatoryChatbotService::identify_risk_indicators(const std::string& query) {
+    static const std::vector<std::string> indicators = {
+        "penalty", "violation", "non-compliance", "fine", "sanction", "risk", "investigation", "audit"
+    };
+
+    std::vector<std::string> detected;
+    std::string lower = to_lower_copy(query);
+    for (const auto& indicator : indicators) {
+        if (lower.find(indicator) != std::string::npos) {
+            detected.push_back(indicator);
+        }
+    }
+    return detected;
+}
+
+void RegulatoryChatbotService::set_regulatory_focus_domains(const std::vector<std::string>& domains) {
+    regulatory_focus_domains_ = domains;
+}
+
+void RegulatoryChatbotService::set_audit_trail_enabled(bool enabled) {
+    audit_trail_enabled_ = enabled;
+}
+
+void RegulatoryChatbotService::set_minimum_confidence_threshold(double threshold) {
+    min_confidence_threshold_ = std::clamp(threshold, 0.0, 1.0);
+}
+
+void RegulatoryChatbotService::set_citation_required(bool required) {
+    citations_required_ = required;
 }
 
 } // namespace chatbot

@@ -264,6 +264,18 @@ public:
                                                      StructuredLogger* logger);
     static std::unique_ptr<Tool> create_monitoring_tool(const ToolConfig& config,
                                                        StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_erp_tool(const ToolConfig& config,
+                                                StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_crm_tool(const ToolConfig& config,
+                                                StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_document_tool(const ToolConfig& config,
+                                                     StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_storage_tool(const ToolConfig& config,
+                                                    StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_integration_hub_tool(const ToolConfig& config,
+                                                            StructuredLogger* logger);
+    static std::unique_ptr<Tool> create_model_context_bridge(const ToolConfig& config,
+                                                            StructuredLogger* logger);
 
 private:
     ToolFactory() = delete; // Static factory only

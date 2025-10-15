@@ -15,6 +15,7 @@
 #include <cmath>
 #include <iterator>
 #include <spdlog/spdlog.h>
+#include <fmt/format.h>
 
 namespace regulens {
 
@@ -150,7 +151,11 @@ CommunicationMediator::CommunicationMediator(
     }
 
     if (logger_) {
-        logger_->info("CommunicationMediator initialized with conversation orchestration capabilities");
+        logger_->info(
+            "CommunicationMediator initialized with conversation orchestration capabilities",
+            "CommunicationMediator",
+            __func__
+        );
     }
 }
 
@@ -161,13 +166,25 @@ CommunicationMediator::~CommunicationMediator() {
             end_conversation(conversation_id, "Mediator shutdown");
         } catch (const std::exception& e) {
             if (logger_) {
-                logger_->error("Error ending conversation {} during shutdown: {}", conversation_id, e.what());
+                logger_->error(
+                    "Error ending conversation during shutdown",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"conversation_id", conversation_id},
+                        {"error", e.what()}
+                    }
+                );
             }
         }
     }
 
     if (logger_) {
-        logger_->info("CommunicationMediator shutting down");
+        logger_->info(
+            "CommunicationMediator shutting down",
+            "CommunicationMediator",
+            __func__
+        );
     }
 }
 
@@ -177,14 +194,31 @@ std::string CommunicationMediator::initiate_conversation(const std::string& topi
         // Validate input
         if (topic.empty() || objective.empty() || participant_ids.empty()) {
             if (logger_) {
-                logger_->error("Invalid conversation parameters: empty topic, objective, or participants");
+                logger_->error(
+                    "Invalid conversation parameters",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"topic", topic},
+                        {"objective", objective},
+                        {"participant_count", std::to_string(participant_ids.size())}
+                    }
+                );
             }
             return "";
         }
 
         if (participant_ids.size() > max_participants_) {
             if (logger_) {
-                logger_->error("Too many participants: {} (max: {})", participant_ids.size(), max_participants_);
+                logger_->error(
+                    "Too many participants for conversation",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"participant_count", std::to_string(participant_ids.size())},
+                        {"max_participants", std::to_string(max_participants_)}
+                    }
+                );
             }
             return "";
         }
@@ -195,7 +229,12 @@ std::string CommunicationMediator::initiate_conversation(const std::string& topi
         // Create conversation context
         if (!create_conversation_context(conversation_id, topic, objective, participant_ids)) {
             if (logger_) {
-                logger_->error("Failed to create conversation context for {}", conversation_id);
+                logger_->error(
+                    "Failed to create conversation context",
+                    "CommunicationMediator",
+                    __func__,
+                    {{"conversation_id", conversation_id}}
+                );
             }
             return "";
         }
@@ -211,15 +250,27 @@ std::string CommunicationMediator::initiate_conversation(const std::string& topi
         broadcast_message(conversation_id, "mediator", welcome_content, "notification");
 
         if (logger_) {
-            logger_->info("Conversation initiated: {} with {} participants",
-                         conversation_id, participant_ids.size());
+            logger_->info(
+                "Conversation initiated",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", conversation_id},
+                    {"participant_count", std::to_string(participant_ids.size())}
+                }
+            );
         }
 
         return conversation_id;
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in initiate_conversation: {}", e.what());
+            logger_->error(
+                "Exception in initiate_conversation",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
         return "";
     }
@@ -247,7 +298,15 @@ bool CommunicationMediator::send_message(const ConversationMessage& message) {
         // Validate message
         if (!validate_message(message)) {
             if (logger_) {
-                logger_->error("Invalid message: {}", message.message_id);
+                logger_->error(
+                    "Invalid conversation message",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"message_id", message.message_id},
+                        {"conversation_id", message.conversation_id}
+                    }
+                );
             }
             return false;
         }
@@ -258,7 +317,15 @@ bool CommunicationMediator::send_message(const ConversationMessage& message) {
         auto context_it = active_conversations_.find(message.conversation_id);
         if (context_it == active_conversations_.end()) {
             if (logger_) {
-                logger_->error("Conversation {} not found for message {}", message.conversation_id, message.message_id);
+                logger_->error(
+                    "Conversation not found for message",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"conversation_id", message.conversation_id},
+                        {"message_id", message.message_id}
+                    }
+                );
             }
             return false;
         }
@@ -266,8 +333,15 @@ bool CommunicationMediator::send_message(const ConversationMessage& message) {
         // Check if sender is a participant
         if (!is_agent_participant(message.conversation_id, message.sender_agent_id)) {
             if (logger_) {
-                logger_->error("Agent {} is not a participant in conversation {}",
-                             message.sender_agent_id, message.conversation_id);
+                logger_->error(
+                    "Sender not authorized for conversation",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"conversation_id", message.conversation_id},
+                        {"agent_id", message.sender_agent_id}
+                    }
+                );
             }
             return false;
         }
@@ -282,7 +356,12 @@ bool CommunicationMediator::send_message(const ConversationMessage& message) {
         // Store message
         if (!store_conversation_message(message)) {
             if (logger_) {
-                logger_->error("Failed to store message {}", message.message_id);
+                logger_->error(
+                    "Failed to store conversation message",
+                    "CommunicationMediator",
+                    __func__,
+                    {{"message_id", message.message_id}}
+                );
             }
             return false;
         }
@@ -290,7 +369,12 @@ bool CommunicationMediator::send_message(const ConversationMessage& message) {
         // Deliver message
         if (!deliver_message(message)) {
             if (logger_) {
-                logger_->error("Failed to deliver message {}", message.message_id);
+                logger_->error(
+                    "Failed to deliver conversation message",
+                    "CommunicationMediator",
+                    __func__,
+                    {{"message_id", message.message_id}}
+                );
             }
             return false;
         }
@@ -308,16 +392,28 @@ bool CommunicationMediator::send_message(const ConversationMessage& message) {
         manage_conversation_flow(message.conversation_id);
 
         if (logger_) {
-            logger_->info("Message sent in conversation {}: {} -> {}",
-                         message.conversation_id, message.sender_agent_id,
-                         message.recipient_agent_id.empty() ? "all" : message.recipient_agent_id);
+            logger_->info(
+                "Conversation message sent",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", message.conversation_id},
+                    {"sender_id", message.sender_agent_id},
+                    {"recipient", message.recipient_agent_id.empty() ? "all" : message.recipient_agent_id}
+                }
+            );
         }
 
         return true;
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in send_message: {}", e.what());
+            logger_->error(
+                "Exception in send_message",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
         return false;
     }
@@ -360,20 +456,36 @@ std::vector<ConversationMessage> CommunicationMediator::get_pending_messages(con
 
         for (const auto& row : results) {
             ConversationMessage msg;
-            msg.message_id = row.at("message_id");
-            msg.conversation_id = row.at("conversation_id");
-            msg.sender_agent_id = row.at("sender_agent_id");
-            msg.recipient_agent_id = row.at("recipient_agent_id");
-            msg.message_type = row.at("message_type");
-            msg.content = nlohmann::json::parse(row.at("content"));
-            // Parse timestamp and metadata...
+            msg.message_id = row.value("message_id", std::string{});
+            msg.conversation_id = row.value("conversation_id", std::string{});
+            msg.sender_agent_id = row.value("sender_agent_id", std::string{});
+            msg.recipient_agent_id = row.value("recipient_agent_id", std::string{});
+            msg.message_type = row.value("message_type", std::string{});
 
-            pending_messages.push_back(msg);
+            const auto content_json = safe_parse_json(row.value("content", std::string{}), nlohmann::json::object());
+            msg.content = content_json;
+            msg.sent_at = parse_timestamp(row.value("sent_at", std::string{}));
+
+            const auto metadata_json = safe_parse_json(row.value("metadata", std::string{}), nlohmann::json::object());
+            if (metadata_json.is_object()) {
+                for (const auto& [key, value] : metadata_json.items()) {
+                    if (value.is_string()) {
+                        msg.metadata[key] = value.get<std::string>();
+                    }
+                }
+            }
+
+            pending_messages.push_back(std::move(msg));
         }
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in get_pending_messages: {}", e.what());
+            logger_->error(
+                "Exception in get_pending_messages",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()} }
+            );
         }
     }
 
@@ -452,12 +564,25 @@ std::vector<ConflictResolution> CommunicationMediator::detect_conflicts(const st
         }
 
         if (!conflicts.empty() && logger_) {
-            logger_->warn("Detected {} conflicts in conversation {}", conflicts.size(), conversation_id);
+            logger_->warn(
+                "Conflicts detected in conversation",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", conversation_id},
+                    {"conflict_count", std::to_string(conflicts.size())}
+                }
+            );
         }
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in detect_conflicts: {}", e.what());
+            logger_->error(
+                "Exception in detect_conflicts",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
     }
 
@@ -522,7 +647,15 @@ MediationResult CommunicationMediator::resolve_conflict(const std::string& conve
 
         if (!store_conflict_resolution(*conflict_it)) {
             if (logger_) {
-                logger_->error("Failed to store conflict resolution for {}", conflict_id);
+                logger_->error(
+                    "Failed to store conflict resolution",
+                    "CommunicationMediator",
+                    __func__,
+                    {
+                        {"conversation_id", conversation_id},
+                        {"conflict_id", conflict_id}
+                    }
+                );
             }
         }
 
@@ -535,13 +668,26 @@ MediationResult CommunicationMediator::resolve_conflict(const std::string& conve
         result.processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
         if (logger_) {
-            logger_->info("Conflict resolution {} for conversation {}: success={}",
-                         conflict_id, conversation_id, result.success);
+            logger_->info(
+                "Conflict resolved",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", conversation_id},
+                    {"conflict_id", conflict_id},
+                    {"success", result.success ? "true" : "false"}
+                }
+            );
         }
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in resolve_conflict: {}", e.what());
+            logger_->error(
+                "Exception in resolve_conflict",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
         result.mediation_details = {"error", e.what()};
     }
@@ -720,7 +866,16 @@ MediationResult CommunicationMediator::mediate_conversation(const std::string& c
                 }
             } catch (const std::exception& translation_error) {
                 if (logger_) {
-                    logger_->warn("Mediation translation warning: {}", translation_error.what());
+                    logger_->warn(
+                        "Mediation translation warning",
+                        "CommunicationMediator",
+                        __func__,
+                        {
+                            {"error", translation_error.what()},
+                            {"conversation_id", conversation_id},
+                            {"message_id", message.message_id}
+                        }
+                    );
                 }
             }
         }
@@ -828,7 +983,12 @@ MediationResult CommunicationMediator::mediate_conversation(const std::string& c
 
         } catch (const std::exception& e) {
             if (logger_) {
-                logger_->error("Consensus mediation failed: {}", e.what());
+                logger_->error(
+                    "Consensus mediation failed",
+                    "CommunicationMediator",
+                    __func__,
+                    {{"error", e.what()}}
+                );
             }
             result.success = false;
             result.resolution = "Consensus mediation failed";
@@ -959,8 +1119,16 @@ MediationResult CommunicationMediator::mediate_conversation(const std::string& c
     });
 
     if (logger_) {
-        logger_->info("Mediated conversation {} outcome: success={} resolution={}",
-                      conversation_id, result.success, result.resolution);
+        logger_->info(
+            "Mediated conversation outcome",
+            "CommunicationMediator",
+            __func__,
+            {
+                {"conversation_id", conversation_id},
+                {"success", result.success ? "true" : "false"},
+                {"resolution", result.resolution}
+            }
+        );
     }
 
     result.processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1135,7 +1303,12 @@ std::unordered_map<std::string, int> CommunicationMediator::get_conversation_sta
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in get_conversation_stats: {}", e.what());
+            logger_->error(
+                "Exception in get_conversation_stats",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
     }
 
@@ -1298,7 +1471,12 @@ bool CommunicationMediator::store_conversation_context(const std::string& conver
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in store_conversation_context: {}", e.what());
+            logger_->error(
+                "Exception in store_conversation_context",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
         return false;
     }
@@ -1331,7 +1509,12 @@ bool CommunicationMediator::store_conversation_message(const ConversationMessage
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in store_conversation_message: {}", e.what());
+            logger_->error(
+                "Exception in store_conversation_message",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
         return false;
     }
@@ -1383,7 +1566,12 @@ bool CommunicationMediator::store_conflict_resolution(const ConflictResolution& 
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in store_conflict_resolution: {}", e.what());
+            logger_->error(
+                "Exception in store_conflict_resolution",
+                "CommunicationMediator",
+                __func__,
+                {{"error", e.what()}}
+            );
         }
         return false;
     }
@@ -1443,7 +1631,15 @@ std::optional<ConversationContext> CommunicationMediator::load_conversation_cont
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Failed to load conversation context {}: {}", conversation_id, e.what());
+            logger_->error(
+                "Failed to load conversation context",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", conversation_id},
+                    {"error", e.what()}
+                }
+            );
         }
         return std::nullopt;
     }
@@ -1489,7 +1685,15 @@ std::vector<ConversationMessage> CommunicationMediator::load_conversation_messag
         }
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Failed to load messages for conversation {}: {}", conversation_id, e.what());
+            logger_->error(
+                "Failed to load conversation messages",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", conversation_id},
+                    {"error", e.what()}
+                }
+            );
         }
     }
 
@@ -1545,7 +1749,15 @@ std::vector<ConflictResolution> CommunicationMediator::load_conflict_resolutions
         }
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Failed to load conflict resolutions for {}: {}", conversation_id, e.what());
+            logger_->error(
+                "Failed to load conflict resolutions",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"conversation_id", conversation_id},
+                    {"error", e.what()}
+                }
+            );
         }
     }
 
@@ -1647,14 +1859,27 @@ bool CommunicationMediator::update_message_delivery_status(const std::string& me
         );
 
         if (!updated && logger_) {
-            logger_->warn("Message {} delivery status update had no effect", message_id);
+            logger_->warn(
+                "Message delivery status update had no effect",
+                "CommunicationMediator",
+                __func__,
+                {{"message_id", message_id}}
+            );
         }
 
         return true;
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception updating delivery status for {}: {}", message_id, e.what());
+            logger_->error(
+                "Exception updating delivery status",
+                "CommunicationMediator",
+                __func__,
+                {
+                    {"message_id", message_id},
+                    {"error", e.what()}
+                }
+            );
         }
         return false;
     }

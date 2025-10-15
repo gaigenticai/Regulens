@@ -10,6 +10,7 @@
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 #include <regex>
+#include <unordered_map>
 
 namespace regulens {
 namespace policy {
@@ -174,41 +175,40 @@ PolicyConversionResult NLPolicyConverter::call_llm_for_conversion(const PolicyCo
     PolicyConversionResult result;
 
     try {
-        // Prepare OpenAI request
-        nlohmann::json openai_request = {
-            {"model", default_model_},
-            {"messages", nlohmann::json::array({
-                {{"role", "system"}, {"content", "You are a policy conversion expert. Always respond with valid JSON."}},
-                {{"role", "user"}, {"content", prompt}}
-            })},
-            {"temperature", 0.1}, // Low temperature for consistent policy generation
-            {"max_tokens", 2000},
-            {"presence_penalty", 0.0},
-            {"frequency_penalty", 0.0},
-            {"response_format", {{"type", "json_object"}}}
+        OpenAICompletionRequest completion_request;
+        completion_request.model = default_model_;
+        completion_request.messages = {
+            OpenAIMessage{"system", "You are a policy conversion expert. Always respond with valid JSON."},
+            OpenAIMessage{"user", prompt}
         };
+        completion_request.temperature = 0.1;
+        completion_request.max_tokens = 2000;
+        completion_request.presence_penalty = 0.0;
+        completion_request.frequency_penalty = 0.0;
 
-        // Call OpenAI API
-        auto openai_response = openai_client_->chat_completion(openai_request);
-
-        if (openai_response.contains("error")) {
-            result.error_message = openai_response["error"]["message"];
+        auto openai_response_opt = openai_client_->create_chat_completion(completion_request);
+        if (!openai_response_opt.has_value()) {
+            result.error_message = "LLM service unavailable";
             result.success = false;
             return result;
         }
 
-        // Parse response
-        std::string llm_response = openai_response["choices"][0]["message"]["content"];
-
-        // Extract usage information
-        if (openai_response.contains("usage")) {
-            result.tokens_used = openai_response["usage"]["total_tokens"];
-            result.cost = calculate_message_cost(
-                default_model_,
-                openai_response["usage"]["prompt_tokens"],
-                openai_response["usage"]["completion_tokens"]
-            );
+        const auto& openai_response = openai_response_opt.value();
+        if (openai_response.choices.empty()) {
+            result.error_message = "LLM returned no completion choices";
+            result.success = false;
+            return result;
         }
+
+        const auto& assistant_message = openai_response.choices.front().message;
+        std::string llm_response = assistant_message.content;
+
+        result.tokens_used = openai_response.usage.total_tokens;
+        result.cost = calculate_message_cost(
+            default_model_,
+            openai_response.usage.prompt_tokens,
+            openai_response.usage.completion_tokens
+        );
 
         // Parse LLM response
         PolicyConversionResult parsed_result = parse_llm_response(llm_response, request);
@@ -472,8 +472,7 @@ PolicyValidationResult NLPolicyConverter::validate_risk_rule(const nlohmann::jso
 
 std::string NLPolicyConverter::store_conversion_result(const PolicyConversionRequest& request, const PolicyConversionResult& result) {
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) {
+        if (!db_conn_ || !db_conn_->get_connection()) {
             logger_->log(LogLevel::ERROR, "Database connection failed in store_conversion_result");
             return "";
         }
@@ -490,39 +489,34 @@ std::string NLPolicyConverter::store_conversion_result(const PolicyConversionReq
         metadata["cost"] = result.cost;
         metadata["template_used"] = result.template_used;
 
-        const char* params[12] = {
-            conversion_id.c_str(),
-            request.user_id.c_str(),
-            request.natural_language_input.c_str(),
-            result.generated_policy.dump().c_str(),
-            request.policy_type.c_str(),
-            std::to_string(result.confidence_score).c_str(),
-            validation_errors.dump().c_str(),
-            result.status.c_str(),
-            result.template_used.c_str(),
-            std::to_string(result.tokens_used).c_str(),
-            std::to_string(result.cost).c_str(),
-            metadata.dump().c_str()
+        std::vector<std::string> params = {
+            conversion_id,
+            request.user_id,
+            request.natural_language_input,
+            result.generated_policy.dump(),
+            request.policy_type,
+            std::to_string(result.confidence_score),
+            validation_errors.dump(),
+            result.status,
+            result.template_used,
+            std::to_string(result.tokens_used),
+            std::to_string(result.cost),
+            metadata.dump()
         };
 
-        PGresult* insert_result = PQexecParams(
-            conn,
+        const std::string insert_sql =
             "INSERT INTO nl_policy_conversions "
             "(conversion_id, user_id, natural_language_input, generated_policy, policy_type, "
             "confidence_score, validation_errors, status, template_used, tokens_used, cost, metadata) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5, $6::decimal, $7::jsonb, $8, $9, $10, $11, $12::jsonb)",
-            12, nullptr, params, nullptr, nullptr, 0
-        );
+            "VALUES ($1, $2, $3, $4::jsonb, $5, $6::decimal, $7::jsonb, $8, $9, $10, $11, $12::jsonb)";
 
-        if (PQresultStatus(insert_result) == PGRES_COMMAND_OK) {
+        if (db_conn_->execute_command(insert_sql, params)) {
             logger_->log(LogLevel::INFO, "Stored policy conversion " + conversion_id + " for user " + request.user_id);
-            PQclear(insert_result);
             return conversion_id;
-        } else {
-            logger_->log(LogLevel::ERROR, "Failed to store conversion: " + std::string(PQresultErrorMessage(insert_result)));
-            PQclear(insert_result);
-            return "";
         }
+
+        logger_->log(LogLevel::ERROR, "Failed to store conversion: database command rejected");
+        return "";
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in store_conversion_result: " + std::string(e.what()));
@@ -590,8 +584,7 @@ PolicyDeploymentResult NLPolicyConverter::deploy_to_fraud_detection(const Policy
     PolicyDeploymentResult result;
 
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) {
+        if (!db_conn_ || !db_conn_->get_connection()) {
             result.error_message = "Database connection failed";
             return result;
         }
@@ -613,25 +606,19 @@ PolicyDeploymentResult NLPolicyConverter::deploy_to_fraud_detection(const Policy
             {"source_conversion_id", request.conversion_id}
         };
 
-        // Insert into fraud_rules table (assuming it exists)
-        const char* params[5] = {
-            fraud_rule["rule_id"].get<std::string>().c_str(),
-            fraud_rule["rule_name"].get<std::string>().c_str(),
-            fraud_rule["description"].get<std::string>().c_str(),
-            fraud_rule.dump().c_str(),
-            request.deployed_by.c_str()
+        std::vector<std::string> params = {
+            fraud_rule["rule_id"].get<std::string>(),
+            fraud_rule["rule_name"].get<std::string>(),
+            fraud_rule["description"].get<std::string>(),
+            fraud_rule.dump(),
+            request.deployed_by
         };
 
-        // Note: This assumes a fraud_rules table exists. In a real implementation,
-        // you would check if the table exists and handle deployment accordingly.
-        PGresult* insert_result = PQexecParams(
-            conn,
+        const std::string insert_sql =
             "INSERT INTO fraud_rules (rule_id, rule_name, description, rule_definition, created_by) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5)",
-            5, nullptr, params, nullptr, nullptr, 0
-        );
+            "VALUES ($1, $2, $3, $4::jsonb, $5)";
 
-        if (PQresultStatus(insert_result) == PGRES_COMMAND_OK) {
+        if (db_conn_->execute_command(insert_sql, params)) {
             result.deployment_id = deployment_id;
             result.success = true;
             result.deployed_policy = fraud_rule;
@@ -639,12 +626,9 @@ PolicyDeploymentResult NLPolicyConverter::deploy_to_fraud_detection(const Policy
 
             // Store deployment record
             store_deployment_record(deployment_id, request, "deployed", fraud_rule);
-
-            PQclear(insert_result);
         } else {
-            result.error_message = "Failed to insert fraud rule: " + std::string(PQresultErrorMessage(insert_result));
+            result.error_message = "Failed to insert fraud rule";
             result.status = "failed";
-            PQclear(insert_result);
         }
 
     } catch (const std::exception& e) {
@@ -659,57 +643,428 @@ PolicyDeploymentResult NLPolicyConverter::deploy_to_fraud_detection(const Policy
 PolicyDeploymentResult NLPolicyConverter::deploy_to_compliance_monitor(const PolicyDeploymentRequest& request, const nlohmann::json& policy) {
     PolicyDeploymentResult result;
     result.deployment_id = generate_uuid();
-    result.success = true;
-    result.deployed_policy = policy;
-    result.status = "deployed";
-    store_deployment_record(result.deployment_id, request, "deployed", policy);
-    return result;
+
+    auto format_decimal = [](double value) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(4) << value;
+        return oss.str();
+    };
+
+    try {
+        auto conversion = get_conversion(request.conversion_id);
+        if (!conversion) {
+            result.error_message = "Conversion record not found";
+            result.status = "failed";
+            store_deployment_record(result.deployment_id, request, "failed", {
+                {"error", result.error_message}
+            });
+            return result;
+        }
+
+        std::string rule_id = generate_uuid();
+        std::string rule_name = policy.value("name", "Compliance Policy " + request.conversion_id);
+        std::string natural_input;
+        if (conversion->contains("natural_language_input") && !(*conversion)["natural_language_input"].is_null()) {
+            natural_input = (*conversion)["natural_language_input"].get<std::string>();
+        }
+        if (natural_input.empty()) {
+            natural_input = policy.dump();
+        }
+
+        double base_confidence = 0.75;
+        if (policy.contains("confidence_score")) {
+            base_confidence = policy.value("confidence_score", base_confidence);
+        } else if (conversion->contains("confidence_score") && !(*conversion)["confidence_score"].is_null()) {
+            try {
+                base_confidence = std::stod((*conversion)["confidence_score"].get<std::string>());
+            } catch (...) {}
+        }
+
+        std::string validation_status = policy.value("validation_status", std::string("approved"));
+        bool auto_activate = policy.value("is_active", true);
+
+        nlohmann::json controls = {
+            {"conditions", policy.value("conditions", nlohmann::json::array())},
+            {"actions", policy.value("actions", nlohmann::json::array())},
+            {"exceptions", policy.value("exceptions", nlohmann::json::array())},
+            {"monitoring", policy.value("monitoring", nlohmann::json::object())},
+            {"deployment_metadata", {
+                {"conversion_id", request.conversion_id},
+                {"deployed_by", request.deployed_by},
+                {"deployment_id", result.deployment_id},
+                {"deployment_options", request.deployment_options.value_or(nlohmann::json::object())}
+            }}
+        };
+
+        std::vector<std::string> params = {
+            rule_id,
+            rule_name,
+            natural_input,
+            controls.dump(),
+            "compliance_rule",
+            request.deployed_by,
+            auto_activate ? "true" : "false",
+            format_decimal(std::clamp(base_confidence, 0.0, 1.0)),
+            validation_status
+        };
+
+        bool stored = db_conn_->execute_command(
+            "INSERT INTO nl_policy_rules "
+            "(rule_id, rule_name, natural_language_input, generated_rule_logic, rule_type, created_by, is_active, confidence_score, validation_status) "
+            "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::boolean, $8::numeric, $9) "
+            "ON CONFLICT (rule_id) DO UPDATE SET "
+            "rule_name = EXCLUDED.rule_name, "
+            "generated_rule_logic = EXCLUDED.generated_rule_logic, "
+            "is_active = EXCLUDED.is_active, "
+            "confidence_score = EXCLUDED.confidence_score, "
+            "validation_status = EXCLUDED.validation_status, "
+            "updated_at = CURRENT_TIMESTAMP",
+            params);
+
+        if (!stored) {
+            result.error_message = "Failed to persist compliance rule";
+            result.status = "failed";
+            store_deployment_record(result.deployment_id, request, "failed", {
+                {"error", result.error_message},
+                {"rule_id", rule_id}
+            });
+            return result;
+        }
+
+        nlohmann::json deployed_summary = {
+            {"rule_id", rule_id},
+            {"rule_name", rule_name},
+            {"confidence_score", base_confidence},
+            {"validation_status", validation_status},
+            {"is_active", auto_activate},
+            {"controls", controls}
+        };
+
+        result.success = true;
+        result.status = "deployed";
+        result.deployed_policy = deployed_summary;
+
+        store_deployment_record(result.deployment_id, request, "deployed", deployed_summary);
+        return result;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in deploy_to_compliance_monitor: " + std::string(e.what()));
+        result.error_message = "Deployment failed: " + std::string(e.what());
+        result.status = "failed";
+        store_deployment_record(result.deployment_id, request, "failed", {
+            {"error", result.error_message}
+        });
+        return result;
+    }
 }
 
 PolicyDeploymentResult NLPolicyConverter::deploy_to_validation_engine(const PolicyDeploymentRequest& request, const nlohmann::json& policy) {
     PolicyDeploymentResult result;
     result.deployment_id = generate_uuid();
-    result.success = true;
-    result.deployed_policy = policy;
-    result.status = "deployed";
-    store_deployment_record(result.deployment_id, request, "deployed", policy);
-    return result;
+
+    auto ensure_array = [](const nlohmann::json& value) {
+        if (value.is_array()) {
+            return value;
+        }
+        if (value.is_null()) {
+            return nlohmann::json::array();
+        }
+        return nlohmann::json::array({value});
+    };
+
+    try {
+        nlohmann::json schema_constraints = policy.value("validation", nlohmann::json::object());
+        if (!schema_constraints.contains("required")) {
+            schema_constraints["required"] = ensure_array(policy.value("required_fields", nlohmann::json::array()));
+        }
+        if (!schema_constraints.contains("prohibited")) {
+            schema_constraints["prohibited"] = ensure_array(policy.value("prohibited_fields", nlohmann::json::array()));
+        }
+        schema_constraints["severity_mapping"] = policy.value("severity_mapping", nlohmann::json::object());
+        schema_constraints["numeric_thresholds"] = policy.value("thresholds", nlohmann::json::object());
+
+        std::string validation_rule_id = generate_uuid();
+        std::string rule_name = policy.value("name", std::string("Validation Rule ") + request.conversion_id);
+        std::string policy_type = policy.value("policy_type", std::string("validation_rule"));
+        std::string error_message = policy.value("error_message", "Validation constraints violated");
+        std::string severity = policy.value("severity", "error");
+        bool is_active = policy.value("is_active", true);
+
+        std::vector<std::string> params = {
+            validation_rule_id,
+            rule_name,
+            policy_type,
+            schema_constraints.dump(),
+            error_message,
+            severity,
+            is_active ? "true" : "false"
+        };
+
+        bool stored = db_conn_->execute_command(
+            "INSERT INTO policy_validation_rules "
+            "(validation_rule_id, rule_name, policy_type, validation_logic, error_message, severity, is_active) "
+            "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::boolean) "
+            "ON CONFLICT (validation_rule_id) DO UPDATE SET "
+            "rule_name = EXCLUDED.rule_name, "
+            "policy_type = EXCLUDED.policy_type, "
+            "validation_logic = EXCLUDED.validation_logic, "
+            "error_message = EXCLUDED.error_message, "
+            "severity = EXCLUDED.severity, "
+            "is_active = EXCLUDED.is_active, "
+            "updated_at = CURRENT_TIMESTAMP",
+            params);
+
+        if (!stored) {
+            result.error_message = "Failed to persist validation rule";
+            result.status = "failed";
+            store_deployment_record(result.deployment_id, request, "failed", {
+                {"validation_rule_id", validation_rule_id},
+                {"error", result.error_message}
+            });
+            return result;
+        }
+
+        nlohmann::json deployed_summary = {
+            {"validation_rule_id", validation_rule_id},
+            {"rule_name", rule_name},
+            {"policy_type", policy_type},
+            {"severity", severity},
+            {"is_active", is_active},
+            {"validation_logic", schema_constraints}
+        };
+
+        result.success = true;
+        result.status = "deployed";
+        result.deployed_policy = deployed_summary;
+        store_deployment_record(result.deployment_id, request, "deployed", deployed_summary);
+        return result;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in deploy_to_validation_engine: " + std::string(e.what()));
+        result.error_message = "Deployment failed: " + std::string(e.what());
+        result.status = "failed";
+        store_deployment_record(result.deployment_id, request, "failed", {
+            {"error", result.error_message}
+        });
+        return result;
+    }
 }
 
 PolicyDeploymentResult NLPolicyConverter::deploy_to_risk_assessment(const PolicyDeploymentRequest& request, const nlohmann::json& policy) {
     PolicyDeploymentResult result;
     result.deployment_id = generate_uuid();
-    result.success = true;
-    result.deployed_policy = policy;
-    result.status = "deployed";
-    store_deployment_record(result.deployment_id, request, "deployed", policy);
-    return result;
+
+    auto format_decimal = [](double value) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(4) << value;
+        return oss.str();
+    };
+
+    auto to_lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    };
+
+    auto ensure_array = [](const nlohmann::json& value) {
+        if (value.is_array()) {
+            return value;
+        }
+        if (value.is_null()) {
+            return nlohmann::json::array();
+        }
+        return nlohmann::json::array({value});
+    };
+
+    try {
+        std::optional<nlohmann::json> active_model = db_conn_->execute_query_single(
+            "SELECT model_id FROM compliance_ml_models WHERE is_active = true ORDER BY COALESCE(last_trained_at, created_at) DESC LIMIT 1",
+            {}
+        );
+
+        double risk_score = 0.5;
+        if (policy.contains("risk_score")) {
+            risk_score = policy.value("risk_score", risk_score);
+        } else if (policy.contains("severity")) {
+            std::string severity = to_lower(policy.value("severity", std::string("medium")));
+            if (severity == "critical" || severity == "very_high") {
+                risk_score = 0.92;
+            } else if (severity == "high") {
+                risk_score = 0.78;
+            } else if (severity == "medium") {
+                risk_score = 0.55;
+            } else {
+                risk_score = 0.35;
+            }
+        }
+
+        risk_score = std::clamp(risk_score, 0.0, 1.0);
+
+        std::string risk_level;
+        if (risk_score >= 0.85) {
+            risk_level = "critical";
+        } else if (risk_score >= 0.65) {
+            risk_level = "high";
+        } else if (risk_score >= 0.45) {
+            risk_level = "medium";
+        } else {
+            risk_level = "low";
+        }
+
+        double confidence = policy.value("confidence_score", 0.7);
+        confidence = std::clamp(confidence, 0.0, 1.0);
+
+        int horizon = policy.value("prediction_horizon_days", 30);
+        if (horizon <= 0) {
+            horizon = 30;
+        }
+
+        nlohmann::json contributing_factors = nlohmann::json::array();
+        if (policy.contains("conditions") && policy["conditions"].is_array()) {
+            for (const auto& condition : policy["conditions"]) {
+                contributing_factors.push_back(condition);
+            }
+        }
+        if (contributing_factors.empty()) {
+            contributing_factors.push_back({{"source", "policy"}, {"detail", "No explicit conditions provided"}});
+        }
+
+        nlohmann::json recommended_actions = ensure_array(policy.value("actions", nlohmann::json::array()));
+        if (recommended_actions.empty()) {
+            recommended_actions.push_back({{"action", "monitor"}, {"priority", "medium"}});
+        }
+
+        nlohmann::json metadata = {
+            {"conversion_id", request.conversion_id},
+            {"deployment_id", result.deployment_id},
+            {"source_policy", policy},
+            {"deployment_options", request.deployment_options.value_or(nlohmann::json::object())}
+        };
+
+        std::string prediction_id = generate_uuid();
+        std::vector<std::string> params;
+        std::string query;
+
+        if (active_model && active_model->contains("model_id") && !(*active_model)["model_id"].is_null()) {
+            std::string model_id = (*active_model)["model_id"].get<std::string>();
+            params = {
+                prediction_id,
+                model_id,
+                "policy",
+                request.conversion_id,
+                format_decimal(risk_score),
+                risk_level,
+                format_decimal(confidence),
+                std::to_string(horizon),
+                contributing_factors.dump(),
+                recommended_actions.dump(),
+                metadata.dump()
+            };
+
+            query = "INSERT INTO compliance_risk_predictions "
+                    "(prediction_id, model_id, entity_type, entity_id, risk_score, risk_level, confidence_score, prediction_horizon_days, contributing_factors, recommended_actions, metadata) "
+                    "VALUES ($1, $2, $3, $4, $5::numeric, $6, $7::numeric, $8, $9::jsonb, $10::jsonb, $11::jsonb)";
+        } else {
+            params = {
+                prediction_id,
+                "policy",
+                request.conversion_id,
+                format_decimal(risk_score),
+                risk_level,
+                format_decimal(confidence),
+                std::to_string(horizon),
+                contributing_factors.dump(),
+                recommended_actions.dump(),
+                metadata.dump()
+            };
+
+            query = "INSERT INTO compliance_risk_predictions "
+                    "(prediction_id, entity_type, entity_id, risk_score, risk_level, confidence_score, prediction_horizon_days, contributing_factors, recommended_actions, metadata) "
+                    "VALUES ($1, $2, $3, $4::numeric, $5, $6::numeric, $7, $8::jsonb, $9::jsonb, $10::jsonb)";
+        }
+
+        if (!db_conn_->execute_command(query, params)) {
+            result.error_message = "Failed to store risk prediction";
+            result.status = "failed";
+            store_deployment_record(result.deployment_id, request, "failed", {
+                {"prediction_id", prediction_id},
+                {"error", result.error_message}
+            });
+            return result;
+        }
+
+        nlohmann::json deployed_summary = {
+            {"prediction_id", prediction_id},
+            {"risk_score", risk_score},
+            {"risk_level", risk_level},
+            {"confidence_score", confidence},
+            {"prediction_horizon_days", horizon},
+            {"contributing_factors", contributing_factors},
+            {"recommended_actions", recommended_actions}
+        };
+        if (active_model && active_model->contains("model_id") && !(*active_model)["model_id"].is_null()) {
+            deployed_summary["model_id"] = (*active_model)["model_id"].get<std::string>();
+        }
+
+        result.success = true;
+        result.status = "deployed";
+        result.deployed_policy = deployed_summary;
+        store_deployment_record(result.deployment_id, request, "deployed", deployed_summary);
+        return result;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in deploy_to_risk_assessment: " + std::string(e.what()));
+        result.error_message = "Deployment failed: " + std::string(e.what());
+        result.status = "failed";
+        store_deployment_record(result.deployment_id, request, "failed", {
+            {"error", result.error_message}
+        });
+        return result;
+    }
 }
 
 void NLPolicyConverter::store_deployment_record(const std::string& deployment_id, const PolicyDeploymentRequest& request,
                                               const std::string& status, const nlohmann::json& deployed_policy) {
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) return;
+        if (!db_conn_ || !db_conn_->get_connection()) {
+            return;
+        }
 
-        const char* params[6] = {
-            deployment_id.c_str(),
-            request.conversion_id.c_str(),
-            request.target_system.c_str(),
-            deployed_policy.dump().c_str(),
-            status.c_str(),
-            request.deployed_by.c_str()
+        std::string target_table;
+        if (request.target_system == "fraud_detection") {
+            target_table = "fraud_rules";
+        } else if (request.target_system == "compliance_monitor") {
+            target_table = "nl_policy_rules";
+        } else if (request.target_system == "validation_engine") {
+            target_table = "policy_validation_rules";
+        } else if (request.target_system == "risk_assessment") {
+            target_table = "compliance_risk_predictions";
+        }
+
+        std::vector<std::string> params = {
+            deployment_id,
+            request.conversion_id,
+            request.target_system
         };
 
-        PGresult* result = PQexecParams(
-            conn,
-            "INSERT INTO policy_deployments "
-            "(deployment_id, conversion_id, target_system, deployed_policy, deployment_status, deployed_by) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5, $6)",
-            6, nullptr, params, nullptr, nullptr, 0
-        );
+        std::string query;
+        if (!target_table.empty()) {
+            params.push_back(target_table);
+            params.push_back(deployed_policy.dump());
+            params.push_back(status);
+            params.push_back(request.deployed_by);
+            query = "INSERT INTO policy_deployments "
+                    "(deployment_id, conversion_id, target_system, target_table, deployed_policy, deployment_status, deployed_by) "
+                    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)";
+        } else {
+            params.push_back(deployed_policy.dump());
+            params.push_back(status);
+            params.push_back(request.deployed_by);
+            query = "INSERT INTO policy_deployments "
+                    "(deployment_id, conversion_id, target_system, deployed_policy, deployment_status, deployed_by) "
+                    "VALUES ($1, $2, $3, $4::jsonb, $5, $6)";
+        }
 
-        PQclear(result);
+        db_conn_->execute_command(query, params);
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in store_deployment_record: " + std::string(e.what()));
@@ -720,53 +1075,67 @@ std::vector<PolicyTemplate> NLPolicyConverter::get_available_templates(const std
     std::vector<PolicyTemplate> templates;
 
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) return templates;
+        if (!db_conn_ || !db_conn_->get_connection()) {
+            return templates;
+        }
 
         std::string query = "SELECT template_id, template_name, template_description, policy_type, "
                            "template_prompt, input_schema, output_schema, example_inputs, example_outputs, "
                            "is_active, usage_count, success_rate, average_confidence, category "
                            "FROM policy_templates WHERE is_active = true";
 
-        std::vector<const char*> params;
+        std::vector<std::string> params;
         if (!policy_type.empty()) {
             query += " AND policy_type = $1";
-            params.push_back(policy_type.c_str());
+            params.push_back(policy_type);
         }
 
         query += " ORDER BY usage_count DESC, success_rate DESC";
 
-        PGresult* result = PQexecParams(
-            conn, query.c_str(), params.size(), nullptr,
-            params.data(), nullptr, nullptr, 0
-        );
-
-        if (PQresultStatus(result) == PGRES_TUPLES_OK) {
-            int rows = PQntuples(result);
-            for (int i = 0; i < rows; ++i) {
-                PolicyTemplate tmpl;
-                tmpl.template_id = PQgetvalue(result, i, 0);
-                tmpl.template_name = PQgetvalue(result, i, 1);
-                tmpl.template_description = PQgetvalue(result, i, 2) ? PQgetvalue(result, i, 2) : "";
-                tmpl.policy_type = PQgetvalue(result, i, 3);
-                tmpl.template_prompt = PQgetvalue(result, i, 4);
-
-                if (PQgetvalue(result, i, 5)) tmpl.input_schema = nlohmann::json::parse(PQgetvalue(result, i, 5));
-                if (PQgetvalue(result, i, 6)) tmpl.output_schema = nlohmann::json::parse(PQgetvalue(result, i, 6));
-                if (PQgetvalue(result, i, 7)) tmpl.example_inputs = nlohmann::json::parse(PQgetvalue(result, i, 7));
-                if (PQgetvalue(result, i, 8)) tmpl.example_outputs = nlohmann::json::parse(PQgetvalue(result, i, 8));
-
-                tmpl.is_active = std::string(PQgetvalue(result, i, 9)) == "t";
-                tmpl.usage_count = std::atoi(PQgetvalue(result, i, 10));
-                tmpl.success_rate = std::atof(PQgetvalue(result, i, 11));
-                tmpl.average_confidence = std::atof(PQgetvalue(result, i, 12));
-                tmpl.category = PQgetvalue(result, i, 13) ? PQgetvalue(result, i, 13) : "";
-
-                templates.push_back(tmpl);
+        auto parse_json_or = [](const std::string& value, const nlohmann::json& fallback) {
+            if (value.empty()) {
+                return fallback;
             }
-        }
+            try {
+                return nlohmann::json::parse(value);
+            } catch (...) {
+                return fallback;
+            }
+        };
 
-        PQclear(result);
+        auto rows = db_conn_->execute_query_multi(query, params);
+        for (const auto& row : rows) {
+            PolicyTemplate tmpl;
+            tmpl.template_id = row.value("template_id", std::string{});
+            tmpl.template_name = row.value("template_name", std::string{});
+            tmpl.template_description = row.value("template_description", std::string{});
+            tmpl.policy_type = row.value("policy_type", std::string{});
+            tmpl.template_prompt = row.value("template_prompt", std::string{});
+
+            tmpl.input_schema = parse_json_or(row.value("input_schema", std::string{}), nlohmann::json::object());
+            tmpl.output_schema = parse_json_or(row.value("output_schema", std::string{}), nlohmann::json::object());
+            auto example_inputs_json = parse_json_or(row.value("example_inputs", std::string{}), nlohmann::json::array());
+            auto example_outputs_json = parse_json_or(row.value("example_outputs", std::string{}), nlohmann::json::array());
+
+            if (example_inputs_json.is_array()) {
+                tmpl.example_inputs = example_inputs_json.get<std::vector<std::string>>();
+            }
+
+            if (example_outputs_json.is_array()) {
+                tmpl.example_outputs.clear();
+                for (const auto& item : example_outputs_json) {
+                    tmpl.example_outputs.push_back(item);
+                }
+            }
+
+            tmpl.is_active = row.value("is_active", "t") == "t";
+            tmpl.usage_count = std::stoi(row.value("usage_count", std::string{"0"}));
+            tmpl.success_rate = std::stod(row.value("success_rate", std::string{"0.0"}));
+            tmpl.average_confidence = std::stod(row.value("average_confidence", std::string{"0.0"}));
+            tmpl.category = row.value("category", std::string{});
+
+            templates.push_back(std::move(tmpl));
+        }
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in get_available_templates: " + std::string(e.what()));
@@ -779,43 +1148,38 @@ std::vector<nlohmann::json> NLPolicyConverter::get_user_conversions(const std::s
     std::vector<nlohmann::json> conversions;
 
     try {
-        auto conn = db_conn_->get_connection();
-        if (!conn) return conversions;
+        if (!db_conn_ || !db_conn_->get_connection()) {
+            return conversions;
+        }
 
-        const char* params[3] = {
-            user_id.c_str(),
-            std::to_string(limit).c_str(),
-            std::to_string(offset).c_str()
+        std::vector<std::string> params = {
+            user_id,
+            std::to_string(limit),
+            std::to_string(offset)
         };
 
-        PGresult* result = PQexecParams(
-            conn,
+        auto rows = db_conn_->execute_query_multi(
             "SELECT conversion_id, natural_language_input, policy_type, confidence_score, "
             "status, created_at, feedback_rating "
             "FROM nl_policy_conversions "
             "WHERE user_id = $1 "
             "ORDER BY created_at DESC "
             "LIMIT $2 OFFSET $3",
-            3, nullptr, params, nullptr, nullptr, 0
+            params
         );
 
-        if (PQresultStatus(result) == PGRES_TUPLES_OK) {
-            int rows = PQntuples(result);
-            for (int i = 0; i < rows; ++i) {
-                nlohmann::json conversion = {
-                    {"conversion_id", PQgetvalue(result, i, 0)},
-                    {"natural_language_input", PQgetvalue(result, i, 1)},
-                    {"policy_type", PQgetvalue(result, i, 2)},
-                    {"confidence_score", std::atof(PQgetvalue(result, i, 3))},
-                    {"status", PQgetvalue(result, i, 4)},
-                    {"created_at", PQgetvalue(result, i, 5)},
-                    {"feedback_rating", PQgetvalue(result, i, 6) ? std::atoi(PQgetvalue(result, i, 6)) : 0}
-                };
-                conversions.push_back(conversion);
-            }
+        for (const auto& row : rows) {
+            nlohmann::json conversion = {
+                {"conversion_id", row.value("conversion_id", std::string{})},
+                {"natural_language_input", row.value("natural_language_input", std::string{})},
+                {"policy_type", row.value("policy_type", std::string{})},
+                {"confidence_score", std::stod(row.value("confidence_score", std::string{"0.0"}))},
+                {"status", row.value("status", std::string{})},
+                {"created_at", row.value("created_at", std::string{})},
+                {"feedback_rating", std::stoi(row.value("feedback_rating", std::string{"0"}))}
+            };
+            conversions.push_back(std::move(conversion));
         }
-
-        PQclear(result);
 
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in get_user_conversions: " + std::string(e.what()));
@@ -907,40 +1271,53 @@ nlohmann::json NLPolicyConverter::get_success_rates_by_policy_type() {
 
 // Logging helper implementations
 void NLPolicyConverter::log_conversion_attempt(const PolicyConversionRequest& request) {
-    logger_->log(LogLevel::INFO, "Policy conversion attempt",
-        {{"user_id", request.user_id},
-         {"policy_type", request.policy_type},
-         {"input_length", std::to_string(request.natural_language_input.length())}});
+    std::unordered_map<std::string, std::string> context = {
+        {"user_id", request.user_id},
+        {"policy_type", request.policy_type},
+        {"input_length", std::to_string(request.natural_language_input.length())}
+    };
+    logger_->log(LogLevel::INFO, "Policy conversion attempt", "NLPolicyConverter", __func__, context);
 }
 
 void NLPolicyConverter::log_conversion_success(const PolicyConversionResult& result) {
-    logger_->log(LogLevel::INFO, "Policy conversion success",
-        {{"conversion_id", result.conversion_id},
-         {"confidence_score", std::to_string(result.confidence_score)},
-         {"tokens_used", std::to_string(result.tokens_used)},
-         {"processing_time_ms", std::to_string(result.processing_time.count())}});
+    std::unordered_map<std::string, std::string> context = {
+        {"conversion_id", result.conversion_id},
+        {"confidence_score", std::to_string(result.confidence_score)},
+        {"tokens_used", std::to_string(result.tokens_used)},
+        {"processing_time_ms", std::to_string(result.processing_time.count())}
+    };
+    logger_->log(LogLevel::INFO, "Policy conversion success", "NLPolicyConverter", __func__, context);
 }
 
 void NLPolicyConverter::log_conversion_failure(const PolicyConversionRequest& request, const std::string& error) {
-    logger_->log(LogLevel::ERROR, "Policy conversion failure",
-        {{"user_id", request.user_id},
-         {"policy_type", request.policy_type},
-         {"error", error}});
+    std::unordered_map<std::string, std::string> context = {
+        {"user_id", request.user_id},
+        {"policy_type", request.policy_type},
+        {"error", error}
+    };
+    logger_->log(LogLevel::ERROR, "Policy conversion failure", "NLPolicyConverter", __func__, context);
 }
 
 void NLPolicyConverter::log_deployment_attempt(const PolicyDeploymentRequest& request) {
-    logger_->log(LogLevel::INFO, "Policy deployment attempt",
-        {{"conversion_id", request.conversion_id},
-         {"target_system", request.target_system},
-         {"deployed_by", request.deployed_by}});
+    std::unordered_map<std::string, std::string> context = {
+        {"conversion_id", request.conversion_id},
+        {"target_system", request.target_system},
+        {"deployed_by", request.deployed_by}
+    };
+    logger_->log(LogLevel::INFO, "Policy deployment attempt", "NLPolicyConverter", __func__, context);
 }
 
 void NLPolicyConverter::log_deployment_result(const PolicyDeploymentResult& result) {
+    std::unordered_map<std::string, std::string> context = {
+        {"deployment_id", result.deployment_id},
+        {"success", result.success ? "true" : "false"},
+        {"status", result.status}
+    };
     logger_->log(result.success ? LogLevel::INFO : LogLevel::ERROR,
-        "Policy deployment result",
-        {{"deployment_id", result.deployment_id},
-         {"success", result.success ? "true" : "false"},
-         {"status", result.status}});
+                 "Policy deployment result",
+                 "NLPolicyConverter",
+                 __func__,
+                 context);
 }
 
 } // namespace policy

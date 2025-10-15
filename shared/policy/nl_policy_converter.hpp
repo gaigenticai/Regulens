@@ -54,6 +54,8 @@ struct PolicyConversionResult {
     double confidence_score = 0.0;
     std::vector<std::string> validation_errors;
     std::vector<std::string> validation_warnings;
+    std::vector<std::string> regulatory_warnings;
+    std::vector<std::string> compliance_recommendations;
     std::string status; // 'draft', 'approved', 'deployed', 'rejected'
     std::chrono::milliseconds processing_time;
     int tokens_used = 0;
@@ -165,6 +167,8 @@ private:
     PolicyDeploymentResult deploy_to_compliance_monitor(const PolicyDeploymentRequest& request, const nlohmann::json& policy);
     PolicyDeploymentResult deploy_to_validation_engine(const PolicyDeploymentRequest& request, const nlohmann::json& policy);
     PolicyDeploymentResult deploy_to_risk_assessment(const PolicyDeploymentRequest& request, const nlohmann::json& policy);
+    void store_deployment_record(const std::string& deployment_id, const PolicyDeploymentRequest& request,
+                                 const std::string& status, const nlohmann::json& deployed_policy);
 
     // Utility methods
     std::string generate_uuid();
@@ -172,6 +176,7 @@ private:
     bool is_valid_policy_type(const std::string& policy_type);
     double calculate_confidence_score(const nlohmann::json& policy, const std::string& policy_type);
     std::vector<std::string> extract_policy_keywords(const std::string& natural_language);
+    double calculate_message_cost(const std::string& model, int input_tokens, int output_tokens);
 
     // Error handling and fallback
     PolicyConversionResult create_fallback_result(const std::string& error_message);

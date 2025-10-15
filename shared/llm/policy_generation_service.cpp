@@ -10,6 +10,21 @@
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 #include <regex>
+#include <unordered_set>
+#include <functional>
+#include <cctype>
+
+namespace {
+
+std::string to_lower_copy(const std::string& value) {
+    std::string lowered = value;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return lowered;
+}
+
+} // namespace
 
 namespace regulens {
 
@@ -546,25 +561,96 @@ std::string PolicyGenerationService::build_policy_generation_prompt(const Policy
 }
 
 std::string PolicyGenerationService::format_rule_code_from_gpt_response(const std::string& response, RuleFormat format) {
-    // Extract code from GPT response (remove markdown formatting if present)
-    std::string code = response;
+    std::string code_block = response;
 
-    // Remove markdown code blocks
-    std::regex markdown_regex("```(?:json|yaml|python|javascript|dsl)?\\n?(.*?)```");
+    // Remove markdown code blocks while preserving inner content
+    std::regex markdown_regex("```(?:json|yaml|python|javascript|dsl)?\\s*([\\s\\S]*?)```", std::regex::icase);
     std::smatch match;
-    if (std::regex_search(code, match, markdown_regex)) {
-        code = match[1].str();
+    if (std::regex_search(code_block, match, markdown_regex)) {
+        code_block = match[1].str();
     }
 
-    // Trim whitespace
-    code.erase(code.begin(), std::find_if(code.begin(), code.end(), [](char c) {
+    // Normalize line endings
+    code_block = std::regex_replace(code_block, std::regex("\\r\\n"), "\n");
+    code_block = std::regex_replace(code_block, std::regex("\\r"), "\n");
+
+    // Trim leading/trailing whitespace
+    code_block.erase(code_block.begin(), std::find_if(code_block.begin(), code_block.end(), [](unsigned char c) {
         return !std::isspace(c);
     }));
-    code.erase(std::find_if(code.rbegin(), code.rend(), [](char c) {
+    code_block.erase(std::find_if(code_block.rbegin(), code_block.rend(), [](unsigned char c) {
         return !std::isspace(c);
-    }).base(), code.end());
+    }).base(), code_block.end());
 
-    return code;
+    try {
+        switch (format) {
+            case RuleFormat::JSON: {
+                auto json_obj = nlohmann::json::parse(code_block);
+                return json_obj.dump(4);
+            }
+            case RuleFormat::YAML: {
+                // If GPT returned JSON for YAML request, convert to YAML-like structure
+                if (!code_block.empty() && code_block.front() == '{') {
+                    auto json_obj = nlohmann::json::parse(code_block);
+                    std::stringstream yaml_stream;
+                    yaml_stream << "rule:\n";
+                    for (auto& [key, value] : json_obj.items()) {
+                        yaml_stream << "  " << key << ": " << value.dump() << "\n";
+                    }
+                    return yaml_stream.str();
+                }
+                return code_block;
+            }
+            case RuleFormat::DSL: {
+                // Standardize DSL keywords casing and spacing
+                static const std::vector<std::pair<std::regex, std::string>> keyword_patterns = {
+                    {std::regex("\\bwhen\\b", std::regex::icase), "WHEN"},
+                    {std::regex("\\bthen\\b", std::regex::icase), "THEN"},
+                    {std::regex("\\belse\\b", std::regex::icase), "ELSE"},
+                    {std::regex("\\band\\b", std::regex::icase), "AND"},
+                    {std::regex("\\bor\\b", std::regex::icase), "OR"},
+                    {std::regex("\\bend\\b", std::regex::icase), "END"},
+                    {std::regex("\\brule\\b", std::regex::icase), "RULE"}
+                };
+
+                for (const auto& [pattern, replacement] : keyword_patterns) {
+                    code_block = std::regex_replace(code_block, pattern, replacement);
+                }
+
+                // Ensure consistent indentation
+                std::stringstream formatted;
+                std::stringstream input(code_block);
+                std::string line;
+                while (std::getline(input, line)) {
+                    line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char c) {
+                        return !std::isspace(c);
+                    }));
+                    formatted << line << "\n";
+                }
+                return formatted.str();
+            }
+            case RuleFormat::PYTHON:
+            case RuleFormat::JAVASCRIPT: {
+                // Normalize indentation to spaces and remove trailing spaces
+                std::stringstream formatted;
+                std::stringstream input(code_block);
+                std::string line;
+                while (std::getline(input, line)) {
+                    line = std::regex_replace(line, std::regex("\t"), "    ");
+                    line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char c) {
+                        return !std::isspace(c);
+                    }).base(), line.end());
+                    formatted << line << "\n";
+                }
+                return formatted.str();
+            }
+            default:
+                return code_block;
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("Failed to normalize GPT response for format {}: {}", static_cast<int>(format), e.what());
+        return code_block;
+    }
 }
 
 void PolicyGenerationService::extract_rule_metadata(const std::string& response, GeneratedRule& rule) {
@@ -578,25 +664,53 @@ void PolicyGenerationService::extract_rule_metadata(const std::string& response,
 
 std::vector<std::string> PolicyGenerationService::parse_test_cases(const std::string& response) {
     std::vector<std::string> tests;
+    std::unordered_set<std::string> seen;
 
-    // Simple parsing - split by numbered lines or bullet points
-    std::stringstream ss(response);
-    std::string line;
+    std::regex test_regex(R"((?:^|\n)\s*(?:[-*]|\d+\.)\s*(?:Test|Scenario)?\s*(\d+)?\s*[:\-]\s*(.+))", std::regex::icase);
+    auto begin = std::sregex_iterator(response.begin(), response.end(), test_regex);
+    auto end = std::sregex_iterator();
 
-    while (std::getline(ss, line)) {
-        // Remove leading/trailing whitespace
-        line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](char c) {
-            return !std::isspace(c);
-        }));
-        line.erase(std::find_if(line.rbegin(), line.rend(), [](char c) {
-            return !std::isspace(c);
-        }).base(), line.end());
+    for (auto it = begin; it != end; ++it) {
+        std::string raw = (*it)[2].str();
+        raw.erase(raw.begin(), std::find_if(raw.begin(), raw.end(), [](unsigned char c) { return !std::isspace(c); }));
+        raw.erase(std::find_if(raw.rbegin(), raw.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), raw.end());
 
-        // Check if it looks like a test case
-        if (!line.empty() && (line.find("Test") != std::string::npos ||
-                             std::isdigit(line[0]) ||
-                             line[0] == '-')) {
-            tests.push_back(line);
+        std::string scenario;
+        std::string expectation;
+
+        // Split on "Expect" keyword if present
+        std::regex expect_regex(R"((.+?)(?:\s+Expect(?:ation)?s?\s*[:\-]\s*)(.+))", std::regex::icase);
+        std::smatch match;
+        if (std::regex_match(raw, match, expect_regex)) {
+            scenario = match[1].str();
+            expectation = match[2].str();
+        } else {
+            scenario = raw;
+        }
+
+        scenario.erase(std::find_if(scenario.rbegin(), scenario.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), scenario.end());
+        expectation.erase(expectation.begin(), std::find_if(expectation.begin(), expectation.end(), [](unsigned char c) { return !std::isspace(c); }));
+
+        std::string formatted = "Scenario: " + scenario;
+        if (!expectation.empty()) {
+            formatted += " | Expectation: " + expectation;
+        }
+
+        if (!formatted.empty() && seen.insert(to_lower_copy(formatted)).second) {
+            tests.push_back(formatted);
+        }
+    }
+
+    // Fallback: treat paragraphs as scenarios if regex failed
+    if (tests.empty()) {
+        std::stringstream ss(response);
+        std::string line;
+        while (std::getline(ss, line)) {
+            line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char c) { return !std::isspace(c); }));
+            line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), line.end());
+            if (line.size() > 10 && seen.insert(to_lower_copy(line)).second) {
+                tests.push_back("Scenario: " + line);
+            }
         }
     }
 
@@ -604,14 +718,78 @@ std::vector<std::string> PolicyGenerationService::parse_test_cases(const std::st
 }
 
 bool PolicyGenerationService::validate_rule_logic(const nlohmann::json& rule_obj) {
-    // Basic logic validation - check for logical consistency
-    if (!rule_obj.contains("conditions") || !rule_obj["conditions"].is_array()) {
+    if (!rule_obj.is_object()) {
         return false;
     }
 
-    // Ensure conditions are properly structured
+    if (!rule_obj.contains("conditions") || !rule_obj["conditions"].is_array() || rule_obj["conditions"].empty()) {
+        return false;
+    }
+
+    if (!rule_obj.contains("actions") || !rule_obj["actions"].is_array() || rule_obj["actions"].empty()) {
+        return false;
+    }
+
+    static const std::unordered_set<std::string> allowed_operators = {
+        "EQUALS", "NOT_EQUALS", ">", "<", ">=", "<=", "IN", "NOT_IN",
+        "CONTAINS", "NOT_CONTAINS", "BETWEEN", "MATCHES"
+    };
+
+    std::unordered_set<std::string> condition_fingerprints;
+    std::function<bool(const nlohmann::json&)> validate_condition = [&](const nlohmann::json& condition) -> bool {
+        if (condition.contains("any") || condition.contains("all")) {
+            auto group_key = condition.contains("any") ? "any" : "all";
+            const auto& group = condition[group_key];
+            if (!group.is_array() || group.empty()) {
+                return false;
+            }
+            for (const auto& nested : group) {
+                if (!validate_condition(nested)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if (!condition.contains("field") || !condition.contains("operator") || !condition.contains("value")) {
+            return false;
+        }
+
+        std::string field = condition["field"].get<std::string>();
+        std::string op = condition["operator"].get<std::string>();
+
+        std::string upper_op = op;
+        std::transform(upper_op.begin(), upper_op.end(), upper_op.begin(), ::toupper);
+
+        if (allowed_operators.find(upper_op) == allowed_operators.end()) {
+            return false;
+        }
+
+        // Ensure value type matches operator expectations
+        if ((upper_op == "IN" || upper_op == "NOT_IN") && !condition["value"].is_array()) {
+            return false;
+        }
+        if ((upper_op == ">" || upper_op == "<" || upper_op == ">=" || upper_op == "<=") &&
+            !condition["value"].is_number()) {
+            return false;
+        }
+
+        std::string fingerprint = field + "|" + upper_op + "|" + condition["value"].dump();
+        if (!condition_fingerprints.insert(fingerprint).second) {
+            return false; // duplicate condition indicates redundant logic
+        }
+
+        return true;
+    };
+
     for (const auto& condition : rule_obj["conditions"]) {
-        if (!condition.contains("field") || !condition.contains("operator")) {
+        if (!validate_condition(condition)) {
+            return false;
+        }
+    }
+
+    for (const auto& action : rule_obj["actions"]) {
+        if (!action.contains("type") || !action.contains("target")) {
             return false;
         }
     }
@@ -620,16 +798,47 @@ bool PolicyGenerationService::validate_rule_logic(const nlohmann::json& rule_obj
 }
 
 bool PolicyGenerationService::validate_dsl_logic(const std::string& rule_dsl) {
-    // Basic DSL logic validation
-    // Check for proper IF-THEN structure
-    size_t if_pos = rule_dsl.find("IF");
-    size_t then_pos = rule_dsl.find("THEN");
-
-    if (if_pos == std::string::npos || then_pos == std::string::npos) {
+    if (rule_dsl.empty()) {
         return false;
     }
 
-    return if_pos < then_pos;
+    std::regex structure_regex(R"(RULE\s+.+\s+(?:WHEN|IF)\s+.+\s+THEN\s+.+END)" , std::regex::icase);
+    if (!std::regex_search(rule_dsl, structure_regex)) {
+        return false;
+    }
+
+    int balance = 0;
+    for (char ch : rule_dsl) {
+        if (ch == '(') {
+            ++balance;
+        } else if (ch == ')') {
+            --balance;
+            if (balance < 0) {
+                return false;
+            }
+        }
+    }
+    if (balance != 0) {
+        return false;
+    }
+
+    std::regex action_regex(R"(THEN\s+.*?(ALERT|NOTIFY|BLOCK|ESCALATE|LOG))", std::regex::icase);
+    if (!std::regex_search(rule_dsl, action_regex)) {
+        return false;
+    }
+
+    static const std::vector<std::string> forbidden_tokens = {
+        "DROP", "DELETE", "INSERT", "UPDATE", "EXEC", "SYSTEM", "SHELL"
+    };
+    std::string upper = rule_dsl;
+    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    for (const auto& token : forbidden_tokens) {
+        if (upper.find(token) != std::string::npos) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 double PolicyGenerationService::calculate_validation_score(const RuleValidationResult& result) {
@@ -704,82 +913,106 @@ std::string PolicyGenerationService::format_timestamp(std::chrono::system_clock:
     return ss.str();
 }
 
-// Missing method implementations
-std::string PolicyGenerationService::format_rule_code_from_gpt_response(const std::string& response, RuleFormat format) {
-    // Extract code from GPT response (remove markdown formatting if present)
-    std::string code = response;
+std::string PolicyGenerationService::generate_fallback_rule(const PolicyGenerationRequest& request) {
+    const std::string normalized_description = to_lower_copy(request.natural_language_description);
 
-    // Remove markdown code blocks
-    std::regex markdown_regex("```(?:json|yaml|python|javascript|dsl)?\\n?(.*?)```");
-    std::smatch match;
-    if (std::regex_search(code, match, markdown_regex)) {
-        code = match[1].str();
+    // Derive heuristic conditions based on detected keywords
+    std::vector<nlohmann::json> conditions;
+    if (normalized_description.find("transaction") != std::string::npos) {
+        conditions.push_back({
+            {"field", "transaction.amount"},
+            {"operator", ">"},
+            {"value", 10000},
+            {"severity", "critical"},
+            {"message", "Flag transactions exceeding the high-risk threshold"}
+        });
+    }
+    if (normalized_description.find("login") != std::string::npos ||
+        normalized_description.find("access") != std::string::npos) {
+        conditions.push_back({
+            {"field", "user.authentication_context"},
+            {"operator", "NOT_EQUALS"},
+            {"value", "multi_factor"},
+            {"severity", "high"},
+            {"message", "Enforce multi-factor authentication for sensitive access"}
+        });
+    }
+    if (normalized_description.find("pii") != std::string::npos ||
+        normalized_description.find("personal data") != std::string::npos) {
+        conditions.push_back({
+            {"field", "data.classification"},
+            {"operator", "IN"},
+            {"value", nlohmann::json::array({"PII", "CONFIDENTIAL"})},
+            {"severity", "high"},
+            {"message", "Sensitive data requires encryption at rest and in transit"}
+        });
+    }
+    if (conditions.empty()) {
+        conditions.push_back({
+            {"field", "control.status"},
+            {"operator", "EQUALS"},
+            {"value", "non_compliant"},
+            {"severity", "medium"},
+            {"message", "Default compliance fallback condition"}
+        });
     }
 
-    // Trim whitespace
-    code.erase(code.begin(), std::find_if(code.begin(), code.end(), [](char c) {
-        return !std::isspace(c);
-    }));
-    code.erase(std::find_if(code.rbegin(), code.rend(), [](char c) {
-        return !std::isspace(c);
-    }).base(), code.end());
+    // Determine default actions based on domain context
+    std::vector<nlohmann::json> actions;
+    switch (request.domain) {
+        case PolicyDomain::DATA_PRIVACY:
+            actions.push_back({
+                {"type", "APPLY_REMEDIATION"},
+                {"target", "data_controller"},
+                {"instructions", "Mask personal data before storage and notify privacy officer"}
+            });
+            break;
+        case PolicyDomain::RISK_MANAGEMENT:
+            actions.push_back({
+                {"type", "ESCALATE"},
+                {"target", "risk_management_team"},
+                {"instructions", "Initiate risk assessment workflow and record mitigation plan"}
+            });
+            break;
+        case PolicyDomain::SECURITY_POLICY:
+            actions.push_back({
+                {"type", "BLOCK"},
+                {"target", "session"},
+                {"instructions", "Terminate the session and require security review"}
+            });
+            break;
+        default:
+            actions.push_back({
+                {"type", "NOTIFY"},
+                {"target", "compliance_officer"},
+                {"instructions", "Review the flagged event and document resolution"}
+            });
+            break;
+    }
 
-    return code;
-}
-
-void PolicyGenerationService::extract_rule_metadata(const std::string& response, GeneratedRule& rule) {
-    // Extract metadata from GPT response (simplified)
-    rule.rule_metadata = {
-        {"generated_by", "gpt-4-turbo-preview"},
-        {"generation_method", "natural_language_to_rule"},
-        {"confidence_explanation", "Based on GPT-4 analysis of natural language input"}
-    };
-}
-
-std::string PolicyGenerationService::generate_fallback_rule(const PolicyGenerationRequest& request) {
-    // Generate a basic fallback rule structure
     nlohmann::json fallback_rule = {
         {"rule", {
-            {"name", "Generated Compliance Rule"},
-            {"description", "Automatically generated rule from: " + request.natural_language_description},
-            {"type", "COMPLIANCE_RULE"},
-            {"domain", "FINANCIAL_COMPLIANCE"}
+            {"name", generate_rule_name(request.natural_language_description)},
+            {"description", request.natural_language_description},
+            {"type", rule_type_to_string(request.rule_type)},
+            {"domain", domain_to_string(request.domain)},
+            {"format", format_to_string(request.output_format)}
         }},
-        {"conditions", nlohmann::json::array()},
-        {"actions", nlohmann::json::array()},
+        {"conditions", conditions},
+        {"actions", actions},
         {"metadata", {
-            {"generated_by", "fallback_generator"},
-            {"confidence", 0.3}
+            {"generated_by", "fallback_policy_generator"},
+            {"generated_at", format_timestamp(std::chrono::system_clock::now())},
+            {"confidence", 0.35},
+            {"explanation", "Heuristic fallback rule created due to upstream generation failure"}
+        }},
+        {"audit", {
+            {"requires_manual_review", true},
+            {"recommended_reviewer_role", "Compliance Lead"}
         }}
     };
 
-    return fallback_rule.dump(2);
-}
-
-// Utility string conversion functions
-std::string PolicyGenerationService::rule_type_to_string(RuleType type) {
-    switch (type) {
-        case RuleType::VALIDATION_RULE: return "VALIDATION_RULE";
-        case RuleType::BUSINESS_RULE: return "BUSINESS_RULE";
-        case RuleType::COMPLIANCE_RULE: return "COMPLIANCE_RULE";
-        case RuleType::RISK_RULE: return "RISK_RULE";
-        case RuleType::AUDIT_RULE: return "AUDIT_RULE";
-        case RuleType::WORKFLOW_RULE: return "WORKFLOW_RULE";
-        default: return "UNKNOWN";
-    }
-}
-
-std::string PolicyGenerationService::domain_to_string(PolicyDomain domain) {
-    switch (domain) {
-        case PolicyDomain::FINANCIAL_COMPLIANCE: return "FINANCIAL_COMPLIANCE";
-        case PolicyDomain::DATA_PRIVACY: return "DATA_PRIVACY";
-        case PolicyDomain::REGULATORY_REPORTING: return "REGULATORY_REPORTING";
-        case PolicyDomain::RISK_MANAGEMENT: return "RISK_MANAGEMENT";
-        case PolicyDomain::OPERATIONAL_CONTROLS: return "OPERATIONAL_CONTROLS";
-        case PolicyDomain::SECURITY_POLICY: return "SECURITY_POLICY";
-        case PolicyDomain::AUDIT_PROCEDURES: return "AUDIT_PROCEDURES";
-        default: return "UNKNOWN";
-    }
+    return fallback_rule.dump(4);
 }
 
 // Configuration setters
@@ -804,15 +1037,4 @@ int PolicyGenerationService::estimate_token_count(const std::string& text) {
     // Rough estimation: ~4 characters per token for English text
     return std::max(1, static_cast<int>(text.length() / 4));
 }
-
-double PolicyGenerationService::calculate_validation_score(const RuleValidationResult& result) {
-    double score = 0.0;
-
-    if (result.syntax_valid) score += 0.4;
-    if (result.logic_valid) score += 0.4;
-    if (result.security_safe) score += 0.2;
-
-    return score;
-}
-
 } // namespace regulens

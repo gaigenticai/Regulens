@@ -185,7 +185,7 @@ private:
     std::vector<std::string> extract_regulatory_entities(const std::string& text);
     std::vector<std::string> identify_risk_indicators(const std::string& query);
 
-    void store_regulatory_message(
+    std::string store_regulatory_message(
         const std::string& session_id,
         const std::string& role,
         const std::string& content,
@@ -222,6 +222,10 @@ private:
         const std::vector<nlohmann::json>& sources,
         const RegulatoryQueryContext& context
     );
+    double calculate_message_cost(const std::string& model, int input_tokens, int output_tokens);
+    std::vector<nlohmann::json> build_citation_previews(const std::vector<nlohmann::json>& sources) const;
+    std::vector<nlohmann::json> fetch_message_citations(const std::string& message_id);
+    std::chrono::system_clock::time_point parse_timestamp(const std::string& timestamp) const;
 };
 
 } // namespace chatbot

@@ -5,8 +5,88 @@
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 #include <random>
+#include <optional>
+#include <cctype>
+#include <limits>
+#include <unordered_set>
+#include <set>
+
+#include <libpq-fe.h>
 
 namespace regulens {
+
+namespace {
+
+std::string lowercase_trimmed(const std::string& input) {
+    std::string result;
+    result.reserve(input.size());
+    for (char ch : input) {
+        if (!std::isspace(static_cast<unsigned char>(ch))) {
+            result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+    }
+    return result;
+}
+
+std::optional<bool> interpret_decision_as_bool(const std::string& decision) {
+    if (decision.empty()) {
+        return std::nullopt;
+    }
+    const std::string normalized = lowercase_trimmed(decision);
+    static const std::unordered_set<std::string> positive_tokens = {
+        "approve", "approved", "accept", "accepted", "allow", "allowed",
+        "true", "yes", "confirm", "confirmed", "positive", "pass"
+    };
+    static const std::unordered_set<std::string> negative_tokens = {
+        "reject", "rejected", "deny", "denied", "decline", "declined",
+        "false", "no", "negative", "fail", "failed", "block", "blocked"
+    };
+
+    if (positive_tokens.count(normalized) > 0) {
+        return true;
+    }
+    if (negative_tokens.count(normalized) > 0) {
+        return false;
+    }
+    return std::nullopt;
+}
+
+double parse_numeric_value(const nlohmann::json& value, double fallback) {
+    try {
+        if (value.is_number()) {
+            return value.get<double>();
+        }
+        if (value.is_string()) {
+            return std::stod(value.get<std::string>());
+        }
+    } catch (const std::exception&) {
+        return fallback;
+    }
+    return fallback;
+}
+
+double clamp_probability(double value) {
+    if (std::isnan(value)) {
+        return 0.0;
+    }
+    return std::clamp(value, 0.0, 1.0);
+}
+
+double confidence_level_weight(ConsensusDecisionConfidence confidence) {
+    switch (confidence) {
+        case ConsensusDecisionConfidence::VERY_HIGH:
+            return 1.0;
+        case ConsensusDecisionConfidence::HIGH:
+            return 0.85;
+        case ConsensusDecisionConfidence::MEDIUM:
+            return 0.65;
+        case ConsensusDecisionConfidence::LOW:
+        default:
+            return 0.4;
+    }
+}
+
+} // namespace
 
 ConsensusEngine::ConsensusEngine(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -32,34 +112,42 @@ std::string ConsensusEngine::initiate_consensus(const ConsensusConfiguration& co
 
     std::string consensus_id = generate_consensus_id();
 
+    ConsensusConfiguration stored_config = config;
+    stored_config.consensus_id = consensus_id;
+
     std::lock_guard<std::mutex> lock(consensus_mutex_);
 
     // Initialize the consensus process
-    active_consensus_[consensus_id] = config;
+    active_consensus_[consensus_id] = stored_config;
 
     // Create first voting round
     VotingRound initial_round;
     initial_round.round_number = 1;
-    initial_round.topic = config.topic;
-    initial_round.description = config.description;
+    initial_round.topic = stored_config.topic;
+    initial_round.description = stored_config.description;
     initial_round.state = ConsensusState::COLLECTING_OPINIONS;
     initial_round.started_at = std::chrono::system_clock::now();
 
     consensus_rounds_[consensus_id] = {initial_round};
 
     // Store in database
-    store_consensus_session(consensus_id, config);
+    store_consensus_session(consensus_id, stored_config);
 
     spdlog::info("Consensus process initiated: {} with {} participants using {} algorithm",
-                consensus_id, config.participants.size(), static_cast<int>(config.algorithm));
+                consensus_id, stored_config.participants.size(), static_cast<int>(stored_config.algorithm));
 
     if (logger_) {
-        nlohmann::json log_data;
-        log_data["consensus_id"] = consensus_id;
-        log_data["topic"] = config.topic;
-        log_data["participant_count"] = config.participants.size();
-        log_data["algorithm"] = static_cast<int>(config.algorithm);
-        logger_->log("consensus_initiated", log_data, spdlog::level::info);
+        logger_->info(
+            "Consensus initiated",
+            "ConsensusEngine",
+            __func__,
+            {
+                {"consensus_id", consensus_id},
+                {"topic", stored_config.topic},
+                {"participant_count", std::to_string(stored_config.participants.size())},
+                {"algorithm", std::to_string(static_cast<int>(stored_config.algorithm))}
+            }
+        );
     }
 
     return consensus_id;
@@ -149,13 +237,18 @@ bool ConsensusEngine::submit_opinion(const std::string& consensus_id, const Agen
                 consensus_id, opinion.agent_id, opinion.confidence_score);
 
     if (logger_) {
-        nlohmann::json log_data;
-        log_data["consensus_id"] = consensus_id;
-        log_data["agent_id"] = opinion.agent_id;
-        log_data["decision"] = opinion.decision;
-        log_data["confidence_score"] = opinion.confidence_score;
-        log_data["round_number"] = opinion.round_number;
-        logger_->log("opinion_submitted", log_data, spdlog::level::info);
+        logger_->info(
+            "Opinion submitted",
+            "ConsensusEngine",
+            __func__,
+            {
+                {"consensus_id", consensus_id},
+                {"agent_id", opinion.agent_id},
+                {"decision", opinion.decision},
+                {"confidence_score", std::to_string(opinion.confidence_score)},
+                {"round_number", std::to_string(opinion.round_number)}
+            }
+        );
     }
 
     return true;
@@ -279,14 +372,20 @@ bool ConsensusEngine::end_voting_round(const std::string& consensus_id) {
 }
 
 ConsensusResult ConsensusEngine::calculate_consensus(const std::string& consensus_id) {
+    const auto start_time = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(consensus_mutex_);
 
     auto active_it = active_consensus_.find(consensus_id);
     if (active_it == active_consensus_.end()) {
-    ConsensusResult result;
+        ConsensusResult result;
         result.consensus_id = consensus_id;
         result.success = false;
         result.error_message = "Consensus process not found";
+        result.processing_time_ms = static_cast<long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time
+            ).count()
+        );
         return result;
     }
 
@@ -296,6 +395,11 @@ ConsensusResult ConsensusEngine::calculate_consensus(const std::string& consensu
         result.consensus_id = consensus_id;
         result.success = false;
         result.error_message = "No voting rounds found";
+        result.processing_time_ms = static_cast<long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time
+            ).count()
+        );
         return result;
     }
 
@@ -330,8 +434,8 @@ ConsensusResult ConsensusEngine::calculate_consensus(const std::string& consensu
             break;
         }
 
-        result.rounds_used = rounds.size();
-        result.total_participants = config.participants.size();
+        result.rounds_used = static_cast<int>(rounds.size());
+        result.total_participants = static_cast<int>(config.participants.size());
 
         // Store completed consensus
         if (result.success) {
@@ -350,6 +454,12 @@ ConsensusResult ConsensusEngine::calculate_consensus(const std::string& consensu
         result.error_message = std::string("Consensus calculation failed: ") + e.what();
         spdlog::error("Consensus calculation failed for {}: {}", consensus_id, e.what());
     }
+
+    result.processing_time_ms = static_cast<long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time
+        ).count()
+    );
 
     return result;
 }
@@ -387,17 +497,19 @@ bool ConsensusEngine::register_agent(const Agent& agent) {
             case AgentRole::OBSERVER: role_str = "OBSERVER"; break;
         }
 
+        std::string weight_str = std::to_string(agent.voting_weight);
+        std::string confidence_str = std::to_string(agent.confidence_threshold);
         const char* param_values[7] = {
             agent.agent_id.c_str(),
             agent.name.c_str(),
             role_str.c_str(),
-            std::to_string(agent.voting_weight).c_str(),
+            weight_str.c_str(),
             agent.domain_expertise.c_str(),
-            std::to_string(agent.confidence_threshold).c_str(),
+            confidence_str.c_str(),
             agent.is_active ? "true" : "false"
         };
 
-        PGresult* pg_result = PQexecParams(db_conn_->get_connection(), query, 7, NULL, param_values, NULL, NULL, 0);
+        PGresult* pg_result = PQexecParams(db_conn_->get_connection(), query, 7, nullptr, param_values, nullptr, nullptr, 0);
 
         if (PQresultStatus(pg_result) != PGRES_COMMAND_OK) {
             spdlog::error("Failed to register agent: {}", PQerrorMessage(db_conn_->get_connection()));
@@ -604,7 +716,7 @@ ConsensusResult ConsensusEngine::run_majority_voting(const std::vector<VotingRou
                                            return a.second < b.second;
                                        });
 
-    int total_votes = final_round.opinions.size();
+    int total_votes = static_cast<int>(final_round.opinions.size());
     int majority_votes = majority_it->second;
     double agreement_percentage = static_cast<double>(majority_votes) / total_votes;
 
@@ -613,10 +725,10 @@ ConsensusResult ConsensusEngine::run_majority_voting(const std::vector<VotingRou
     result.success = agreement_percentage > config.consensus_threshold;
 
     if (result.success) {
-        if (agreement_percentage >= 0.9) result.confidence_level = DecisionConfidence::VERY_HIGH;
-        else if (agreement_percentage >= 0.7) result.confidence_level = DecisionConfidence::HIGH;
-        else if (agreement_percentage >= 0.5) result.confidence_level = DecisionConfidence::MEDIUM;
-        else result.confidence_level = DecisionConfidence::LOW;
+        if (agreement_percentage >= 0.9) result.confidence_level = ConsensusDecisionConfidence::VERY_HIGH;
+        else if (agreement_percentage >= 0.7) result.confidence_level = ConsensusDecisionConfidence::HIGH;
+        else if (agreement_percentage >= 0.5) result.confidence_level = ConsensusDecisionConfidence::MEDIUM;
+        else result.confidence_level = ConsensusDecisionConfidence::LOW;
     }
 
     return result;
@@ -674,10 +786,10 @@ ConsensusResult ConsensusEngine::run_weighted_majority_voting(const std::vector<
     result.success = agreement_percentage > config.consensus_threshold;
 
     if (result.success) {
-        if (agreement_percentage >= 0.8) result.confidence_level = DecisionConfidence::VERY_HIGH;
-        else if (agreement_percentage >= 0.6) result.confidence_level = DecisionConfidence::HIGH;
-        else if (agreement_percentage >= 0.4) result.confidence_level = DecisionConfidence::MEDIUM;
-        else result.confidence_level = DecisionConfidence::LOW;
+        if (agreement_percentage >= 0.8) result.confidence_level = ConsensusDecisionConfidence::VERY_HIGH;
+        else if (agreement_percentage >= 0.6) result.confidence_level = ConsensusDecisionConfidence::HIGH;
+        else if (agreement_percentage >= 0.4) result.confidence_level = ConsensusDecisionConfidence::MEDIUM;
+        else result.confidence_level = ConsensusDecisionConfidence::LOW;
     }
 
     return result;
@@ -804,10 +916,15 @@ bool ConsensusEngine::resolve_conflict(const std::string& consensus_id, const st
     spdlog::info("Conflict resolution applied to consensus {}: {}", consensus_id, resolution_strategy);
 
     if (logger_) {
-        nlohmann::json log_data;
-        log_data["consensus_id"] = consensus_id;
-        log_data["resolution_strategy"] = resolution_strategy;
-        logger_->log("conflict_resolved", log_data, spdlog::level::info);
+        logger_->info(
+            "Conflict resolved",
+            "ConsensusEngine",
+            __func__,
+            {
+                {"consensus_id", consensus_id},
+                {"strategy", resolution_strategy}
+            }
+        );
     }
 
     return true;
@@ -821,12 +938,12 @@ std::unordered_map<std::string, int> ConsensusEngine::get_consensus_statistics()
     // For now, return basic in-memory stats
     std::lock_guard<std::mutex> lock(consensus_mutex_);
 
-    stats["active_consensus"] = active_consensus_.size();
-    stats["completed_consensus"] = completed_consensus_.size();
+    stats["active_consensus"] = static_cast<int>(active_consensus_.size());
+    stats["completed_consensus"] = static_cast<int>(completed_consensus_.size());
 
     int total_rounds = 0;
     for (const auto& [id, rounds] : consensus_rounds_) {
-        total_rounds += rounds.size();
+        total_rounds += static_cast<int>(rounds.size());
     }
     stats["total_rounds"] = total_rounds;
 
@@ -850,21 +967,117 @@ std::vector<std::pair<std::string, double>> ConsensusEngine::get_agent_performan
 }
 
 double ConsensusEngine::calculate_decision_accuracy(const std::string& consensus_id, bool actual_outcome) {
-    // This would compare consensus decisions with actual outcomes
-    // For now, return a placeholder implementation
-    auto result = get_consensus_result(consensus_id);
-    if (!result.success) {
+
+    ConsensusResult result = get_consensus_result(consensus_id);
+    if (result.final_state != ConsensusState::REACHED_CONSENSUS &&
+        result.final_state != ConsensusState::RESOLVING_CONFLICTS) {
+        spdlog::warn("Consensus {} not finalized; unable to compute accuracy", consensus_id);
         return 0.0;
     }
 
-    // Simplified accuracy calculation based on confidence level
-    switch (result.confidence_level) {
-        case DecisionConfidence::VERY_HIGH: return actual_outcome ? 0.9 : 0.1;
-        case DecisionConfidence::HIGH: return actual_outcome ? 0.8 : 0.2;
-        case DecisionConfidence::MEDIUM: return actual_outcome ? 0.7 : 0.3;
-        case DecisionConfidence::LOW: return actual_outcome ? 0.6 : 0.4;
-        default: return 0.5;
+    double agreement = clamp_probability(result.agreement_percentage > 1.0
+                                         ? result.agreement_percentage / 100.0
+                                         : result.agreement_percentage);
+
+    auto final_decision_normalized = interpret_decision_as_bool(result.final_decision);
+    double final_alignment = final_decision_normalized.has_value()
+        ? (final_decision_normalized.value() == actual_outcome ? 1.0 : 0.0)
+        : 0.5;
+
+    double agent_alignment = 0.5;
+    try {
+        auto rows = db_conn_->execute_query_multi(
+            "SELECT decision, confidence_score FROM consensus_agent_opinions WHERE consensus_id = $1",
+            {consensus_id});
+
+        double total_weight = 0.0;
+        double aligned_weight = 0.0;
+
+        for (const auto& row : rows) {
+            const auto interpreted = interpret_decision_as_bool(row.value("decision", std::string{}));
+            double confidence = 0.5;
+            if (row.contains("confidence_score")) {
+                confidence = clamp_probability(parse_numeric_value(row["confidence_score"], 0.5));
+            }
+            if (confidence <= std::numeric_limits<double>::epsilon()) {
+                continue;
+            }
+
+            total_weight += confidence;
+            if (interpreted.has_value()) {
+                if (interpreted.value() == actual_outcome) {
+                    aligned_weight += confidence;
+                }
+            } else {
+                aligned_weight += confidence * 0.5;
+            }
+        }
+
+        if (total_weight > 0.0) {
+            agent_alignment = aligned_weight / total_weight;
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to analyze agent opinions for consensus {}: {}", consensus_id, ex.what());
     }
+
+    double historical_baseline = 0.5;
+    try {
+        auto historical_rows = db_conn_->execute_query_multi(
+            "SELECT metric_value FROM consensus_performance_metrics WHERE consensus_id = $1 AND metric_type = 'decision_accuracy' ORDER BY recorded_at DESC LIMIT 5",
+            {consensus_id});
+        if (!historical_rows.empty()) {
+            double sum = 0.0;
+            for (const auto& row : historical_rows) {
+                sum += parse_numeric_value(row.value("metric_value", 0.5), 0.5);
+            }
+            historical_baseline = clamp_probability(sum / static_cast<double>(historical_rows.size()));
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to load historical accuracy for consensus {}: {}", consensus_id, ex.what());
+    }
+
+    const double confidence_component = confidence_level_weight(result.confidence_level);
+
+    double composite_accuracy = 0.45 * clamp_probability(agent_alignment);
+    composite_accuracy += 0.25 * agreement;
+    composite_accuracy += 0.2 * final_alignment;
+    composite_accuracy += 0.1 * confidence_component;
+
+    // Blend with prior performance to stabilize the metric
+    double accuracy_score = clamp_probability(0.7 * composite_accuracy + 0.3 * historical_baseline);
+
+    // Persist performance metrics for future analyses
+    try {
+        db_conn_->execute_command(
+            "INSERT INTO consensus_performance_metrics (consensus_id, metric_type, metric_value) VALUES ($1, $2, $3)",
+            {consensus_id, "decision_accuracy", std::to_string(accuracy_score)});
+        db_conn_->execute_command(
+            "INSERT INTO consensus_performance_metrics (consensus_id, metric_type, metric_value) VALUES ($1, $2, $3)",
+            {consensus_id, "outcome_alignment", std::to_string(final_alignment)});
+        db_conn_->execute_command(
+            "INSERT INTO consensus_performance_metrics (consensus_id, metric_type, metric_value) VALUES ($1, $2, $3)",
+            {consensus_id, "agent_alignment", std::to_string(agent_alignment)});
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to persist accuracy metrics for consensus {}: {}", consensus_id, ex.what());
+    }
+
+    if (logger_) {
+        logger_->info(
+            "Consensus accuracy computed",
+            "ConsensusEngine",
+            __func__,
+            {
+                {"consensus_id", consensus_id},
+                {"accuracy_score", std::to_string(accuracy_score)},
+                {"agent_alignment", std::to_string(agent_alignment)},
+                {"agreement", std::to_string(agreement)},
+                {"final_alignment", std::to_string(final_alignment)},
+                {"actual_outcome", std::to_string(static_cast<int>(actual_outcome))}
+            }
+        );
+    }
+
+    return accuracy_score;
 }
 
 // Configuration and optimization
@@ -948,7 +1161,15 @@ bool ConsensusEngine::validate_agent_opinion(const AgentOpinion& opinion, const 
     }
 
     // Check if agent is authorized to participate
-    if (std::find(config.participants.begin(), config.participants.end(), opinion.agent_id) == config.participants.end()) {
+    const bool authorized = std::any_of(
+        config.participants.begin(),
+        config.participants.end(),
+        [&opinion](const Agent& agent) {
+            return agent.agent_id == opinion.agent_id && agent.is_active;
+        }
+    );
+
+    if (!authorized) {
         return false;
     }
 

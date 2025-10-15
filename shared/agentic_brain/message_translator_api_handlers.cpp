@@ -6,8 +6,48 @@
 #include "message_translator_api_handlers.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <uuid/uuid.h>
 
 namespace regulens {
+
+namespace {
+
+std::string protocol_to_string_local(MessageProtocol protocol) {
+    switch (protocol) {
+        case MessageProtocol::JSON_RPC: return "JSON_RPC";
+        case MessageProtocol::REST_HTTP: return "REST_HTTP";
+        case MessageProtocol::GRAPHQL: return "GRAPHQL";
+        case MessageProtocol::WEBSOCKET: return "WEBSOCKET";
+        case MessageProtocol::GRPC: return "GRPC";
+        case MessageProtocol::SOAP: return "SOAP";
+        case MessageProtocol::MQTT: return "MQTT";
+        case MessageProtocol::AMQP: return "AMQP";
+        case MessageProtocol::CUSTOM: return "CUSTOM";
+        default: return "UNKNOWN";
+    }
+}
+
+std::string message_type_to_string_local(MessageType type) {
+    switch (type) {
+        case MessageType::REQUEST: return "REQUEST";
+        case MessageType::RESPONSE: return "RESPONSE";
+        case MessageType::NOTIFICATION: return "NOTIFICATION";
+        case MessageType::ERROR: return "ERROR";
+        case MessageType::HEARTBEAT: return "HEARTBEAT";
+        case MessageType::ACKNOWLEDGMENT: return "ACKNOWLEDGMENT";
+        default: return "UNKNOWN";
+    }
+}
+
+std::string generate_message_id_local() {
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+    char buffer[37];
+    uuid_unparse_lower(uuid, buffer);
+    return std::string(buffer);
+}
+
+} // namespace
 
 MessageTranslatorAPIHandlers::MessageTranslatorAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -76,7 +116,7 @@ std::string MessageTranslatorAPIHandlers::handle_batch_translate(const std::stri
         MessageProtocol target_protocol = parse_protocol_param(request.value("target_protocol", "JSON_RPC"));
 
         // Perform batch translation
-        log_batch_operation(user_id, batch_messages.size());
+        log_batch_operation(user_id, static_cast<int>(batch_messages.size()));
         std::vector<TranslationResultData> results = translator_->translate_batch(
             batch_messages, target_protocol);
 
@@ -109,7 +149,7 @@ std::string MessageTranslatorAPIHandlers::handle_detect_protocol(const std::stri
             {"detected_protocol", detected_protocol ?
                 protocol_to_string(*detected_protocol) : "UNKNOWN"},
             {"message_type", detected_type ?
-                translator_->message_type_to_string(*detected_type) : "UNKNOWN"},
+                message_type_to_string_local(*detected_type) : "UNKNOWN"},
             {"confidence", detected_protocol ? "HIGH" : "LOW"}
         };
 
@@ -314,7 +354,11 @@ std::string MessageTranslatorAPIHandlers::handle_get_translation_stats(const std
 MessageHeader MessageTranslatorAPIHandlers::parse_message_header(const nlohmann::json& request) {
     MessageHeader header;
 
-    header.message_id = request.value("message_id", translator_->generate_message_id());
+    if (request.contains("message_id") && request["message_id"].is_string()) {
+        header.message_id = request["message_id"].get<std::string>();
+    } else {
+        header.message_id = generate_message_id_local();
+    }
     header.correlation_id = request.value("correlation_id", "");
     header.source_protocol = parse_protocol_param(request.value("source_protocol", "REST_HTTP"));
     header.sender_id = request.value("sender_id", "");
@@ -603,8 +647,29 @@ nlohmann::json MessageTranslatorAPIHandlers::process_batch_results(const std::ve
     return create_success_response(batch_response, "Batch translation completed");
 }
 
+std::vector<TranslationRule> MessageTranslatorAPIHandlers::filter_rules_by_protocols(
+    const std::vector<TranslationRule>& rules,
+    MessageProtocol from_protocol,
+    MessageProtocol to_protocol) {
+
+    std::vector<TranslationRule> filtered;
+    filtered.reserve(rules.size());
+
+    for (const auto& rule : rules) {
+        if (from_protocol != MessageProtocol::CUSTOM && rule.from_protocol != from_protocol) {
+            continue;
+        }
+        if (to_protocol != MessageProtocol::CUSTOM && rule.to_protocol != to_protocol) {
+            continue;
+        }
+        filtered.push_back(rule);
+    }
+
+    return filtered;
+}
+
 std::string MessageTranslatorAPIHandlers::protocol_to_string(MessageProtocol protocol) {
-    return translator_->protocol_to_string(protocol);
+    return protocol_to_string_local(protocol);
 }
 
 std::string MessageTranslatorAPIHandlers::result_to_string(TranslationResult result) {

@@ -1,56 +1,82 @@
+
 #pragma once
 
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
-#include <memory>
-#include <optional>
-#include <mutex>
+#include <unordered_set>
+#include <vector>
+
 #include <nlohmann/json.hpp>
-#include <libpq-fe.h>
 
-// Forward declarations
+#include "../database/postgresql_connection.hpp"
+
 namespace regulens {
-class Logger;
 
-/**
- * @brief Result of configuration validation
- */
-struct ConfigValidationResult {
-    bool valid;
-    std::string error_message;
-    nlohmann::json suggested_value;
+class StructuredLogger;
 
-    ConfigValidationResult(bool v = true, std::string msg = "", nlohmann::json suggested = nullptr)
-        : valid(v), error_message(std::move(msg)), suggested_value(std::move(suggested)) {}
+enum class ConfigScope {
+    GLOBAL,
+    USER,
+    ORGANIZATION,
+    ENVIRONMENT,
+    MODULE
 };
 
-/**
- * @brief Configuration metadata
- */
+enum class ConfigDataType {
+    STRING,
+    INTEGER,
+    FLOAT,
+    BOOLEAN,
+    JSON,
+    SECRET
+};
+
+struct ConfigValidationResult {
+    bool is_valid = true;
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+    nlohmann::json normalized_value = nlohmann::json::object();
+    std::optional<nlohmann::json> suggested_value;
+};
+
 struct ConfigMetadata {
-    std::string config_type;
+    ConfigDataType data_type = ConfigDataType::JSON;
+    ConfigScope scope = ConfigScope::GLOBAL;
+    std::string module_name;
     std::string description;
-    bool is_sensitive;
-    nlohmann::json validation_rules;
-    bool requires_restart;
+    bool is_sensitive = false;
+    bool requires_restart = false;
+    std::vector<std::string> tags;
+    nlohmann::json validation_rules = nlohmann::json::object();
     std::string last_updated;
     std::string updated_by;
+    int version = 1;
+    std::optional<std::string> created_by;
+    std::chrono::system_clock::time_point created_at{};
+    std::chrono::system_clock::time_point updated_at{};
 };
 
-/**
- * @brief Configuration update request
- */
 struct ConfigUpdateRequest {
     std::string key;
     nlohmann::json value;
     std::string user_id;
     std::string reason;
     std::string source;
+    ConfigScope scope = ConfigScope::GLOBAL;
+    std::string module_name;
+    bool is_encrypted = false;
+    bool requires_restart = false;
+    std::string description;
+    std::vector<std::string> tags;
+    nlohmann::json validation_rules = nlohmann::json::object();
+    std::optional<ConfigDataType> data_type_override;
 };
 
-/**
- * @brief Configuration history entry
- */
 struct ConfigHistoryEntry {
     std::string history_id;
     std::string config_key;
@@ -62,204 +88,162 @@ struct ConfigHistoryEntry {
     std::string change_source;
 };
 
-/**
- * @brief Dynamic Configuration Manager for runtime configuration updates
- *
- * Provides database-backed configuration management with:
- * - Runtime configuration updates without restart
- * - Audit trail for all changes
- * - Configuration validation
- * - Role-based access control
- * - Configuration history and rollback
- */
+struct ConfigValue {
+    std::string key;
+    nlohmann::json value;
+    ConfigMetadata metadata;
+    bool is_encrypted = false;
+    std::optional<std::string> updated_by;
+    std::optional<std::string> created_by;
+    std::chrono::system_clock::time_point created_at{};
+    std::chrono::system_clock::time_point updated_at{};
+};
+
+struct ConfigChangeLog {
+    std::string change_id;
+    std::string key;
+    ConfigScope scope = ConfigScope::GLOBAL;
+    nlohmann::json old_value;
+    nlohmann::json new_value;
+    std::string changed_by;
+    std::string change_reason;
+    std::string change_source;
+    int version = 1;
+    std::chrono::system_clock::time_point changed_at{};
+};
+
 class DynamicConfigManager {
 public:
-    /**
-     * @brief Constructor with database connection
-     * @param db_conn PostgreSQL database connection
-     * @param logger Optional logger instance
-     */
-    DynamicConfigManager(PGconn* db_conn, std::shared_ptr<Logger> logger = nullptr);
-
-    /**
-     * @brief Destructor
-     */
+    DynamicConfigManager(std::shared_ptr<PostgreSQLConnection> db_conn,
+                         std::shared_ptr<StructuredLogger> logger = nullptr);
     ~DynamicConfigManager() = default;
 
-    // Delete copy/move operations
     DynamicConfigManager(const DynamicConfigManager&) = delete;
     DynamicConfigManager& operator=(const DynamicConfigManager&) = delete;
     DynamicConfigManager(DynamicConfigManager&&) = delete;
     DynamicConfigManager& operator=(DynamicConfigManager&&) = delete;
 
-    /**
-     * @brief Initialize the configuration manager by loading from database
-     * @return true if initialization successful
-     */
     bool initialize();
 
-    /**
-     * @brief Update configuration value
-     * @param request Configuration update request
-     * @return true if update successful
-     */
+    std::optional<ConfigValue> get_config(const std::string& key,
+                                          ConfigScope scope = ConfigScope::GLOBAL);
+
+    bool set_config(const std::string& key,
+                    const nlohmann::json& value,
+                    ConfigScope scope,
+                    const std::string& module_name,
+                    const std::string& user_id,
+                    const std::string& reason,
+                    bool is_encrypted = false,
+                    bool requires_restart = false,
+                    const std::string& description = "",
+                    const std::vector<std::string>& tags = {},
+                    const nlohmann::json& validation_rules = nlohmann::json::object(),
+                    std::optional<ConfigDataType> data_type_override = std::nullopt);
+
+    bool update_config(const ConfigValue& config,
+                       const std::string& user_id,
+                       const std::string& reason);
+
+    bool delete_config(const std::string& key,
+                       ConfigScope scope,
+                       const std::string& user_id);
+
+    std::vector<ConfigValue> get_configs_by_scope(ConfigScope scope);
+    std::vector<ConfigValue> get_configs_by_module(const std::string& module_name);
+
+    std::vector<ConfigChangeLog> get_config_history(const std::string& key,
+                                                    std::optional<std::chrono::system_clock::time_point> since = std::nullopt,
+                                                    int limit = 50);
+
+    bool register_config_schema(const std::string& key,
+                                ConfigDataType data_type,
+                                const nlohmann::json& validation_rules,
+                                const std::string& description,
+                                ConfigScope scope,
+                                const std::string& module_name,
+                                const std::string& user_id);
+
+    ConfigValidationResult validate_config_value(const std::string& key,
+                                                 const nlohmann::json& value,
+                                                 std::optional<ConfigDataType> override_type = std::nullopt) const;
+
+    void reload_configs();
+
+    nlohmann::json get_config_usage_stats();
+    std::vector<std::pair<std::string, int>> get_most_changed_configs(int limit);
+
+    std::string scope_to_string(ConfigScope scope) const;
+    std::string data_type_to_string(ConfigDataType type) const;
+    ConfigScope parse_scope(const std::string& scope) const;
+    ConfigDataType parse_data_type(const std::string& type) const;
+
+    void register_change_listener(std::function<void(const ConfigValue&)> listener);
+
     bool update_configuration(const ConfigUpdateRequest& request);
-
-    /**
-     * @brief Get configuration value by key
-     * @param key Configuration key
-     * @return Optional JSON value
-     */
     std::optional<nlohmann::json> get_configuration(const std::string& key);
-
-    /**
-     * @brief Get all configuration values
-     * @return Map of all configuration key-value pairs
-     */
     std::unordered_map<std::string, nlohmann::json> get_all_configurations();
-
-    /**
-     * @brief Get configuration metadata
-     * @param key Configuration key
-     * @return Optional metadata
-     */
     std::optional<ConfigMetadata> get_configuration_metadata(const std::string& key);
-
-    /**
-     * @brief Validate configuration value against rules
-     * @param key Configuration key
-     * @param value Value to validate
-     * @return Validation result
-     */
     ConfigValidationResult validate_configuration(const std::string& key, const nlohmann::json& value);
-
-    /**
-     * @brief Get configuration history for a key
-     * @param key Configuration key
-     * @param limit Maximum number of entries to return
-     * @return Vector of history entries
-     */
-    std::vector<ConfigHistoryEntry> get_configuration_history(const std::string& key, int limit = 50);
-
-    /**
-     * @brief Rollback configuration to previous value
-     * @param history_id History entry ID to rollback to
-     * @param user_id User performing the rollback
-     * @param reason Reason for rollback
-     * @return true if rollback successful
-     */
+    std::vector<ConfigHistoryEntry> get_configuration_history_legacy(const std::string& key, int limit = 50);
     bool rollback_configuration(const std::string& history_id, const std::string& user_id, const std::string& reason);
-
-    /**
-     * @brief Delete configuration
-     * @param key Configuration key to delete
-     * @param user_id User performing the deletion
-     * @param reason Reason for deletion
-     * @return true if deletion successful
-     */
     bool delete_configuration(const std::string& key, const std::string& user_id, const std::string& reason);
-
-    /**
-     * @brief Check if user has permission to update configuration
-     * @param key Configuration key
-     * @param user_id User ID
-     * @return true if user has permission
-     */
     bool has_update_permission(const std::string& key, const std::string& user_id);
-
-    /**
-     * @brief Refresh configuration cache from database
-     * @return true if refresh successful
-     */
     bool refresh_cache();
-
-    /**
-     * @brief Get configurations that require restart
-     * @return Vector of configuration keys that require restart
-     */
     std::vector<std::string> get_restart_required_configs();
 
-    /**
-     * @brief Notify all registered listeners of configuration change
-     * @param key Configuration key that changed
-     * @param value New value
-     */
-    void notify_config_change(const std::string& key, const nlohmann::json& value);
-
-    /**
-     * @brief Register a configuration change listener
-     * @param listener Function to call on configuration changes
-     */
-    void register_change_listener(std::function<void(const std::string&, const nlohmann::json&)> listener);
-
 private:
-    /**
-     * @brief Load configuration from database
-     */
-    bool load_from_database();
+    struct ValidationContext {
+        ConfigDataType data_type = ConfigDataType::JSON;
+        nlohmann::json rules = nlohmann::json::object();
+        std::optional<double> min_numeric;
+        std::optional<double> max_numeric;
+        std::optional<std::size_t> min_length;
+        std::optional<std::size_t> max_length;
+        std::unordered_set<std::string> allowed_values;
+        std::optional<std::string> regex_pattern;
+    };
 
-    /**
-     * @brief Save configuration to database
-     * @param key Configuration key
-     * @param value Configuration value
-     * @param metadata Configuration metadata
-     * @param user_id User making the change
-     * @return true if save successful
-     */
-    bool save_to_database(const std::string& key, const nlohmann::json& value,
-                         const ConfigMetadata& metadata, const std::string& user_id);
+    std::shared_ptr<PostgreSQLConnection> db_conn_;
+    std::shared_ptr<StructuredLogger> logger_;
 
-    /**
-     * @brief Save configuration history
-     * @param key Configuration key
-     * @param old_value Previous value
-     * @param new_value New value
-     * @param user_id User making the change
-     * @param reason Reason for change
-     * @param source Change source
-     * @return true if history save successful
-     */
-    bool save_history(const std::string& key, const nlohmann::json& old_value,
-                     const nlohmann::json& new_value, const std::string& user_id,
-                     const std::string& reason, const std::string& source);
+    mutable std::mutex cache_mutex_;
+    std::unordered_map<std::string, ConfigValue> config_cache_;
+    std::unordered_map<std::string, ValidationContext> validation_cache_;
 
-    /**
-     * @brief Execute SQL query with error handling
-     * @param query SQL query
-     * @param param_values Parameter values
-     * @param param_lengths Parameter lengths
-     * @param param_formats Parameter formats
-     * @param n_params Number of parameters
-     * @return PGresult pointer (caller must PQclear it)
-     */
-    PGresult* execute_query(const std::string& query, const char* const* param_values = nullptr,
-                           const int* param_lengths = nullptr, const int* param_formats = nullptr,
-                           int n_params = 0);
+    mutable std::mutex listener_mutex_;
+    std::vector<std::function<void(const ConfigValue&)>> change_listeners_;
 
-    /**
-     * @brief Convert JSON value to appropriate type
-     * @param value JSON value
-     * @param type Configuration type
-     * @return Converted value
-     */
-    nlohmann::json normalize_value(const nlohmann::json& value, const std::string& type);
+    std::string make_cache_key(const std::string& key, ConfigScope scope) const;
+    void store_in_cache(const ConfigValue& value);
+    std::optional<ConfigValue> load_from_cache(const std::string& cache_key) const;
 
-    // Database connection
-    PGconn* db_conn_;
+    std::optional<ConfigValue> fetch_config_from_db(const std::string& key, ConfigScope scope) const;
+    std::vector<ConfigValue> fetch_configs_with_query(const std::string& query,
+                                                      const std::vector<std::string>& params) const;
 
-    // Logger
-    std::shared_ptr<Logger> logger_;
+    bool persist_config(const ConfigValue& config,
+                        const ConfigValue* previous,
+                        const nlohmann::json& validation_rules,
+                        const std::string& user_id,
+                        const std::string& reason);
 
-    // Configuration cache
-    std::unordered_map<std::string, nlohmann::json> config_cache_;
-    std::unordered_map<std::string, ConfigMetadata> metadata_cache_;
+    void record_history(const ConfigValue& previous,
+                        const ConfigValue& current,
+                        const std::string& user_id,
+                        const std::string& reason,
+                        const std::string& source);
 
-    // Thread safety
-    std::mutex cache_mutex_;
-    std::mutex db_mutex_;
+    ConfigChangeLog hydrate_change_log(const nlohmann::json& row) const;
+    ConfigValue hydrate_config_row(const nlohmann::json& row) const;
 
-    // Change listeners
-    std::vector<std::function<void(const std::string&, const nlohmann::json&)>> change_listeners_;
+    ValidationContext build_validation_context(const nlohmann::json& metadata_json,
+                                               ConfigDataType data_type) const;
+
+    ConfigDataType infer_data_type(const nlohmann::json& value) const;
+    bool compare_json(const nlohmann::json& lhs, const nlohmann::json& rhs) const;
+
+    void notify_listeners(const ConfigValue& value);
 };
 
 } // namespace regulens

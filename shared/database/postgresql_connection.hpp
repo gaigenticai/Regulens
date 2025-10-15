@@ -18,6 +18,7 @@
 #include <optional>
 #include <condition_variable>
 #include <nlohmann/json.hpp>
+#include <libpq-fe.h>
 
 // Include configuration types
 #include "../config/config_types.hpp"

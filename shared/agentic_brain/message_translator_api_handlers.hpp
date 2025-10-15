@@ -105,9 +105,9 @@ private:
     bool update_translator_configuration(const nlohmann::json& config);
 
     // Rule management helpers
-    std::vector<nlohmann::json> filter_rules_by_protocols(const std::vector<TranslationRule>& rules,
-                                                        MessageProtocol from_protocol,
-                                                        MessageProtocol to_protocol);
+    std::vector<TranslationRule> filter_rules_by_protocols(const std::vector<TranslationRule>& rules,
+                                                           MessageProtocol from_protocol,
+                                                           MessageProtocol to_protocol);
     nlohmann::json get_rule_summary(const TranslationRule& rule);
 
     // Performance helpers

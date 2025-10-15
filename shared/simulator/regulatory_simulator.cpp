@@ -12,6 +12,8 @@
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 #include <cmath>
+#include <libpq-fe.h>
+#include <unordered_map>
 
 namespace regulens {
 namespace simulator {
@@ -817,19 +819,39 @@ std::string RegulatorySimulator::generate_uuid() {
 
 // Logging helper implementations
 void RegulatorySimulator::log_simulation_start(const std::string& execution_id, const SimulationRequest& request) {
-    logger_->log(LogLevel::INFO, "Simulation execution started",
-        {{"execution_id", execution_id}, {"scenario_id", request.scenario_id}});
+    std::unordered_map<std::string, std::string> context = {
+        {"execution_id", execution_id},
+        {"scenario_id", request.scenario_id}
+    };
+    logger_->log(LogLevel::INFO,
+                 "Simulation execution started",
+                 "RegulatorySimulator",
+                 __func__,
+                 context);
 }
 
 void RegulatorySimulator::log_simulation_complete(const std::string& execution_id, const ImpactMetrics& metrics) {
-    logger_->log(LogLevel::INFO, "Simulation execution completed",
-        {{"execution_id", execution_id},
-         {"entities_affected", std::to_string(metrics.total_entities_affected)}});
+    std::unordered_map<std::string, std::string> context = {
+        {"execution_id", execution_id},
+        {"entities_affected", std::to_string(metrics.total_entities_affected)}
+    };
+    logger_->log(LogLevel::INFO,
+                 "Simulation execution completed",
+                 "RegulatorySimulator",
+                 __func__,
+                 context);
 }
 
 void RegulatorySimulator::log_simulation_error(const std::string& execution_id, const std::string& error) {
-    logger_->log(LogLevel::ERROR, "Simulation execution failed",
-        {{"execution_id", execution_id}, {"error", error}});
+    std::unordered_map<std::string, std::string> context = {
+        {"execution_id", execution_id},
+        {"error", error}
+    };
+    logger_->log(LogLevel::ERROR,
+                 "Simulation execution failed",
+                 "RegulatorySimulator",
+                 __func__,
+                 context);
 }
 
 // Placeholder implementations for remaining methods

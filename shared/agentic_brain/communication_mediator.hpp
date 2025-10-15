@@ -50,7 +50,7 @@ enum class ResolutionStrategy {
     EXPERT_ARBITRATION,     // Let domain expert decide
     COMPROMISE_NEGOTIATION, // Negotiate compromise
     ESCALATION,            // Escalate to higher authority
-    EXTERNAL_MEDiation,     // Involve external mediator
+    EXTERNAL_MEDIATION,     // Involve external mediator
     TIMEOUT_ABORT,          // Abort on timeout
     MANUAL_OVERRIDE         // Manual human intervention
 };
@@ -225,7 +225,8 @@ private:
     bool process_message_queue();
     bool validate_message(const ConversationMessage& message);
     bool deliver_message(const ConversationMessage& message);
-    void update_message_delivery_status(const std::string& message_id);
+    bool update_message_delivery_status(const std::string& message_id);
+    std::string find_most_expert_agent(const std::vector<ConversationParticipant>& participants);
 
     // Resolution strategy implementations
     MediationResult execute_majority_vote_resolution(const std::string& conversation_id,

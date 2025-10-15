@@ -662,7 +662,7 @@ ResolutionStrategy CommunicationMediatorAPIHandlers::parse_resolution_strategy(c
     if (strategy_str == "EXPERT_ARBITRATION") return ResolutionStrategy::EXPERT_ARBITRATION;
     if (strategy_str == "COMPROMISE_NEGOTIATION") return ResolutionStrategy::COMPROMISE_NEGOTIATION;
     if (strategy_str == "ESCALATION") return ResolutionStrategy::ESCALATION;
-    if (strategy_str == "EXTERNAL_MEDIATION") return ResolutionStrategy::EXTERNAL_MEDiation;
+    if (strategy_str == "EXTERNAL_MEDIATION") return ResolutionStrategy::EXTERNAL_MEDIATION;
     if (strategy_str == "TIMEOUT_ABORT") return ResolutionStrategy::TIMEOUT_ABORT;
     if (strategy_str == "MANUAL_OVERRIDE") return ResolutionStrategy::MANUAL_OVERRIDE;
     return ResolutionStrategy::MAJORITY_VOTE;

@@ -12,6 +12,54 @@
 #include <spdlog/spdlog.h>
 #include <thread>
 #include <future>
+#include <ctime>
+#include <cctype>
+
+namespace {
+
+std::string format_double(double value, int precision = 6) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(precision) << value;
+    return oss.str();
+}
+
+nlohmann::json safe_parse_json(const std::string& data, const nlohmann::json& fallback = nlohmann::json::object()) {
+    if (data.empty()) {
+        return fallback;
+    }
+    try {
+        return nlohmann::json::parse(data);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+std::chrono::system_clock::time_point parse_database_timestamp(const std::string& timestamp) {
+    if (timestamp.empty()) {
+        return std::chrono::system_clock::now();
+    }
+
+    std::tm tm{};
+    std::istringstream ss(timestamp);
+    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    if (ss.fail()) {
+        ss.clear();
+        ss.str(timestamp);
+        ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    }
+
+#if defined(_WIN32)
+    time_t time_value = _mkgmtime(&tm);
+#else
+    time_t time_value = timegm(&tm);
+#endif
+    if (time_value == -1) {
+        return std::chrono::system_clock::now();
+    }
+    return std::chrono::system_clock::from_time_t(time_value);
+}
+
+} // namespace
 
 namespace regulens {
 
@@ -736,20 +784,20 @@ std::optional<TextAnalysisResult> TextAnalysisService::get_cached_result(
     const std::string& text_hash,
     const std::string& tasks_hash
 ) {
-    if (!redis_client_) {
+    if (!redis_client_ || !cache_enabled_) {
         return std::nullopt;
     }
 
     try {
         std::string cache_key = "text_analysis:" + text_hash + ":" + tasks_hash;
 
-        auto cached_data = redis_client_->get(cache_key);
-        if (!cached_data) {
+        RedisResult cache_result = redis_client_->get(cache_key);
+        if (!cache_result.success || !cache_result.value) {
             return std::nullopt;
         }
 
         // Parse cached JSON data
-        nlohmann::json cached_json = nlohmann::json::parse(*cached_data);
+        nlohmann::json cached_json = nlohmann::json::parse(*cache_result.value);
 
         // Reconstruct TextAnalysisResult from cached data
         TextAnalysisResult result;
@@ -758,13 +806,16 @@ std::optional<TextAnalysisResult> TextAnalysisService::get_cached_result(
 
         // Parse timestamp
         if (cached_json.contains("analyzed_at")) {
-            std::string timestamp_str = cached_json["analyzed_at"];
-            // Simple timestamp parsing - in production, use proper parsing
-            result.analyzed_at = std::chrono::system_clock::now(); // Fallback
+            try {
+                int64_t epoch_seconds = cached_json["analyzed_at"].get<int64_t>();
+                result.analyzed_at = std::chrono::system_clock::time_point(std::chrono::seconds(epoch_seconds));
+            } catch (...) {
+                result.analyzed_at = std::chrono::system_clock::now();
+            }
         }
 
         if (cached_json.contains("processing_time_ms")) {
-            result.processing_time = std::chrono::milliseconds(cached_json["processing_time_ms"]);
+            result.processing_time = std::chrono::milliseconds(cached_json["processing_time_ms"].get<int64_t>());
         }
 
         // Parse sentiment if present
@@ -813,7 +864,7 @@ void TextAnalysisService::cache_result(
     const std::string& tasks_hash,
     const TextAnalysisResult& result
 ) {
-    if (!redis_client_) {
+    if (!redis_client_ || !cache_enabled_) {
         return;
     }
 
@@ -824,9 +875,8 @@ void TextAnalysisService::cache_result(
         nlohmann::json cache_json;
         cache_json["request_id"] = result.request_id;
         cache_json["text_hash"] = result.text_hash;
-        cache_json["analyzed_at"] = std::to_string(
-            std::chrono::duration_cast<std::chrono::seconds>(
-                result.analyzed_at.time_since_epoch()).count());
+        cache_json["analyzed_at"] = std::chrono::duration_cast<std::chrono::seconds>(
+            result.analyzed_at.time_since_epoch()).count();
         cache_json["processing_time_ms"] = result.processing_time.count();
         cache_json["success"] = result.success;
         cache_json["total_tokens"] = result.total_tokens;
@@ -873,7 +923,10 @@ void TextAnalysisService::cache_result(
 
         // Set cache with TTL (24 hours by default)
         int ttl_seconds = cache_ttl_hours_ * 3600;
-        redis_client_->setex(cache_key, ttl_seconds, cache_data);
+        RedisResult set_result = redis_client_->set(cache_key, cache_data, std::chrono::seconds(ttl_seconds));
+        if (!set_result.success) {
+            spdlog::warn("Failed to cache result for hash {}: {}", text_hash, set_result.error_message);
+        }
 
         spdlog::info("Cached text analysis result for hash: {}", text_hash);
 
@@ -907,46 +960,33 @@ void TextAnalysisService::store_analysis_result(const TextAnalysisResult& result
         result_json["task_confidences"] = confidences_json;
 
         std::string result_data = result_json.dump();
+        int64_t analyzed_epoch = std::chrono::duration_cast<std::chrono::seconds>(
+            result.analyzed_at.time_since_epoch()).count();
 
-        // SQL to insert analysis result
-        const char* query = R"(
-            INSERT INTO text_analysis_results (
-                request_id, text_hash, result_data, analyzed_at, processing_time_ms,
-                total_tokens, total_cost, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-            ON CONFLICT (text_hash) DO UPDATE SET
-                result_data = EXCLUDED.result_data,
-                analyzed_at = EXCLUDED.analyzed_at,
-                processing_time_ms = EXCLUDED.processing_time_ms,
-                total_tokens = EXCLUDED.total_tokens,
-                total_cost = EXCLUDED.total_cost
-        )";
+        bool success = db_conn_->execute_command(
+            "INSERT INTO text_analysis_results ("
+            "request_id, text_hash, result_data, analyzed_at, processing_time_ms, total_tokens, total_cost, updated_at) "
+            "VALUES ($1, $2, $3::jsonb, to_timestamp($4::bigint), $5::int, $6::int, $7::numeric, NOW()) "
+            "ON CONFLICT (request_id) DO UPDATE SET "
+            "result_data = EXCLUDED.result_data, analyzed_at = EXCLUDED.analyzed_at, "
+            "processing_time_ms = EXCLUDED.processing_time_ms, total_tokens = EXCLUDED.total_tokens, "
+            "total_cost = EXCLUDED.total_cost, updated_at = NOW()",
+            {
+                result.request_id,
+                result.text_hash,
+                result_data,
+                std::to_string(analyzed_epoch),
+                std::to_string(result.processing_time.count()),
+                std::to_string(result.total_tokens),
+                format_double(result.total_cost)
+            }
+        );
 
-        // Convert timestamp to string
-        auto analyzed_time = std::chrono::system_clock::to_time_t(result.analyzed_at);
-        char time_buffer[26];
-        std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&analyzed_time));
-        std::string analyzed_at_str = time_buffer;
-
-        const char* param_values[7] = {
-            result.request_id.c_str(),
-            result.text_hash.c_str(),
-            result_data.c_str(),
-            analyzed_at_str.c_str(),
-            std::to_string(result.processing_time.count()).c_str(),
-            std::to_string(result.total_tokens).c_str(),
-            std::to_string(result.total_cost).c_str()
-        };
-
-        PGresult* pg_result = PQexecParams(db_conn_->get_connection(), query, 7, NULL, param_values, NULL, NULL, 0);
-
-        if (PQresultStatus(pg_result) != PGRES_COMMAND_OK) {
-            spdlog::error("Failed to store analysis result: {}", PQerrorMessage(db_conn_->get_connection()));
+        if (!success) {
+            spdlog::error("Failed to store analysis result for request: {}", result.request_id);
         } else {
             spdlog::info("Stored analysis result for request: {}", result.request_id);
         }
-
-        PQclear(pg_result);
 
     } catch (const std::exception& e) {
         spdlog::error("Failed to store analysis result: {}", e.what());
@@ -962,49 +1002,39 @@ std::optional<TextAnalysisResult> TextAnalysisService::load_analysis_result(
     }
 
     try {
-        const char* query = R"(
-            SELECT request_id, result_data, analyzed_at, processing_time_ms,
-                   total_tokens, total_cost
-            FROM text_analysis_results
-            WHERE text_hash = $1
-            ORDER BY created_at DESC
-            LIMIT 1
-        )";
+        auto row = db_conn_->execute_query_single(
+            "SELECT request_id, result_data, analyzed_at, processing_time_ms, total_tokens, total_cost "
+            "FROM text_analysis_results WHERE text_hash = $1 ORDER BY created_at DESC LIMIT 1",
+            {text_hash}
+        );
 
-        const char* param_values[1] = {text_hash.c_str()};
-        PGresult* pg_result = PQexecParams(db_conn_->get_connection(), query, 1, NULL, param_values, NULL, NULL, 0);
-
-        if (PQresultStatus(pg_result) != PGRES_TUPLES_OK || PQntuples(pg_result) == 0) {
-            PQclear(pg_result);
+        if (!row) {
             return std::nullopt;
         }
 
-        // Parse database result
         TextAnalysisResult result;
-        result.request_id = PQgetvalue(pg_result, 0, 0);
+        result.request_id = row->value("request_id", "");
         result.text_hash = text_hash;
 
-        std::string result_data = PQgetvalue(pg_result, 0, 1);
-        nlohmann::json result_json = nlohmann::json::parse(result_data);
-
+        auto result_json = safe_parse_json(row->value("result_data", "{}"));
         result.success = result_json.value("success", true);
         result.total_tokens = result_json.value("total_tokens", 0);
         result.total_cost = result_json.value("total_cost", 0.0);
 
         if (result_json.contains("task_confidences")) {
             for (auto& [task, confidence] : result_json["task_confidences"].items()) {
-                result.task_confidences[task] = confidence;
+                try {
+                    result.task_confidences[task] = confidence.get<double>();
+                } catch (...) {}
             }
         }
 
-        result.analyzed_at = std::chrono::system_clock::now(); // Fallback timestamp
-
-        if (PQgetvalue(pg_result, 0, 3)) {
-            result.processing_time = std::chrono::milliseconds(
-                std::stoll(PQgetvalue(pg_result, 0, 3)));
+        result.analyzed_at = parse_database_timestamp(row->value("analyzed_at", ""));
+        try {
+            result.processing_time = std::chrono::milliseconds(std::stoll(row->value("processing_time_ms", "0")));
+        } catch (...) {
+            result.processing_time = std::chrono::milliseconds(0);
         }
-
-        PQclear(pg_result);
 
         spdlog::info("Loaded analysis result from database for hash: {}", text_hash);
         return result;

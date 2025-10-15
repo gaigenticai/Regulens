@@ -4,12 +4,62 @@
  */
 
 #include "advanced_rule_engine_api_handlers.hpp"
-#include <spdlog/spdlog.h>
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <random>
 #include <sstream>
 #include <thread>
 
+#include <spdlog/spdlog.h>
+
 namespace regulens {
+
+namespace {
+
+int safe_string_to_int(const std::string& value, int default_value = 0) {
+    if (value.empty()) {
+        return default_value;
+    }
+    char* end = nullptr;
+    long parsed = std::strtol(value.c_str(), &end, 10);
+    if (end == value.c_str()) {
+        return default_value;
+    }
+    return static_cast<int>(parsed);
+}
+
+double safe_string_to_double(const std::string& value, double default_value = 0.0) {
+    if (value.empty()) {
+        return default_value;
+    }
+    char* end = nullptr;
+    double parsed = std::strtod(value.c_str(), &end);
+    if (end == value.c_str()) {
+        return default_value;
+    }
+    return parsed;
+}
+
+std::string json_string_value(const nlohmann::json& row,
+                              const std::string& key,
+                              const std::string& fallback = "") {
+    if (!row.contains(key) || row[key].is_null()) {
+        return fallback;
+    }
+    if (row[key].is_string()) {
+        return row[key].get<std::string>();
+    }
+    if (row[key].is_number_integer()) {
+        return std::to_string(row[key].get<long long>());
+    }
+    if (row[key].is_number_float()) {
+        return std::to_string(row[key].get<double>());
+    }
+    return row[key].dump();
+}
+
+} // namespace
 
 AdvancedRuleEngineAPIHandlers::AdvancedRuleEngineAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -248,6 +298,10 @@ std::string AdvancedRuleEngineAPIHandlers::handle_list_rules(const std::string& 
         std::string rule_type = params["type"];
         bool active_only = parse_bool_param(params["active_only"], true);
         int limit = parse_int_param(params["limit"], 50);
+        if (limit < 0) {
+            limit = 0;
+        }
+        const std::size_t limit_size = static_cast<std::size_t>(limit);
 
         std::vector<RuleDefinition> rules;
         if (rule_type.empty()) {
@@ -263,8 +317,8 @@ std::string AdvancedRuleEngineAPIHandlers::handle_list_rules(const std::string& 
         }
 
         // Apply limit
-        if (rules.size() > limit) {
-            rules.resize(limit);
+        if (rules.size() > limit_size) {
+            rules.resize(limit_size);
         }
 
         // Format response
@@ -275,7 +329,7 @@ std::string AdvancedRuleEngineAPIHandlers::handle_list_rules(const std::string& 
 
         nlohmann::json response_data = create_paginated_response(
             formatted_rules,
-            formatted_rules.size(), // Simplified
+            static_cast<int>(formatted_rules.size()),
             1,
             limit
         );
@@ -410,7 +464,12 @@ RuleExecutionContext AdvancedRuleEngineAPIHandlers::parse_transaction_context(co
 RuleDefinition AdvancedRuleEngineAPIHandlers::parse_rule_definition(const nlohmann::json& request, const std::string& user_id) {
     RuleDefinition rule;
 
-    rule.rule_id = request.value("rule_id", rule_engine_ ? "" : rule_engine_->generate_rule_id());
+    std::string provided_id = request.value("rule_id", "");
+    if (provided_id.empty()) {
+        rule.rule_id = generate_rule_identifier();
+    } else {
+        rule.rule_id = provided_id;
+    }
     rule.name = request.value("name", "");
     rule.description = request.value("description", "");
     rule.priority = string_to_rule_priority(request.value("priority", "MEDIUM"));
@@ -462,7 +521,7 @@ nlohmann::json AdvancedRuleEngineAPIHandlers::format_execution_result(const Rule
 }
 
 nlohmann::json AdvancedRuleEngineAPIHandlers::format_fraud_detection_result(const FraudDetectionResult& result) {
-    nlohmann::json rule_results_json;
+    nlohmann::json rule_results_json = nlohmann::json::array();
     for (const auto& rule_result : result.rule_results) {
         rule_results_json.push_back(format_execution_result(rule_result));
     }
@@ -588,8 +647,8 @@ bool AdvancedRuleEngineAPIHandlers::is_admin_user(const std::string& user_id) {
 
         if (!results.empty()) {
             const auto& row = results[0];
-            std::string role_name = row.at("role_name");
-            int role_level = std::stoi(row.at("role_level"));
+            std::string role_name = json_string_value(row, "role_name");
+            int role_level = safe_string_to_int(json_string_value(row, "role_level"));
 
             // Admin role has highest privilege level (level >= 90)
             // Or role name is explicitly "administrator" or "super_admin"
@@ -636,6 +695,16 @@ std::string AdvancedRuleEngineAPIHandlers::generate_batch_id() {
     return "batch_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
+std::string AdvancedRuleEngineAPIHandlers::generate_rule_identifier() {
+    static thread_local std::mt19937_64 rng(std::random_device{}());
+    std::uniform_int_distribution<uint64_t> dist;
+    auto timestamp = static_cast<unsigned long long>(std::chrono::system_clock::now().time_since_epoch().count());
+    auto random_suffix = dist(rng);
+    std::ostringstream oss;
+    oss << "rule_" << timestamp << '_' << std::hex << random_suffix;
+    return oss.str();
+}
+
 void AdvancedRuleEngineAPIHandlers::update_batch_progress(const std::string& batch_id, double progress) {
     std::lock_guard<std::mutex> lock(batch_mutex_);
     batch_progress_[batch_id] = progress;
@@ -677,16 +746,16 @@ nlohmann::json AdvancedRuleEngineAPIHandlers::get_fraud_detection_summary(const 
         }
 
         const auto& row = results[0];
-        int total = std::stoi(row.at("total_transactions"));
-        int fraudulent = std::stoi(row.at("fraudulent_transactions"));
+        int total = safe_string_to_int(json_string_value(row, "total_transactions"));
+        int fraudulent = safe_string_to_int(json_string_value(row, "fraudulent_transactions"));
         double fraud_rate = total > 0 ? static_cast<double>(fraudulent) / total : 0.0;
 
         return {
             {"total_transactions", total},
             {"fraudulent_transactions", fraudulent},
             {"fraud_rate", fraud_rate},
-            {"average_processing_time_ms", std::stod(row.at("avg_processing_time_ms"))},
-            {"most_common_fraud_type", row.at("most_common_fraud_type")}
+            {"average_processing_time_ms", safe_string_to_double(json_string_value(row, "avg_processing_time_ms"))},
+            {"most_common_fraud_type", json_string_value(row, "most_common_fraud_type")}
         };
 
     } catch (const std::exception& e) {
@@ -724,10 +793,10 @@ std::vector<nlohmann::json> AdvancedRuleEngineAPIHandlers::get_top_fraud_rules(i
         std::vector<nlohmann::json> top_rules;
         for (const auto& row : results) {
             top_rules.push_back({
-                {"rule_id", row.at("rule_id")},
-                {"rule_name", row.at("rule_name")},
-                {"fraud_detections", std::stoi(row.at("fraud_detections"))},
-                {"avg_fraud_score", std::stod(row.at("avg_fraud_score"))}
+                {"rule_id", json_string_value(row, "rule_id")},
+                {"rule_name", json_string_value(row, "rule_name")},
+                {"fraud_detections", safe_string_to_int(json_string_value(row, "fraud_detections"))},
+                {"avg_fraud_score", safe_string_to_double(json_string_value(row, "avg_fraud_score"))}
             });
         }
 
@@ -767,8 +836,8 @@ std::unordered_map<std::string, int> AdvancedRuleEngineAPIHandlers::get_fraud_de
 
         std::unordered_map<std::string, int> risk_distribution;
         for (const auto& row : results) {
-            std::string risk_level = row.at("risk_level");
-            int count = std::stoi(row.at("count"));
+            std::string risk_level = json_string_value(row, "risk_level");
+            int count = safe_string_to_int(json_string_value(row, "count"));
             risk_distribution[risk_level] = count;
         }
 

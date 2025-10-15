@@ -8,9 +8,187 @@
 #include <random>
 #include <sstream>
 #include <iomanip>
+#include <chrono>
 #include <spdlog/spdlog.h>
+#include <regex>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
+#include <libxml/xpathInternals.h>
 
 namespace regulens {
+
+namespace {
+
+int safe_json_to_int(const nlohmann::json& value, int default_value = 0) {
+    try {
+        if (value.is_number_integer()) {
+            return value.get<int>();
+        }
+        if (value.is_string()) {
+            return std::stoi(value.get<std::string>());
+        }
+        if (value.is_number()) {
+            return static_cast<int>(value.get<double>());
+        }
+    } catch (const std::exception&) {
+        // Ignore and fall back to default
+    }
+    return default_value;
+}
+
+bool safe_json_to_bool(const nlohmann::json& value, bool default_value = false) {
+    try {
+        if (value.is_boolean()) {
+            return value.get<bool>();
+        }
+        if (value.is_string()) {
+            const auto text = value.get<std::string>();
+            return text == "true" || text == "1" || text == "TRUE";
+        }
+        if (value.is_number_integer()) {
+            return value.get<int>() != 0;
+        }
+    } catch (const std::exception&) {
+        // Ignore and use default
+    }
+    return default_value;
+}
+
+void append_json_to_xml(xmlNodePtr parent, const std::string& key, const nlohmann::json& value) {
+    const xmlChar* node_name = BAD_CAST key.c_str();
+
+    if (value.is_object()) {
+        xmlNodePtr object_node = xmlNewChild(parent, nullptr, node_name, nullptr);
+        for (const auto& [child_key, child_value] : value.items()) {
+            append_json_to_xml(object_node, child_key, child_value);
+        }
+    } else if (value.is_array()) {
+        xmlNodePtr array_node = xmlNewChild(parent, nullptr, node_name, nullptr);
+        size_t index = 0;
+        for (const auto& item : value) {
+            xmlNodePtr item_node = xmlNewChild(array_node, nullptr, BAD_CAST "item", nullptr);
+            xmlNewProp(item_node, BAD_CAST "index", BAD_CAST std::to_string(index++).c_str());
+            if (item.is_object()) {
+                for (const auto& [child_key, child_value] : item.items()) {
+                    append_json_to_xml(item_node, child_key, child_value);
+                }
+            } else if (item.is_array()) {
+                append_json_to_xml(item_node, "item", item);
+            } else {
+                std::string text = item.is_string() ? item.get<std::string>() : item.dump();
+                xmlNodeSetContent(item_node, BAD_CAST text.c_str());
+            }
+        }
+    } else {
+        std::string text = value.is_string() ? value.get<std::string>() : value.dump();
+        xmlNewChild(parent, nullptr, node_name, BAD_CAST text.c_str());
+    }
+}
+
+nlohmann::json xml_node_to_json(xmlNodePtr node) {
+    nlohmann::json result = nlohmann::json::object();
+
+    for (xmlNodePtr child = node->children; child != nullptr; child = child->next) {
+        if (child->type != XML_ELEMENT_NODE) {
+            continue;
+        }
+
+        std::string name = reinterpret_cast<const char*>(child->name);
+        nlohmann::json child_value;
+
+        bool has_element_children = false;
+        for (xmlNodePtr grand = child->children; grand != nullptr; grand = grand->next) {
+            if (grand->type == XML_ELEMENT_NODE) {
+                has_element_children = true;
+                break;
+            }
+        }
+
+        if (!has_element_children && child->children != nullptr) {
+            xmlChar* content = xmlNodeGetContent(child);
+            std::string value_text = content ? reinterpret_cast<const char*>(content) : "";
+            if (content) {
+                xmlFree(content);
+            }
+            child_value = value_text;
+        } else {
+            child_value = xml_node_to_json(child);
+        }
+
+        if (child->properties) {
+            nlohmann::json attributes = nlohmann::json::object();
+            for (xmlAttrPtr attr = child->properties; attr != nullptr; attr = attr->next) {
+                xmlChar* value = xmlNodeListGetString(child->doc, attr->children, 1);
+                if (value) {
+                    attributes[reinterpret_cast<const char*>(attr->name)] = std::string(reinterpret_cast<const char*>(value));
+                    xmlFree(value);
+                }
+            }
+
+            if (!attributes.empty()) {
+                if (!child_value.is_object()) {
+                    nlohmann::json wrapped;
+                    wrapped["value"] = child_value;
+                    wrapped["_attributes"] = attributes;
+                    child_value = wrapped;
+                } else {
+                    child_value["_attributes"] = attributes;
+                }
+            }
+        }
+
+        if (result.contains(name)) {
+            if (!result[name].is_array()) {
+                result[name] = nlohmann::json::array({result[name]});
+            }
+            result[name].push_back(child_value);
+        } else {
+            result[name] = child_value;
+        }
+    }
+
+    return result;
+}
+
+std::string extract_graphql_operation_name(const std::string& query_text) {
+    static const std::regex operation_regex(R"((query|mutation|subscription)\s+([_A-Za-z][_0-9A-Za-z]*)?)", std::regex::icase);
+    std::smatch match;
+    if (std::regex_search(query_text, match, operation_regex) && match.size() >= 3) {
+        std::string op_name = match[2].str();
+        if (!op_name.empty()) {
+            return op_name;
+        }
+    }
+    return "";
+}
+
+nlohmann::json build_rest_envelope_from_websocket(const nlohmann::json& websocket_message) {
+    nlohmann::json envelope;
+    envelope["protocol"] = "REST_HTTP";
+    envelope["headers"] = websocket_message.value("headers", nlohmann::json::object());
+    envelope["metadata"] = {
+        {"websocket_type", websocket_message.value("type", std::string("message"))},
+        {"channel", websocket_message.value("channel", std::string())},
+        {"message_id", websocket_message.value("id", std::string())}
+    };
+
+    if (websocket_message.contains("payload")) {
+        envelope["body"] = websocket_message["payload"];
+    } else if (websocket_message.contains("data")) {
+        envelope["body"] = websocket_message["data"];
+    } else {
+        envelope["body"] = websocket_message;
+    }
+
+    if (websocket_message.contains("method")) {
+        envelope["method"] = websocket_message["method"];
+    }
+
+    return envelope;
+}
+
+} // namespace
 
 MessageTranslator::MessageTranslator(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -599,14 +777,222 @@ std::string MessageTranslator::build_soap(const nlohmann::json& message_data) {
 }
 
 // Placeholder implementations for remaining methods
-std::optional<nlohmann::json> MessageTranslator::parse_graphql(const std::string& message) { return parse_rest_http(message); }
-std::optional<nlohmann::json> MessageTranslator::parse_websocket(const std::string& message) { return parse_rest_http(message); }
-std::string MessageTranslator::rest_to_soap(const std::string& rest_message) { return build_soap(nlohmann::json::parse(rest_message)); }
-std::string MessageTranslator::soap_to_rest(const std::string& soap_message) { return nlohmann::json{{"protocol", "rest"}, {"raw_content", soap_message}}.dump(); }
-std::string MessageTranslator::websocket_to_rest(const std::string& ws_message) { return ws_message; }
-std::string MessageTranslator::rest_to_websocket(const std::string& rest_message) { return rest_message; }
-std::string MessageTranslator::build_graphql(const nlohmann::json& message_data) { return message_data.dump(2); }
-std::string MessageTranslator::build_websocket(const nlohmann::json& message_data) { return message_data.dump(2); }
+std::optional<nlohmann::json> MessageTranslator::parse_graphql(const std::string& message) {
+    try {
+        nlohmann::json payload = nlohmann::json::parse(message);
+        nlohmann::json result = nlohmann::json::object();
+
+        if (payload.is_string()) {
+            result["query"] = payload.get<std::string>();
+        } else {
+            if (payload.contains("query")) {
+                result["query"] = payload["query"].is_string() ? payload["query"].get<std::string>() : payload["query"].dump();
+            } else if (payload.contains("document")) {
+                result["query"] = payload["document"].is_string() ? payload["document"].get<std::string>() : payload["document"].dump();
+            }
+
+            if (payload.contains("variables")) {
+                result["variables"] = payload["variables"];
+            }
+            if (payload.contains("operationName")) {
+                result["operationName"] = payload["operationName"].get<std::string>();
+            }
+        }
+
+        if (!result.contains("query")) {
+            return std::nullopt;
+        }
+
+        if (!result.contains("operationName")) {
+            result["operationName"] = extract_graphql_operation_name(result["query"].get<std::string>());
+        }
+
+        if (!result.contains("variables")) {
+            result["variables"] = nlohmann::json::object();
+        }
+
+        return result;
+    } catch (...) {
+        if (message.empty()) {
+            return std::nullopt;
+        }
+        nlohmann::json fallback = {
+            {"query", message},
+            {"variables", nlohmann::json::object()},
+            {"operationName", extract_graphql_operation_name(message)}
+        };
+        return fallback;
+    }
+}
+
+std::optional<nlohmann::json> MessageTranslator::parse_websocket(const std::string& message) {
+    try {
+        nlohmann::json parsed = nlohmann::json::parse(message);
+        nlohmann::json result = nlohmann::json::object();
+
+        result["type"] = parsed.value("type", std::string("message"));
+        result["channel"] = parsed.value("channel", std::string());
+        result["id"] = parsed.value("id", std::string());
+        result["headers"] = parsed.value("headers", nlohmann::json::object());
+
+        if (parsed.contains("payload")) {
+            result["payload"] = parsed["payload"];
+        } else if (parsed.contains("data")) {
+            result["payload"] = parsed["data"];
+        } else if (parsed.contains("body")) {
+            result["payload"] = parsed["body"];
+        } else {
+            result["payload"] = parsed;
+        }
+
+        result["timestamp"] = parsed.value("timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+        return result;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::string MessageTranslator::rest_to_soap(const std::string& rest_message) {
+    try {
+        nlohmann::json rest_payload = nlohmann::json::parse(rest_message);
+
+        xmlDocPtr doc = xmlNewDoc(BAD_CAST "1.0");
+        xmlNodePtr envelope = xmlNewNode(nullptr, BAD_CAST "soap:Envelope");
+        xmlNewProp(envelope, BAD_CAST "xmlns:soap", BAD_CAST "http://www.w3.org/2003/05/soap-envelope");
+        xmlDocSetRootElement(doc, envelope);
+
+        xmlNodePtr body = xmlNewChild(envelope, nullptr, BAD_CAST "soap:Body", nullptr);
+        xmlNodePtr payload_node = xmlNewChild(body, nullptr, BAD_CAST "RestPayload", nullptr);
+
+        if (rest_payload.contains("method")) {
+            std::string method_str = rest_payload["method"].is_string()
+                ? rest_payload["method"].get<std::string>()
+                : rest_payload["method"].dump();
+            xmlNewChild(payload_node, nullptr, BAD_CAST "Method", BAD_CAST method_str.c_str());
+        }
+        if (rest_payload.contains("headers")) {
+            append_json_to_xml(payload_node, "Headers", rest_payload["headers"]);
+        }
+        if (rest_payload.contains("body")) {
+            append_json_to_xml(payload_node, "Body", rest_payload["body"]);
+        }
+
+        xmlChar* buffer = nullptr;
+        int size = 0;
+        xmlDocDumpFormatMemoryEnc(doc, &buffer, &size, "UTF-8", 1);
+
+        std::string soap_message;
+        if (buffer && size > 0) {
+            soap_message.assign(reinterpret_cast<const char*>(buffer), static_cast<size_t>(size));
+        }
+
+        if (buffer) {
+            xmlFree(buffer);
+        }
+        xmlFreeDoc(doc);
+        return soap_message;
+
+    } catch (const std::exception& e) {
+        if (logger_) {
+            logger_->warn("Failed to convert REST to SOAP: {}", e.what());
+        }
+        return rest_message;
+    }
+}
+
+std::string MessageTranslator::soap_to_rest(const std::string& soap_message) {
+    xmlDocPtr doc = xmlReadMemory(soap_message.c_str(), static_cast<int>(soap_message.size()), nullptr, nullptr, XML_PARSE_NOBLANKS);
+    if (!doc) {
+        return nlohmann::json{{"protocol", "REST_HTTP"}, {"raw_content", soap_message}}.dump();
+    }
+
+    xmlXPathContextPtr xpath_context = xmlXPathNewContext(doc);
+    nlohmann::json rest_payload = nlohmann::json::object();
+
+    if (xpath_context) {
+        xmlXPathRegisterNs(xpath_context, BAD_CAST "soap", BAD_CAST "http://www.w3.org/2003/05/soap-envelope");
+        xmlXPathObjectPtr body_result = xmlXPathEvalExpression(BAD_CAST "//soap:Body", xpath_context);
+        if (body_result && body_result->nodesetval && body_result->nodesetval->nodeNr > 0) {
+            xmlNodePtr body_node = body_result->nodesetval->nodeTab[0];
+            rest_payload = xml_node_to_json(body_node);
+        }
+
+        if (body_result) {
+            xmlXPathFreeObject(body_result);
+        }
+        xmlXPathFreeContext(xpath_context);
+    }
+
+    xmlFreeDoc(doc);
+
+    if (!rest_payload.is_object() || rest_payload.empty()) {
+        rest_payload["raw_content"] = soap_message;
+    }
+    rest_payload["protocol"] = "REST_HTTP";
+    return rest_payload.dump();
+}
+
+std::string MessageTranslator::websocket_to_rest(const std::string& ws_message) {
+    try {
+        auto parsed = parse_websocket(ws_message);
+        if (!parsed) {
+            return nlohmann::json{{"protocol", "REST_HTTP"}, {"raw_content", ws_message}}.dump();
+        }
+        auto envelope = build_rest_envelope_from_websocket(*parsed);
+        return envelope.dump();
+    } catch (...) {
+        return nlohmann::json{{"protocol", "REST_HTTP"}, {"raw_content", ws_message}}.dump();
+    }
+}
+
+std::string MessageTranslator::rest_to_websocket(const std::string& rest_message) {
+    try {
+        nlohmann::json rest_payload = nlohmann::json::parse(rest_message);
+        nlohmann::json websocket_message;
+
+        websocket_message["type"] = rest_payload.value("websocket_type", std::string("message"));
+        websocket_message["channel"] = rest_payload.value("channel", rest_payload.value("path", std::string()));
+        websocket_message["headers"] = rest_payload.value("headers", nlohmann::json::object());
+        websocket_message["id"] = rest_payload.value("message_id", generate_message_id());
+        websocket_message["payload"] = rest_payload.value("body", rest_payload);
+        websocket_message["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        return websocket_message.dump();
+    } catch (...) {
+        return nlohmann::json{{"type", "message"}, {"payload", rest_message}}.dump();
+    }
+}
+
+std::string MessageTranslator::build_graphql(const nlohmann::json& message_data) {
+    nlohmann::json payload = nlohmann::json::object();
+    payload["query"] = message_data.value("query", std::string());
+    payload["variables"] = message_data.value("variables", nlohmann::json::object());
+    if (payload["query"].get<std::string>().empty() && message_data.contains("document")) {
+        payload["query"] = message_data["document"].get<std::string>();
+    }
+    if (message_data.contains("operationName")) {
+        payload["operationName"] = message_data["operationName"].get<std::string>();
+    } else {
+        payload["operationName"] = extract_graphql_operation_name(payload["query"].get<std::string>());
+    }
+    payload["extensions"] = message_data.value("extensions", nlohmann::json::object());
+    return payload.dump();
+}
+
+std::string MessageTranslator::build_websocket(const nlohmann::json& message_data) {
+    nlohmann::json websocket_message;
+    websocket_message["type"] = message_data.value("type", std::string("message"));
+    websocket_message["channel"] = message_data.value("channel", std::string());
+    websocket_message["id"] = message_data.value("id", generate_message_id());
+    websocket_message["headers"] = message_data.value("headers", nlohmann::json::object());
+    websocket_message["payload"] = message_data.value("payload", message_data);
+    websocket_message["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    return websocket_message.dump();
+}
 
 TranslationResultData MessageTranslator::create_error_result(const std::string& error_message, TranslationResult result_type) {
     TranslationResultData result;
@@ -773,14 +1159,27 @@ std::vector<TranslationRule> MessageTranslator::load_translation_rules() {
 
         for (const auto& row : results) {
             TranslationRule rule;
-            rule.rule_id = row.at("rule_id");
-            rule.name = row.at("name");
-            rule.from_protocol = static_cast<MessageProtocol>(std::stoi(row.at("from_protocol")));
-            rule.to_protocol = static_cast<MessageProtocol>(std::stoi(row.at("to_protocol")));
-            rule.transformation_rules = nlohmann::json::parse(row.at("transformation_rules"));
-            rule.bidirectional = (row.at("bidirectional") == "true");
-            rule.priority = std::stoi(row.at("priority"));
-            rule.active = (row.at("active") == "true");
+            rule.rule_id = row.value("rule_id", "");
+            rule.name = row.value("name", "");
+            rule.from_protocol = static_cast<MessageProtocol>(
+                safe_json_to_int(row.value("from_protocol", nlohmann::json{}), 0));
+            rule.to_protocol = static_cast<MessageProtocol>(
+                safe_json_to_int(row.value("to_protocol", nlohmann::json{}), 0));
+
+            try {
+                const auto transformation_json = row.value("transformation_rules", nlohmann::json::object());
+                if (transformation_json.is_string()) {
+                    rule.transformation_rules = nlohmann::json::parse(transformation_json.get<std::string>());
+                } else {
+                    rule.transformation_rules = transformation_json;
+                }
+            } catch (const std::exception&) {
+                rule.transformation_rules = nlohmann::json::object();
+            }
+
+            rule.bidirectional = safe_json_to_bool(row.value("bidirectional", nlohmann::json{}), false);
+            rule.priority = safe_json_to_int(row.value("priority", nlohmann::json{}), 0);
+            rule.active = safe_json_to_bool(row.value("active", nlohmann::json{}), true);
 
             rules.push_back(rule);
         }

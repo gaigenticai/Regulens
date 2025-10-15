@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include "advanced_rule_engine.hpp"
 #include "../database/postgresql_connection.hpp"
@@ -95,6 +96,7 @@ private:
 
     // Batch processing helpers
     std::string generate_batch_id();
+    std::string generate_rule_identifier();
     void update_batch_progress(const std::string& batch_id, double progress);
     std::unordered_map<std::string, FraudDetectionResult> get_batch_results_safe(const std::string& batch_id);
 

@@ -12,6 +12,8 @@
 #include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <spdlog/spdlog.h>
+#include <libpq-fe.h>
+#include <unordered_map>
 
 namespace regulens {
 namespace llm {
@@ -554,11 +556,17 @@ bool LLMKeyManager::update_key_status(const std::string& key_id, const std::stri
 
 // Logging helper implementations
 void LLMKeyManager::log_key_creation(const std::string& key_id, const CreateKeyRequest& request) {
-    logger_->log(LogLevel::INFO, "LLM API key created",
-        {{"key_id", key_id},
-         {"provider", request.provider},
-         {"created_by", request.created_by},
-         {"is_default", request.is_default ? "true" : "false"}});
+    std::unordered_map<std::string, std::string> context = {
+        {"key_id", key_id},
+        {"provider", request.provider},
+        {"created_by", request.created_by},
+        {"is_default", request.is_default ? "true" : "false"}
+    };
+    logger_->log(LogLevel::INFO,
+                 "LLM API key created",
+                 "LLMKeyManager",
+                 __func__,
+                 context);
 }
 
 } // namespace llm

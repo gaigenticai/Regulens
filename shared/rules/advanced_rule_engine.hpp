@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <optional>
 #include <chrono>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
@@ -246,6 +247,7 @@ private:
     void cache_rule(const RuleDefinition& rule);
     void invalidate_rule_cache(const std::string& rule_id = "");
     void cleanup_expired_cache_entries();
+    void load_configuration();
 };
 
 } // namespace regulens

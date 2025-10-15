@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
+#include <libpq-fe.h>
 
 namespace regulens {
 namespace llm {
@@ -317,7 +318,7 @@ std::optional<FunctionCallReplay> FunctionCallDebugger::replay_function_call(
         replay.modified_parameters = request.modified_parameters;
         replay.modified_function_name = request.modified_function_name.empty() ?
                                        original_call->function_name : request.modified_function_name;
-        replay.replay_result = {"replayed_output": "simulated result"}; // Mock result
+        replay.replay_result = nlohmann::json{{"replayed_output", "simulated result"}}; // Mock result
         replay.success = true;
         replay.execution_time_ms = 150; // Mock execution time
         replay.replayed_at = std::chrono::system_clock::now();

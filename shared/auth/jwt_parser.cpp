@@ -1,9 +1,12 @@
 #include "jwt_parser.hpp"
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/buffer.h>
+#include <openssl/bio.h>
 #include <sstream>
 #include <ctime>
 #include <iostream>
+#include <vector>
 
 namespace regulens {
 
@@ -26,18 +29,22 @@ std::string JWTParser::base64_url_decode(const std::string& input) {
 
     // Decode base64
     BIO *bio, *b64;
-    int decode_len = base64.length();
-    std::vector<unsigned char> buffer(decode_len);
+    const size_t decode_len = base64.length();
+    std::vector<unsigned char> buffer(decode_len + 1);
 
     bio = BIO_new_mem_buf(base64.c_str(), -1);
     b64 = BIO_new(BIO_f_base64());
     bio = BIO_push(b64, bio);
 
     BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
-    int length = BIO_read(bio, buffer.data(), decode_len);
+    const int length = BIO_read(bio, buffer.data(), static_cast<int>(decode_len));
     BIO_free_all(bio);
 
-    return std::string(buffer.begin(), buffer.begin() + length);
+    if (length <= 0) {
+        return {};
+    }
+
+    return std::string(reinterpret_cast<char*>(buffer.data()), static_cast<size_t>(length));
 }
 
 std::string JWTParser::hmac_sha256(const std::string& data, const std::string& key) {
@@ -45,8 +52,8 @@ std::string JWTParser::hmac_sha256(const std::string& data, const std::string& k
     unsigned int hash_len;
 
     HMAC(EVP_sha256(),
-         key.c_str(), key.length(),
-         reinterpret_cast<const unsigned char*>(data.c_str()), data.length(),
+         key.c_str(), static_cast<int>(key.length()),
+         reinterpret_cast<const unsigned char*>(data.c_str()), static_cast<int>(data.length()),
          hash, &hash_len);
 
     return std::string(reinterpret_cast<char*>(hash), hash_len);
@@ -95,7 +102,7 @@ bool JWTParser::validate_signature(const std::string& token) {
     bio = BIO_push(b64, bio);
 
     BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
-    BIO_write(bio, expected_sig.c_str(), expected_sig.length());
+    BIO_write(bio, expected_sig.c_str(), static_cast<int>(expected_sig.length()));
     BIO_flush(bio);
     BIO_get_mem_ptr(bio, &bufferPtr);
 

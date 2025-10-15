@@ -186,15 +186,19 @@ private:
     std::string format_rule_code(const nlohmann::json& rule_definition, RuleFormat format);
     std::string format_rule_code_from_gpt_response(const std::string& response, RuleFormat format);
     void extract_rule_metadata(const std::string& response, GeneratedRule& rule);
+    std::string generate_fallback_rule(const PolicyGenerationRequest& request);
 
     // Validation methods
     RuleValidationResult validate_json_rule(const std::string& rule_json);
     RuleValidationResult validate_dsl_rule(const std::string& rule_dsl);
     RuleValidationResult validate_python_rule(const std::string& rule_python);
+    bool validate_rule_logic(const nlohmann::json& rule_obj);
+    bool validate_dsl_logic(const std::string& rule_dsl);
     bool check_rule_security(const std::string& code, RuleFormat format);
 
     // Test generation
     std::vector<std::string> generate_validation_tests(const GeneratedRule& rule);
+    std::vector<std::string> parse_test_cases(const std::string& response);
     bool execute_test(const std::string& test_code, RuleFormat format);
 
     // Database operations
@@ -213,6 +217,9 @@ private:
     std::string generate_rule_documentation(const GeneratedRule& rule);
     std::string rule_type_to_string(RuleType type);
     std::string domain_to_string(PolicyDomain domain);
+    std::string format_to_string(RuleFormat format);
+    std::string format_timestamp(std::chrono::system_clock::time_point tp);
+    std::string generate_uuid();
 
     // Cost and token tracking
     std::pair<int, double> calculate_generation_cost(int input_tokens, int output_tokens);

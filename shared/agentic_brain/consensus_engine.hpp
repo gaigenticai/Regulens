@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <optional>
 #include <chrono>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
@@ -94,7 +95,7 @@ struct ConsensusResult {
     std::string consensus_id;
     std::string topic;
     std::string final_decision;
-    ConsensusDecisionConfidence confidence_level;
+    ConsensusDecisionConfidence confidence_level = ConsensusDecisionConfidence::LOW;
     VotingAlgorithm algorithm_used;
     std::vector<VotingRound> rounds;
     ConsensusState final_state;
@@ -104,10 +105,15 @@ struct ConsensusResult {
     nlohmann::json resolution_details;
     std::vector<std::string> dissenting_opinions;
     std::chrono::system_clock::time_point completed_at;
+    bool success = false;
+    std::string error_message;
+    int rounds_used = 0;
+    long processing_time_ms = 0;
 };
 
 struct ConsensusConfiguration {
     std::string topic;
+    std::string description;
     VotingAlgorithm algorithm = VotingAlgorithm::MAJORITY;
     std::vector<Agent> participants;
     int max_rounds = 3;
@@ -117,6 +123,7 @@ struct ConsensusConfiguration {
     bool allow_discussion = true;
     bool require_justification = true;
     nlohmann::json custom_rules;
+    std::string consensus_id;
 };
 
 class ConsensusEngine {
@@ -194,7 +201,7 @@ private:
     std::string generate_agent_id();
     bool validate_consensus_config(const ConsensusConfiguration& config);
     bool validate_agent_opinion(const AgentOpinion& opinion, const ConsensusConfiguration& config);
-    DecisionConfidence calculate_confidence_level(double agreement_percentage, int rounds_used);
+    ConsensusDecisionConfidence calculate_confidence_level(double agreement_percentage, int rounds_used);
 
     // Voting algorithm helpers
     std::string determine_majority_decision(const std::unordered_map<std::string, int>& vote_counts);
@@ -203,16 +210,10 @@ private:
     bool has_quorum(const std::vector<AgentOpinion>& opinions, const ConsensusConfiguration& config);
 
     // Database operations
-    bool store_consensus_config(const std::string& consensus_id, const ConsensusConfiguration& config);
-    bool store_voting_round(const std::string& consensus_id, const VotingRound& round);
-    bool store_agent_opinion(const std::string& consensus_id, const AgentOpinion& opinion);
-    bool store_consensus_result(const ConsensusResult& result);
-    bool store_agent(const Agent& agent);
-
-    std::optional<ConsensusConfiguration> load_consensus_config(const std::string& consensus_id);
-    std::vector<VotingRound> load_voting_rounds(const std::string& consensus_id);
-    std::vector<AgentOpinion> load_agent_opinions(const std::string& consensus_id, int round_number = -1);
-    std::optional<Agent> load_agent(const std::string& agent_id);
+    void store_consensus_session(const std::string& consensus_id, const ConsensusConfiguration& config);
+    void store_agent_opinion(const std::string& consensus_id, const AgentOpinion& opinion);
+    void update_agent_opinion(const std::string& consensus_id, const AgentOpinion& opinion);
+    void update_consensus_result(const std::string& consensus_id, const ConsensusResult& result);
 
     // Utility methods
     double calculate_agreement_percentage(const std::vector<AgentOpinion>& opinions);

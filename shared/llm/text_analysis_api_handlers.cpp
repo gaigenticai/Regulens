@@ -393,10 +393,14 @@ std::string TextAnalysisAPIHandlers::handle_update_analysis_config(const std::st
             SET config_value = $2, updated_at = NOW()
         )";
         
-        db_connection_->execute_query(store_query, {
-            config_key, 
+        bool persisted = db_conn_->execute_command(store_query, {
+            config_key,
             request["value"].dump()
         });
+
+        if (!persisted) {
+            return create_error_response("Failed to persist configuration change", 500).dump();
+        }
         
         nlohmann::json response = {
             {"success", true},

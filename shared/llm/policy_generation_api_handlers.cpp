@@ -10,6 +10,46 @@
 
 namespace regulens {
 
+namespace {
+
+std::string rule_type_to_string_local(RuleType type) {
+    switch (type) {
+        case RuleType::VALIDATION_RULE: return "VALIDATION_RULE";
+        case RuleType::BUSINESS_RULE: return "BUSINESS_RULE";
+        case RuleType::COMPLIANCE_RULE: return "COMPLIANCE_RULE";
+        case RuleType::RISK_RULE: return "RISK_RULE";
+        case RuleType::AUDIT_RULE: return "AUDIT_RULE";
+        case RuleType::WORKFLOW_RULE: return "WORKFLOW_RULE";
+        default: return "UNKNOWN";
+    }
+}
+
+std::string domain_to_string_local(PolicyDomain domain) {
+    switch (domain) {
+        case PolicyDomain::FINANCIAL_COMPLIANCE: return "FINANCIAL_COMPLIANCE";
+        case PolicyDomain::DATA_PRIVACY: return "DATA_PRIVACY";
+        case PolicyDomain::REGULATORY_REPORTING: return "REGULATORY_REPORTING";
+        case PolicyDomain::RISK_MANAGEMENT: return "RISK_MANAGEMENT";
+        case PolicyDomain::OPERATIONAL_CONTROLS: return "OPERATIONAL_CONTROLS";
+        case PolicyDomain::SECURITY_POLICY: return "SECURITY_POLICY";
+        case PolicyDomain::AUDIT_PROCEDURES: return "AUDIT_PROCEDURES";
+        default: return "UNKNOWN";
+    }
+}
+
+std::string format_to_string_local(RuleFormat format) {
+    switch (format) {
+        case RuleFormat::JSON: return "JSON";
+        case RuleFormat::YAML: return "YAML";
+        case RuleFormat::DSL: return "DSL";
+        case RuleFormat::PYTHON: return "PYTHON";
+        case RuleFormat::JAVASCRIPT: return "JAVASCRIPT";
+        default: return "UNKNOWN";
+    }
+}
+
+}
+
 PolicyGenerationAPIHandlers::PolicyGenerationAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
     std::shared_ptr<PolicyGenerationService> policy_service
@@ -412,9 +452,9 @@ nlohmann::json PolicyGenerationAPIHandlers::format_rule(const GeneratedRule& rul
         {"name", rule.name},
         {"description", rule.description},
         {"natural_language_input", rule.natural_language_input},
-        {"rule_type", policy_service_->rule_type_to_string(rule.rule_type)},
-        {"domain", policy_service_->domain_to_string(rule.domain)},
-        {"format", policy_service_->format_to_string(rule.format)},
+        {"rule_type", rule_type_to_string_local(rule.rule_type)},
+        {"domain", domain_to_string_local(rule.domain)},
+        {"format", format_to_string_local(rule.format)},
         {"generated_code", rule.generated_code},
         {"confidence_score", rule.confidence_score},
         {"generated_at", std::chrono::duration_cast<std::chrono::seconds>(

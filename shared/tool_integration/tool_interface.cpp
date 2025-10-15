@@ -2,6 +2,7 @@
 #include "tools/email_tool.hpp"
 #include "tools/web_search_tool.hpp"
 #include "tools/tool_categories.hpp"
+#include "tools/enterprise_connectors.hpp"
 #include <deque>
 // MCP tool temporarily disabled - requires Boost which is not available
 // #include "tools/mcp_tool.hpp"
@@ -768,40 +769,37 @@ std::unique_ptr<Tool> ToolFactory::create_tool(const ToolConfig& config,
             break;
 
         case ToolCategory::ERP:
+            return create_erp_tool(config, logger);
+
         case ToolCategory::CRM:
+            return create_crm_tool(config, logger);
+
         case ToolCategory::DMS:
+            return create_document_tool(config, logger);
+
         case ToolCategory::STORAGE:
-            // These tool categories are not yet implemented - return nullptr
-            break;
+            return create_storage_tool(config, logger);
 
         case ToolCategory::ANALYTICS:
             return create_analytics_tool(config, logger);
-            break;
 
         case ToolCategory::WORKFLOW:
             return create_workflow_tool(config, logger);
-            break;
 
         case ToolCategory::INTEGRATION:
-            // Integration tools not yet implemented - return nullptr
-            break;
+            return create_integration_hub_tool(config, logger);
 
         case ToolCategory::SECURITY:
             return create_security_tool(config, logger);
-            break;
 
         case ToolCategory::MONITORING:
             return create_monitoring_tool(config, logger);
-            break;
 
         case ToolCategory::WEB_SEARCH:
             return create_web_search_tool(config, logger);
-            break;
 
         case ToolCategory::MCP_TOOLS:
-            // MCP tool temporarily disabled - requires Boost which is not available
-            // return create_mcp_tool(config, logger);
-            break;
+            return create_model_context_bridge(config, logger);
     }
 
     return nullptr; // Unknown tool type
@@ -883,6 +881,36 @@ std::unique_ptr<Tool> ToolFactory::create_monitoring_tool(const ToolConfig& conf
     }
 
     return nullptr; // Unknown monitoring tool
+}
+
+std::unique_ptr<Tool> ToolFactory::create_erp_tool(const ToolConfig& config,
+                                                   StructuredLogger* logger) {
+    return std::make_unique<ERPIntegrationTool>(config, logger);
+}
+
+std::unique_ptr<Tool> ToolFactory::create_crm_tool(const ToolConfig& config,
+                                                   StructuredLogger* logger) {
+    return std::make_unique<CRMIntegrationTool>(config, logger);
+}
+
+std::unique_ptr<Tool> ToolFactory::create_document_tool(const ToolConfig& config,
+                                                        StructuredLogger* logger) {
+    return std::make_unique<DocumentManagementTool>(config, logger);
+}
+
+std::unique_ptr<Tool> ToolFactory::create_storage_tool(const ToolConfig& config,
+                                                       StructuredLogger* logger) {
+    return std::make_unique<StorageGatewayTool>(config, logger);
+}
+
+std::unique_ptr<Tool> ToolFactory::create_integration_hub_tool(const ToolConfig& config,
+                                                               StructuredLogger* logger) {
+    return std::make_unique<IntegrationHubTool>(config, logger);
+}
+
+std::unique_ptr<Tool> ToolFactory::create_model_context_bridge(const ToolConfig& config,
+                                                               StructuredLogger* logger) {
+    return std::make_unique<ModelContextBridgeTool>(config, logger);
 }
 
 // Forward declarations for tool creation functions

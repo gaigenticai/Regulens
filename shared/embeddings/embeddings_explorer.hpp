@@ -221,6 +221,12 @@ private:
         const nlohmann::json& parameters
     );
 
+    std::vector<std::vector<double>> generate_2d_coordinates(
+        const std::vector<EmbeddingPoint>& points,
+        const std::string& visualization_type,
+        const nlohmann::json& parameters
+    );
+
     std::vector<double> calculate_similarity(
         const std::vector<float>& query_vector,
         const std::vector<float>& target_vector,

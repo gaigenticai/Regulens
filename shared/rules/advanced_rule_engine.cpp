@@ -4,14 +4,89 @@
  */
 
 #include "advanced_rule_engine.hpp"
-#include <sstream>
-#include <iomanip>
 #include <algorithm>
-#include <random>
-#include <spdlog/spdlog.h>
 #include <cmath>
+#include <cstdlib>
+#include <iomanip>
+#include <random>
+#include <regex>
+#include <sstream>
+
+#include <fmt/format.h>
+#include <spdlog/spdlog.h>
 
 namespace regulens {
+
+namespace {
+
+int safe_string_to_int(const std::string& value, int default_value = 0) {
+    if (value.empty()) {
+        return default_value;
+    }
+    char* end = nullptr;
+    long parsed = std::strtol(value.c_str(), &end, 10);
+    if (end == value.c_str()) {
+        return default_value;
+    }
+    return static_cast<int>(parsed);
+}
+
+std::string to_string(RuleExecutionResult result) {
+    switch (result) {
+        case RuleExecutionResult::PASS: return "PASS";
+        case RuleExecutionResult::FAIL: return "FAIL";
+        case RuleExecutionResult::ERROR: return "ERROR";
+        case RuleExecutionResult::TIMEOUT: return "TIMEOUT";
+        case RuleExecutionResult::SKIPPED: return "SKIPPED";
+    }
+    return "UNKNOWN";
+}
+
+std::string to_string(FraudRiskLevel level) {
+    switch (level) {
+        case FraudRiskLevel::LOW: return "LOW";
+        case FraudRiskLevel::MEDIUM: return "MEDIUM";
+        case FraudRiskLevel::HIGH: return "HIGH";
+        case FraudRiskLevel::CRITICAL: return "CRITICAL";
+    }
+    return "UNKNOWN";
+}
+
+nlohmann::json serialize_rule_result(const RuleExecutionResultDetail& detail) {
+    nlohmann::json payload = {
+        {"rule_id", detail.rule_id},
+        {"rule_name", detail.rule_name},
+        {"result", to_string(detail.result)},
+        {"confidence_score", detail.confidence_score},
+        {"risk_level", to_string(detail.risk_level)},
+        {"rule_output", detail.rule_output},
+        {"error_message", detail.error_message},
+        {"execution_time_ms", detail.execution_time.count()},
+        {"triggered_conditions", detail.triggered_conditions}
+    };
+
+    nlohmann::json risk_factors_json = nlohmann::json::object();
+    for (const auto& [factor, value] : detail.risk_factors) {
+        risk_factors_json[factor] = value;
+    }
+    payload["risk_factors"] = std::move(risk_factors_json);
+
+    return payload;
+}
+
+nlohmann::json safe_parse_json_string(const std::string& payload,
+                                      const nlohmann::json& fallback = nlohmann::json::object()) {
+    if (payload.empty()) {
+        return fallback;
+    }
+    try {
+        return nlohmann::json::parse(payload);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+} // namespace
 
 AdvancedRuleEngine::AdvancedRuleEngine(
     std::shared_ptr<PostgreSQLConnection> db_conn,
@@ -107,7 +182,7 @@ RuleExecutionResultDetail AdvancedRuleEngine::execute_rule(
         result.error_message = std::string("Rule execution failed: ") + e.what();
 
         if (logger_) {
-            logger_->error("Rule execution failed for rule '{}': {}", rule.rule_id, e.what());
+            logger_->error(fmt::format("Rule execution failed for rule '{}': {}", rule.rule_id, e.what()));
         }
     }
 
@@ -182,9 +257,12 @@ FraudDetectionResult AdvancedRuleEngine::evaluate_transaction(
         store_fraud_detection_result(result);
 
         if (logger_) {
-            logger_->info("Transaction {} evaluated: fraud_score={}, risk_level={}, recommendation={}",
-                         result.transaction_id, result.fraud_score,
-                         static_cast<int>(result.overall_risk), result.recommendation);
+            logger_->info(fmt::format(
+                "Transaction {} evaluated: fraud_score={}, risk_level={}, recommendation={}",
+                result.transaction_id,
+                result.fraud_score,
+                static_cast<int>(result.overall_risk),
+                result.recommendation));
         }
 
     } catch (const std::exception& e) {
@@ -192,7 +270,7 @@ FraudDetectionResult AdvancedRuleEngine::evaluate_transaction(
         result.recommendation = "ERROR";
 
         if (logger_) {
-            logger_->error("Transaction evaluation failed for {}: {}", context.transaction_id, e.what());
+            logger_->error(fmt::format("Transaction evaluation failed for {}: {}", context.transaction_id, e.what()));
         }
     }
 
@@ -350,11 +428,21 @@ RuleExecutionResultDetail AdvancedRuleEngine::execute_pattern_rule(
 
                     auto field_value = extract_field_value(context.transaction_data, field);
                     if (field_value.is_string()) {
-                        std::regex regex(regex_pattern);
-                        std::string value_str = field_value.get<std::string>();
-                        if (std::regex_match(value_str, regex)) {
-                            pattern_matched = true;
-                            matched_patterns.push_back("Regex pattern on field '" + field + "'");
+                        try {
+                            std::regex compiled_pattern(regex_pattern);
+                            std::string value_str = field_value.get<std::string>();
+                            if (std::regex_match(value_str, compiled_pattern)) {
+                                pattern_matched = true;
+                                matched_patterns.push_back("Regex pattern on field '" + field + "'");
+                            }
+                        } catch (const std::exception& ex) {
+                            if (logger_) {
+                                logger_->warn(fmt::format(
+                                    "Invalid regex '{}' for pattern rule '{}': {}",
+                                    regex_pattern,
+                                    rule.rule_id,
+                                    ex.what()));
+                            }
                         }
                     }
                 } else if (pattern_type == "value_list") {
@@ -406,7 +494,9 @@ RuleExecutionResultDetail AdvancedRuleEngine::execute_ml_rule(
             result.result = RuleExecutionResult::ERROR;
             result.error_message = "ML rule execution requires LLM interface which is not configured";
             if (logger_) {
-                logger_->error("ML rule execution failed: LLM interface not available for rule '{}'", rule.rule_id);
+                logger_->error(fmt::format(
+                    "ML rule execution failed: LLM interface not available for rule '{}'",
+                    rule.rule_id));
             }
             return result;
         }
@@ -437,9 +527,9 @@ RuleExecutionResultDetail AdvancedRuleEngine::execute_ml_rule(
         if (!llm_response.success) {
             result.result = RuleExecutionResult::ERROR;
             result.error_message = "LLM risk assessment failed: " + llm_response.error_message;
-            if (logger_) {
-                logger_->error("ML rule '{}' failed: {}", rule.rule_id, llm_response.error_message);
-            }
+        if (logger_) {
+            logger_->error(fmt::format("ML rule '{}' failed: {}", rule.rule_id, llm_response.error_message));
+        }
             return result;
         }
 
@@ -490,18 +580,19 @@ RuleExecutionResultDetail AdvancedRuleEngine::execute_ml_rule(
         result.risk_factors = risk_factors;
 
         if (logger_) {
-            logger_->info("ML rule '{}' executed: result={}, confidence={:.3f}, threshold={:.3f}",
-                         rule.rule_id,
-                         result.result == RuleExecutionResult::FAIL ? "FAIL" : "PASS",
-                         result.confidence_score,
-                         risk_threshold);
+            logger_->info(fmt::format(
+                "ML rule '{}' executed: result={}, confidence={:.3f}, threshold={:.3f}",
+                rule.rule_id,
+                result.result == RuleExecutionResult::FAIL ? "FAIL" : "PASS",
+                result.confidence_score,
+                risk_threshold));
         }
 
     } catch (const std::exception& e) {
         result.result = RuleExecutionResult::ERROR;
         result.error_message = std::string("ML rule execution exception: ") + e.what();
         if (logger_) {
-            logger_->error("Exception in ML rule '{}': {}", rule.rule_id, e.what());
+            logger_->error(fmt::format("Exception in ML rule '{}': {}", rule.rule_id, e.what()));
         }
     }
 
@@ -513,7 +604,7 @@ bool AdvancedRuleEngine::register_rule(const RuleDefinition& rule) {
         // Validate rule definition
         if (!validate_rule_definition(rule)) {
             if (logger_) {
-                logger_->error("Rule validation failed for rule '{}'", rule.rule_id);
+                logger_->error(fmt::format("Rule validation failed for rule '{}'", rule.rule_id));
             }
             return false;
         }
@@ -527,14 +618,14 @@ bool AdvancedRuleEngine::register_rule(const RuleDefinition& rule) {
         cache_rule(rule);
 
         if (logger_) {
-            logger_->info("Rule '{}' registered successfully", rule.rule_id);
+            logger_->info(fmt::format("Rule '{}' registered successfully", rule.rule_id));
         }
 
         return true;
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in register_rule: {}", e.what());
+            logger_->error(fmt::format("Exception in register_rule: {}", e.what()));
         }
         return false;
     }
@@ -583,12 +674,12 @@ void AdvancedRuleEngine::reload_rules() {
         }
 
         if (logger_) {
-            logger_->info("Reloaded {} active rules into cache", rule_cache_.size());
+            logger_->info(fmt::format("Reloaded {} active rules into cache", rule_cache_.size()));
         }
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in reload_rules: {}", e.what());
+            logger_->error(fmt::format("Exception in reload_rules: {}", e.what()));
         }
     }
 }
@@ -805,7 +896,7 @@ bool AdvancedRuleEngine::store_rule(const RuleDefinition& rule) {
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in store_rule: {}", e.what());
+            logger_->error(fmt::format("Exception in store_rule: {}", e.what()));
         }
         return false;
     }
@@ -836,7 +927,7 @@ std::optional<RuleDefinition> AdvancedRuleEngine::load_rule(const std::string& r
         rule.rule_id = row.at("rule_id");
         rule.name = row.at("name");
         rule.description = row.at("description");
-        rule.priority = static_cast<RulePriority>(std::stoi(row.at("priority")));
+        rule.priority = static_cast<RulePriority>(safe_string_to_int(row.at("priority"), static_cast<int>(RulePriority::MEDIUM)));
         rule.rule_type = row.at("rule_type");
         rule.rule_logic = nlohmann::json::parse(row.at("rule_logic"));
         rule.parameters = nlohmann::json::parse(row.at("parameters"));
@@ -849,7 +940,7 @@ std::optional<RuleDefinition> AdvancedRuleEngine::load_rule(const std::string& r
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in load_rule: {}", e.what());
+            logger_->error(fmt::format("Exception in load_rule: {}", e.what()));
         }
         return std::nullopt;
     }
@@ -874,24 +965,38 @@ std::vector<RuleDefinition> AdvancedRuleEngine::load_active_rules() {
 
         for (const auto& row : results) {
             RuleDefinition rule;
-            rule.rule_id = row.at("rule_id");
-            rule.name = row.at("name");
-            rule.description = row.at("description");
-            rule.priority = static_cast<RulePriority>(std::stoi(row.at("priority")));
-            rule.rule_type = row.at("rule_type");
-            rule.rule_logic = nlohmann::json::parse(row.at("rule_logic"));
-            rule.parameters = nlohmann::json::parse(row.at("parameters"));
-            rule.input_fields = nlohmann::json::parse(row.at("input_fields")).get<std::vector<std::string>>();
-            rule.output_fields = nlohmann::json::parse(row.at("output_fields")).get<std::vector<std::string>>();
-            rule.is_active = (row.at("is_active") == "true");
-            rule.created_by = row.at("created_by");
+            rule.rule_id = row.value("rule_id", "");
+            rule.name = row.value("name", "");
+            rule.description = row.value("description", "");
+            rule.priority = static_cast<RulePriority>(
+                safe_string_to_int(row.value("priority", std::to_string(static_cast<int>(RulePriority::MEDIUM))),
+                                   static_cast<int>(RulePriority::MEDIUM)));
+            rule.rule_type = row.value("rule_type", "");
+
+            const auto rule_logic_json = safe_parse_json_string(row.value("rule_logic", "{}"), nlohmann::json::object());
+            const auto parameters_json = safe_parse_json_string(row.value("parameters", "{}"), nlohmann::json::object());
+            const auto input_fields_json = safe_parse_json_string(row.value("input_fields", "[]"), nlohmann::json::array());
+            const auto output_fields_json = safe_parse_json_string(row.value("output_fields", "[]"), nlohmann::json::array());
+
+            rule.rule_logic = rule_logic_json;
+            rule.parameters = parameters_json;
+            if (input_fields_json.is_array()) {
+                rule.input_fields = input_fields_json.get<std::vector<std::string>>();
+            }
+            if (output_fields_json.is_array()) {
+                rule.output_fields = output_fields_json.get<std::vector<std::string>>();
+            }
+
+            const auto is_active_str = row.value("is_active", "false");
+            rule.is_active = (is_active_str == "true" || is_active_str == "1");
+            rule.created_by = row.value("created_by", "");
 
             rules.push_back(rule);
         }
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in load_active_rules: {}", e.what());
+            logger_->error(fmt::format("Exception in load_active_rules: {}", e.what()));
         }
     }
 
@@ -910,12 +1015,17 @@ bool AdvancedRuleEngine::store_fraud_detection_result(const FraudDetectionResult
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         )";
 
+        nlohmann::json rule_results_json = nlohmann::json::array();
+        for (const auto& detail : result.rule_results) {
+            rule_results_json.push_back(serialize_rule_result(detail));
+        }
+
         std::vector<std::string> params = {
             result.transaction_id,
             result.is_fraudulent ? "true" : "false",
             std::to_string(static_cast<int>(result.overall_risk)),
             std::to_string(result.fraud_score),
-            result.rule_results.empty() ? "[]" : nlohmann::json(result.rule_results).dump(),
+            rule_results_json.dump(),
             result.aggregated_findings.dump(),
             std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
                 result.detection_time.time_since_epoch()).count()),
@@ -927,7 +1037,7 @@ bool AdvancedRuleEngine::store_fraud_detection_result(const FraudDetectionResult
 
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->error("Exception in store_fraud_detection_result: {}", e.what());
+            logger_->error(fmt::format("Exception in store_fraud_detection_result: {}", e.what()));
         }
         return false;
     }
@@ -987,7 +1097,7 @@ void AdvancedRuleEngine::load_configuration() {
         }
     } catch (const std::exception& e) {
         if (logger_) {
-            logger_->warn("Failed to load rule engine configuration: {}", e.what());
+            logger_->warn(fmt::format("Failed to load rule engine configuration: {}", e.what()));
         }
     }
 }

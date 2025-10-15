@@ -13,22 +13,22 @@
 
 // OpenAPIGenerator implementation
 
-OpenAPIGenerator::OpenAPIGenerator(
+regulens::OpenAPIGenerator::OpenAPIGenerator(
     const std::string& title,
     const std::string& version,
     const std::string& description
 ) : title_(title), version_(version), description_(description) {
 }
 
-void OpenAPIGenerator::add_endpoint(const APIEndpoint& endpoint) {
+void regulens::OpenAPIGenerator::add_endpoint(const APIEndpoint& endpoint) {
     endpoints_.push_back(endpoint);
 }
 
-void OpenAPIGenerator::add_schema(const SchemaDefinition& schema) {
+void regulens::OpenAPIGenerator::add_schema(const SchemaDefinition& schema) {
     schemas_[schema.name] = schema;
 }
 
-void OpenAPIGenerator::add_security_scheme(
+void regulens::OpenAPIGenerator::add_security_scheme(
     const std::string& scheme_name,
     const std::string& scheme_type,
     const std::string& description
@@ -49,51 +49,51 @@ void OpenAPIGenerator::add_security_scheme(
     security_schemes_[scheme_name] = scheme;
 }
 
-void OpenAPIGenerator::add_server(const std::string& url, const std::string& description) {
+void regulens::OpenAPIGenerator::add_server(const std::string& url, const std::string& description) {
     servers_.push_back(std::make_pair(url, description));
 }
 
 /**
  * Set API version
  */
-void OpenAPIGenerator::set_info_version(const std::string& version) {
+void regulens::OpenAPIGenerator::set_info_version(const std::string& version) {
     spec_["info"]["version"] = version;
 }
 
 /**
  * Set API description
  */
-void OpenAPIGenerator::set_info_description(const std::string& description) {
+void regulens::OpenAPIGenerator::set_info_description(const std::string& description) {
     spec_["info"]["description"] = description;
 }
 
 /**
  * Set API title
  */
-void OpenAPIGenerator::set_info_title(const std::string& title) {
+void regulens::OpenAPIGenerator::set_info_title(const std::string& title) {
     spec_["info"]["title"] = title;
 }
 
 /**
  * Set contact information
  */
-void OpenAPIGenerator::set_info_contact(const nlohmann::json& contact) {
+void regulens::OpenAPIGenerator::set_info_contact(const nlohmann::json& contact) {
     spec_["info"]["contact"] = contact;
 }
 
 /**
  * Set license information
  */
-void OpenAPIGenerator::set_info_license(const nlohmann::json& license) {
+void regulens::OpenAPIGenerator::set_info_license(const nlohmann::json& license) {
     spec_["info"]["license"] = license;
 }
 
-std::string OpenAPIGenerator::generate_json() const {
+std::string regulens::OpenAPIGenerator::generate_json() const {
     nlohmann::json openapi = build_openapi_json();
     return openapi.dump(2); // Pretty print with 2-space indentation
 }
 
-std::string OpenAPIGenerator::generate_yaml() const {
+std::string regulens::OpenAPIGenerator::generate_yaml() const {
     // For now, return JSON as YAML conversion would require additional dependencies
     // In production, you might want to use a YAML library like yaml-cpp
     std::string json_output = generate_json();
@@ -104,7 +104,7 @@ std::string OpenAPIGenerator::generate_yaml() const {
     return yaml_output;
 }
 
-bool OpenAPIGenerator::write_to_file(const std::string& file_path, const std::string& format) {
+bool regulens::OpenAPIGenerator::write_to_file(const std::string& file_path, const std::string& format) {
     try {
         std::string content;
         if (format == "json") {
@@ -133,7 +133,7 @@ bool OpenAPIGenerator::write_to_file(const std::string& file_path, const std::st
     }
 }
 
-std::string OpenAPIGenerator::generate_swagger_ui_html(const std::string& spec_url) {
+std::string regulens::OpenAPIGenerator::generate_swagger_ui_html(const std::string& spec_url) {
     std::stringstream html;
     html << R"html(
 <!DOCTYPE html>
@@ -179,7 +179,7 @@ std::string OpenAPIGenerator::generate_swagger_ui_html(const std::string& spec_u
     return html.str();
 }
 
-std::string OpenAPIGenerator::generate_redoc_html(const std::string& spec_url) {
+std::string regulens::OpenAPIGenerator::generate_redoc_html(const std::string& spec_url) {
     std::stringstream html;
     html << R"html(
 <!DOCTYPE html>
@@ -206,7 +206,7 @@ std::string OpenAPIGenerator::generate_redoc_html(const std::string& spec_url) {
 
 // Private helper methods
 
-std::string OpenAPIGenerator::method_to_string(HTTPMethod method) const {
+std::string regulens::OpenAPIGenerator::method_to_string(HTTPMethod method) const {
     switch (method) {
         case HTTPMethod::GET: return "get";
         case HTTPMethod::POST: return "post";
@@ -218,7 +218,7 @@ std::string OpenAPIGenerator::method_to_string(HTTPMethod method) const {
     }
 }
 
-std::string OpenAPIGenerator::location_to_string(ParameterLocation location) const {
+std::string regulens::OpenAPIGenerator::location_to_string(ParameterLocation location) const {
     switch (location) {
         case ParameterLocation::PATH: return "path";
         case ParameterLocation::QUERY: return "query";
@@ -229,7 +229,7 @@ std::string OpenAPIGenerator::location_to_string(ParameterLocation location) con
     }
 }
 
-std::string OpenAPIGenerator::type_to_string(ParameterType type) const {
+std::string regulens::OpenAPIGenerator::type_to_string(ParameterType type) const {
     switch (type) {
         case ParameterType::STRING: return "string";
         case ParameterType::INTEGER: return "integer";

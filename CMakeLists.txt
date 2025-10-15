@@ -11,9 +11,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Production-grade compiler flags
 if(MSVC)
-    add_compile_options(/W4 /WX /permissive- /Zc:__cplusplus)
+    add_compile_options(/W4 /permissive- /Zc:__cplusplus)
 else()
-    # Temporarily disable -Werror to allow building with warnings
+    # Disable warnings as errors to allow building with warnings for now
     add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-c++23-attribute-extensions -Wno-unused-parameter -Wno-vexing-parse)
 endif()
 

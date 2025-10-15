@@ -213,16 +213,22 @@ std::string TrainingAPIHandlers::handle_create_course(const std::string& request
         json prerequisites = request.value("prerequisites", json::array());
         json tags = request.value("tags", json::array());
 
+        std::string duration_str = std::to_string(duration_minutes);
+        std::string threshold_str = std::to_string(pass_threshold);
+        std::string course_content_str = course_content.dump();
+        std::string prerequisites_str = prerequisites.dump();
+        std::string tags_str = tags.dump();
+
         const char* params[10] = {
             title.c_str(),
             description.c_str(),
             course_type.c_str(),
             difficulty_level.c_str(),
-            std::to_string(duration_minutes).c_str(),
-            std::to_string(pass_threshold).c_str(),
-            course_content.dump().c_str(),
-            prerequisites.dump().c_str(),
-            tags.dump().c_str(),
+            duration_str.c_str(),
+            threshold_str.c_str(),
+            course_content_str.c_str(),
+            prerequisites_str.c_str(),
+            tags_str.c_str(),
             user_id.c_str()
         };
 
@@ -324,7 +330,7 @@ std::string TrainingAPIHandlers::handle_enroll_user(const std::string& course_id
         );
 
         if (PQresultStatus(enrollment_result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(enrollment_result);
             PQclear(course_result);
             logger_->log(LogLevel::ERROR, "Failed to enroll user: " + error);
@@ -362,14 +368,17 @@ std::string TrainingAPIHandlers::handle_get_user_progress(const std::string& use
         int limit = query_params.count("limit") ? std::stoi(query_params.at("limit")) : 50;
         int offset = query_params.count("offset") ? std::stoi(query_params.at("offset")) : 0;
 
+        std::string limit_str = std::to_string(limit);
+        std::string offset_str = std::to_string(offset);
+
         const char* params[3] = {
             user_id.c_str(),
-            std::to_string(limit).c_str(),
-            std::to_string(offset).c_str()
+            limit_str.c_str(),
+            offset_str.c_str()
         };
 
         PGresult* result = PQexecParams(
-            conn.get(),
+            conn,
             "SELECT e.enrollment_id, e.course_id, e.enrollment_date, e.progress, "
             "e.current_module, e.status, e.quiz_attempts, e.quiz_score, e.completed_at, "
             "e.certificate_issued, e.last_accessed, c.title, c.course_type, c.difficulty_level "
@@ -382,7 +391,7 @@ std::string TrainingAPIHandlers::handle_get_user_progress(const std::string& use
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to fetch user progress: " + error);
             return R"({"error": "Failed to fetch progress"})";
@@ -404,7 +413,7 @@ std::string TrainingAPIHandlers::handle_get_user_progress(const std::string& use
         // Get total count
         const char* count_params[1] = {user_id.c_str()};
         PGresult* count_result = PQexecParams(
-            conn.get(),
+            conn,
             "SELECT COUNT(*) FROM training_enrollments WHERE user_id = $1",
             1, nullptr, count_params, nullptr, nullptr, 0
         );
@@ -474,14 +483,15 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
         json user_answers = request["answers"];
         int time_taken = request.value("timeTaken", 0);
 
-        if (!db_conn_->is_connected()) {
+        auto conn = db_conn_->get_connection();
+        if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
 
         // Get enrollment
         const char* enrollment_params[2] = {user_id.c_str(), course_id.c_str()};
         PGresult* enrollment_result = PQexecParams(
-            db_conn_,
+            conn,
             "SELECT enrollment_id FROM training_enrollments WHERE user_id = $1 AND course_id = $2",
             2, nullptr, enrollment_params, nullptr, nullptr, 0
         );
@@ -497,7 +507,7 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
         // Get course with correct answers
         const char* course_params[1] = {course_id.c_str()};
         PGresult* course_result = PQexecParams(
-            db_conn_,
+            conn,
             "SELECT course_content, pass_threshold FROM training_courses WHERE course_id = $1",
             1, nullptr, course_params, nullptr, nullptr, 0
         );
@@ -533,18 +543,21 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
 
         // Store submission
         std::string feedback_str = feedback.dump();
+        std::string score_str = std::to_string(score);
+        std::string time_taken_str = std::to_string(time_taken);
+        std::string user_answers_str = user_answers.dump();
         const char* submission_params[7] = {
             enrollment_id.c_str(),
             quiz_id.c_str(),
-            user_answers.dump().c_str(),
-            std::to_string(score).c_str(),
+            user_answers_str.c_str(),
+            score_str.c_str(),
             passed ? "true" : "false",
-            std::to_string(time_taken).c_str(),
+            time_taken_str.c_str(),
             feedback_str.c_str()
         };
 
         PGresult* insert_result = PQexecParams(
-            db_conn_,
+            conn,
             "INSERT INTO training_quiz_submissions (enrollment_id, quiz_id, user_answers, score, passed, time_taken_seconds, feedback) "
             "VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb) RETURNING submission_id",
             7, nullptr, submission_params, nullptr, nullptr, 0
@@ -560,14 +573,15 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
         PQclear(insert_result);
 
         // Update enrollment
+        std::string score_str2 = std::to_string(score);
         const char* update_params[3] = {
-            std::to_string(score).c_str(),
+            score_str2.c_str(),
             enrollment_id.c_str(),
-            std::to_string(score).c_str()
+            score_str2.c_str()
         };
 
         PGresult* update_result = PQexecParams(
-            db_conn_,
+            conn,
             "UPDATE training_enrollments SET quiz_score = $1, quiz_attempts = quiz_attempts + 1, "
             "status = CASE WHEN $3 >= (SELECT pass_threshold FROM training_courses WHERE course_id = (SELECT course_id FROM training_enrollments WHERE enrollment_id = $2)) THEN 'completed' ELSE status END, "
             "last_accessed = CURRENT_TIMESTAMP "
@@ -584,16 +598,17 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
         std::string certificate_url = "";
         if (passed) {
             certificate_url = generate_certificate_url(user_id, course_id);
-            
+            std::string cert_hash = generate_certificate_hash(user_id, course_id, std::to_string(std::time(nullptr)));
+
             const char* cert_params[4] = {
                 user_id.c_str(),
                 course_id.c_str(),
                 certificate_url.c_str(),
-                generate_certificate_hash(user_id, course_id, std::to_string(std::time(nullptr))).c_str()
+                cert_hash.c_str()
             };
 
             PGresult* cert_result = PQexecParams(
-                db_conn_,
+                conn,
                 "INSERT INTO training_certifications (user_id, course_id, certification_name, certificate_url, certificate_hash, verification_code) "
                 "VALUES ($1, $2, (SELECT title || ' Certification' FROM training_courses WHERE course_id = $2), $3, $4, $5) "
                 "RETURNING certification_id",
@@ -604,7 +619,7 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
                 // Update enrollment to mark certificate as issued
                 const char* cert_update_params[2] = {PQgetvalue(cert_result, 0, 0), enrollment_id.c_str()};
                 PQexecParams(
-                    db_conn_,
+                    conn,
                     "UPDATE training_enrollments SET certificate_issued = true, certificate_url = $1 WHERE enrollment_id = $2",
                     2, nullptr, cert_update_params, nullptr, nullptr, 0
                 );
@@ -639,9 +654,14 @@ std::string TrainingAPIHandlers::handle_get_certifications(const std::string& us
             return R"({"error": "Database connection failed"})";
         }
 
+        auto conn = db_conn_->get_connection();
+        if (!conn) {
+            return R"({"error": "Database connection failed"})";
+        }
+
         const char* params[1] = {user_id.c_str()};
         PGresult* result = PQexecParams(
-            db_conn_,
+            conn,
             "SELECT c.certification_id, c.course_id, c.certification_name, c.issued_date, "
             "c.expiry_date, c.certificate_url, c.verification_code, c.is_valid, "
             "t.title as course_title, t.course_type "
@@ -690,6 +710,13 @@ std::string TrainingAPIHandlers::handle_get_leaderboard(const std::map<std::stri
         std::string time_range = query_params.count("timeRange") ? query_params.at("timeRange") : "all";
         int limit = query_params.count("limit") ? std::stoi(query_params.at("limit")) : 20;
 
+        std::string limit_str = std::to_string(limit);
+
+        auto conn = db_conn_->get_connection();
+        if (!conn) {
+            return R"({"error": "Database connection failed"})";
+        }
+
         std::stringstream query;
         query << "SELECT e.user_id, u.name as user_name, u.email, COUNT(*) as courses_completed, "
               << "AVG(e.quiz_score) as avg_score, SUM(c.duration_minutes) as total_time, "
@@ -707,14 +734,15 @@ std::string TrainingAPIHandlers::handle_get_leaderboard(const std::map<std::stri
             query << " AND e.completed_at >= CURRENT_TIMESTAMP - INTERVAL '1 year'";
         }
 
+        int param_count = 0;
         query << " GROUP BY e.user_id, u.name, u.email "
               << "ORDER BY avg_score DESC, courses_completed DESC, total_time ASC "
               << "LIMIT $" << (++param_count);
 
-        const char* params[1] = {std::to_string(limit).c_str()};
-        
+        const char* params[1] = {limit_str.c_str()};
+
         PGresult* result = PQexecParams(
-            db_conn_,
+            conn,
             query.str().c_str(),
             1, nullptr, params, nullptr, nullptr, 0
         );
@@ -818,6 +846,7 @@ bool TrainingAPIHandlers::check_prerequisites(const std::string& user_id, const 
         return true;
     }
 
+    auto conn = db_conn_->get_connection();
     if (!conn) {
         return false;
     }
@@ -929,6 +958,7 @@ json TrainingAPIHandlers::serialize_quiz_submission(PGresult* result, int row) {
 
 std::string TrainingAPIHandlers::handle_get_training_stats(const std::string& user_id) {
     try {
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
@@ -1022,11 +1052,12 @@ std::string TrainingAPIHandlers::handle_get_training_stats(const std::string& us
 std::string TrainingAPIHandlers::handle_update_progress(const std::string& enrollment_id, const std::string& request_body) {
     try {
         json request = json::parse(request_body);
-        
+
         if (!request.contains("progress") || !request.contains("current_module")) {
             return R"({"error": "Missing required fields: progress, current_module"})";
         }
 
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
@@ -1034,9 +1065,12 @@ std::string TrainingAPIHandlers::handle_update_progress(const std::string& enrol
         double progress = request["progress"];
         int current_module = request["current_module"];
 
+        std::string progress_str = std::to_string(progress);
+        std::string current_module_str = std::to_string(current_module);
+
         const char* params[3] = {
-            std::to_string(progress).c_str(),
-            std::to_string(current_module).c_str(),
+            progress_str.c_str(),
+            current_module_str.c_str(),
             enrollment_id.c_str()
         };
 
@@ -1082,6 +1116,7 @@ std::string TrainingAPIHandlers::handle_update_progress(const std::string& enrol
 
 std::string TrainingAPIHandlers::handle_mark_complete(const std::string& course_id, const std::string& user_id) {
     try {
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
@@ -1151,6 +1186,7 @@ std::string TrainingAPIHandlers::handle_mark_complete(const std::string& course_
 
 std::string TrainingAPIHandlers::handle_get_quiz_results(const std::string& enrollment_id) {
     try {
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
@@ -1196,6 +1232,7 @@ std::string TrainingAPIHandlers::handle_get_quiz_results(const std::string& enro
 
 std::string TrainingAPIHandlers::handle_issue_certificate(const std::string& enrollment_id) {
     try {
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
@@ -1278,6 +1315,7 @@ std::string TrainingAPIHandlers::handle_issue_certificate(const std::string& enr
 
 std::string TrainingAPIHandlers::handle_verify_certificate(const std::string& verification_code) {
     try {
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }
@@ -1328,7 +1366,8 @@ std::string TrainingAPIHandlers::handle_verify_certificate(const std::string& ve
 std::string TrainingAPIHandlers::handle_update_course(const std::string& course_id, const std::string& request_body) {
     try {
         json request = json::parse(request_body);
-        
+
+        auto conn = db_conn_->get_connection();
         if (!conn) {
             return R"({"error": "Database connection failed"})";
         }

@@ -200,6 +200,19 @@ public:
         const std::string& executed_by
     );
 
+    std::vector<std::pair<std::string, TestConfiguration>> create_test_batch(
+        const std::vector<ToolInfo>& tools,
+        const TestSuite& suite,
+        const std::string& executed_by
+    );
+
+    TestExecution create_test_execution(
+        const ExecutionResult& result,
+        const std::string& tool_name,
+        const std::string& suite_id,
+        const std::string& executed_by
+    );
+
     // Validation and verification
     nlohmann::json validate_test_data(
         const nlohmann::json& test_data,

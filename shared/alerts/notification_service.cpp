@@ -501,7 +501,7 @@ bool NotificationService::send_webhook_notification(const NotificationRequest& r
         
         // Send HTTP request
         std::string response_str, error_str;
-        bool success = send_http_request(url, webhook_payload, headers, response_str, error_str);
+        bool success = send_http_request(url, webhook_payload, headers, &response_str, &error_str);
         response = response_str;
         error = error_str;
         
@@ -535,7 +535,7 @@ bool NotificationService::send_slack_notification(const NotificationRequest& req
         
         // Send HTTP request
         std::string response_str, error_str;
-        bool success = send_http_request(url, slack_payload, {{"Content-Type", "application/json"}}, response_str, error_str);
+        bool success = send_http_request(url, slack_payload, {{"Content-Type", "application/json"}}, &response_str, &error_str);
         response = response_str;
         error = error_str;
         
@@ -596,7 +596,7 @@ bool NotificationService::send_pagerduty_notification(const NotificationRequest&
         
         // Send HTTP request
         std::string response_str, error_str;
-        bool success = send_http_request(url, pagerduty_payload, {{"Content-Type", "application/json"}}, response_str, error_str);
+        bool success = send_http_request(url, pagerduty_payload, {{"Content-Type", "application/json"}}, &response_str, &error_str);
         response = response_str;
         error = error_str;
         
@@ -621,12 +621,13 @@ void NotificationService::log_notification_attempt(const NotificationRequest& re
         return;
     }
     
+    std::string retry_count_str = std::to_string(request.retry_count);
     const char* params[5] = {
         request.incident_id.c_str(),
         request.channel_id.c_str(),
         result.success ? "delivered" : "failed",
         result.error_message.c_str(),
-        std::to_string(request.retry_count).c_str()
+        retry_count_str.c_str()
     };
     
     PGresult* db_result = PQexecParams(
@@ -669,6 +670,9 @@ std::vector<NotificationRequest> NotificationService::get_failed_notifications_f
         return requests;
     }
     
+    std::string max_retry_str = std::to_string(max_retry_attempts_);
+    const char* params[1] = {max_retry_str.c_str()};
+
     PGresult* result = PQexecParams(
         conn,
         "SELECT n.notification_id, n.incident_id, n.channel_id, n.retry_count, "
@@ -680,7 +684,7 @@ std::vector<NotificationRequest> NotificationService::get_failed_notifications_f
         "AND (n.next_retry_at IS NULL OR n.next_retry_at <= CURRENT_TIMESTAMP) "
         "AND n.retry_count < $1 "
         "ORDER BY n.sent_at ASC LIMIT 20",
-        1, nullptr, const_cast<char*>(std::to_string(max_retry_attempts_).c_str()), nullptr, nullptr, 0
+        1, nullptr, params, nullptr, nullptr, 0
     );
     
     if (PQresultStatus(result) != PGRES_TUPLES_OK) {
@@ -833,10 +837,11 @@ std::string NotificationService::generate_notification_id() const {
 }
 
 nlohmann::json NotificationService::format_email_payload(const NotificationRequest& request) const {
+    std::string severity_str = request.alert_data.value("severity", "medium");
+    std::transform(severity_str.begin(), severity_str.end(), severity_str.begin(), ::toupper);
+
     nlohmann::json payload = {
         {"to", request.channel_config.value("recipients", nlohmann::json::array())},
-        std::string severity_str = request.alert_data.value("severity", "medium");
-        std::transform(severity_str.begin(), severity_str.end(), severity_str.begin(), ::toupper);
         {"subject", "[" + severity_str + "] " +
                    request.alert_data["title"].get<std::string>()},
         {"body", request.alert_data["message"].get<std::string>()}
@@ -942,7 +947,7 @@ bool NotificationService::send_http_request(const std::string& url, const nlohma
                           std::string* response, std::string* error) {
     CURL *curl = curl_easy_init();
     if (!curl) {
-        error = "Failed to initialize cURL";
+        if (error) *error = "Failed to initialize cURL";
         return false;
     }
     
@@ -973,7 +978,7 @@ bool NotificationService::send_http_request(const std::string& url, const nlohma
     CURLcode res = curl_easy_perform(curl);
     
     if (res != CURLE_OK) {
-        error = curl_easy_strerror(res);
+        if (error) *error = curl_easy_strerror(res);
         curl_easy_cleanup(curl);
         curl_slist_free_all(headers_list);
         return false;
@@ -989,7 +994,7 @@ bool NotificationService::send_http_request(const std::string& url, const nlohma
     if (response_code >= 200 && response_code < 300) {
         return true;
     } else {
-        error = "HTTP error: " + std::to_string(response_code);
+        if (error) *error = "HTTP error: " + std::to_string(response_code);
         return false;
     }
 }

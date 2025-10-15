@@ -645,13 +645,14 @@ void AlertEvaluationEngine::create_alert_incident(const std::string& rule_id, co
     // Generate message based on rule type and data
     std::string message = "Alert triggered for rule: " + rule["rule_name"].get<std::string>() + "\n";
     message += "Data: " + incident_data.dump();
-    
+    std::string incident_data_str = incident_data.dump();
+
     const char* params[5] = {
         rule_id.c_str(),
-        rule["severity"].get<std::string>().c_str(),
+        severity_str.c_str(),
         title.c_str(),
         message.c_str(),
-        incident_data.dump().c_str()
+        incident_data_str.c_str()
     };
     
     PGresult* result = PQexecParams(
@@ -749,7 +750,7 @@ void AlertEvaluationEngine::retry_failed_notifications() {
     
     // Get failed notifications that are ready for retry
     PGresult* result = PQexecParams(
-        conn.get(),
+        conn,
         "SELECT notification_id, incident_id, channel_id, retry_count "
         "FROM alert_notifications "
         "WHERE delivery_status = 'failed' "
@@ -793,11 +794,12 @@ void AlertEvaluationEngine::schedule_notification_retry(const std::string& notif
         notification_id.c_str()
     };
     
+    std::string query = "UPDATE alert_notifications SET retry_count = $1, next_retry_at = CURRENT_TIMESTAMP + INTERVAL '" +
+                       std::to_string(delay_minutes) + " minutes', delivery_status = 'pending' WHERE notification_id = $2";
+
     PGresult* result = PQexecParams(
-        conn.get(),
-        "UPDATE alert_notifications SET retry_count = $1, next_retry_at = CURRENT_TIMESTAMP + INTERVAL '" +
-        std::to_string(delay_minutes) + " minutes', delivery_status = 'pending' "
-        "WHERE notification_id = $2",
+        conn,
+        query.c_str(),
         2, nullptr, params, nullptr, nullptr, 0
     );
     

@@ -55,8 +55,9 @@ struct MCDAModel {
 struct MCDAResult {
     std::string calculation_id;
     std::string model_id;
+    std::string algorithm_used;
     std::vector<std::pair<std::string, double>> ranking; // alternative_id -> score
-    std::map<std::string, double> normalized_weights;
+    std::vector<double> normalized_weights;
     nlohmann::json intermediate_steps;
     nlohmann::json algorithm_specific_results;
     double quality_score = 0.0;

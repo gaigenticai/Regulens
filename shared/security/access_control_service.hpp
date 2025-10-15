@@ -117,6 +117,7 @@ private:
     std::optional<ConversationAccess> get_conversation_access(const std::string& conversation_id) const;
     std::optional<ConversationAccess> load_conversation_access(const std::string& conversation_id) const;
 
+public:
     static std::string normalize_token(const std::string& value);
     static std::chrono::system_clock::time_point parse_timestamp(const std::string& timestamp_str);
     static bool resource_matches(const std::string& requested, const std::string& candidate);

@@ -146,7 +146,7 @@ std::string AlertManagementHandlers::handle_get_alert_rule_by_id(const std::stri
 
         const char* params[1] = {rule_id.c_str()};
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "SELECT rule_id, rule_name, description, rule_type, severity, condition, "
             "notification_channels, notification_config, cooldown_minutes, is_enabled, "
             "created_by, created_at, updated_at, last_triggered_at "
@@ -155,7 +155,7 @@ std::string AlertManagementHandlers::handle_get_alert_rule_by_id(const std::stri
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to fetch alert rule: " + error);
             return R"({"error": "Failed to fetch alert rule"})";
@@ -205,6 +205,7 @@ std::string AlertManagementHandlers::handle_create_alert_rule(const std::string&
         json notification_channels = request.value("notification_channels", json::array());
         json notification_config = request.value("notification_config", json::object());
         int cooldown_minutes = request.value("cooldown_minutes", 5);
+        std::string cooldown_str = std::to_string(cooldown_minutes);
 
         const char* params[9] = {
             rule_name.c_str(),
@@ -214,7 +215,7 @@ std::string AlertManagementHandlers::handle_create_alert_rule(const std::string&
             condition.dump().c_str(),
             notification_channels.dump().c_str(),
             notification_config.dump().c_str(),
-            std::to_string(cooldown_minutes).c_str(),
+            cooldown_str.c_str(),
             user_id.c_str()
         };
 
@@ -495,7 +496,7 @@ std::string AlertManagementHandlers::handle_get_alert_history(const std::map<std
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to fetch alert history: " + error);
             return R"({"error": "Failed to fetch alert history"})";
@@ -540,7 +541,7 @@ std::string AlertManagementHandlers::handle_get_alert_history(const std::map<std
         }
 
         PGresult* count_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             count_query.str().c_str(),
             count_param_count,
             nullptr,
@@ -591,7 +592,7 @@ std::string AlertManagementHandlers::handle_acknowledge_alert(const std::string&
         };
 
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "UPDATE alert_incidents SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP, "
             "acknowledged_by = $1, resolution_notes = $2 WHERE incident_id = $3 AND status = 'active' "
             "RETURNING incident_id, title, acknowledged_at",
@@ -599,7 +600,7 @@ std::string AlertManagementHandlers::handle_acknowledge_alert(const std::string&
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to acknowledge alert: " + error);
             return R"({"error": "Failed to acknowledge alert"})";
@@ -648,7 +649,7 @@ std::string AlertManagementHandlers::handle_resolve_alert(const std::string& inc
         };
 
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "UPDATE alert_incidents SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, "
             "resolved_by = $1, resolution_notes = $2 WHERE incident_id = $3 AND status IN ('active', 'acknowledged') "
             "RETURNING incident_id, title, resolved_at",
@@ -656,7 +657,7 @@ std::string AlertManagementHandlers::handle_resolve_alert(const std::string& inc
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to resolve alert: " + error);
             return R"({"error": "Failed to resolve alert"})";
@@ -728,7 +729,7 @@ std::string AlertManagementHandlers::handle_get_notification_channels(const std:
         }
 
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             query.str().c_str(),
             param_count,
             nullptr,
@@ -739,7 +740,7 @@ std::string AlertManagementHandlers::handle_get_notification_channels(const std:
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to fetch notification channels: " + error);
             return R"({"error": "Failed to fetch notification channels"})";
@@ -777,7 +778,7 @@ std::string AlertManagementHandlers::handle_get_notification_channels(const std:
         }
 
         PGresult* count_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             count_query.str().c_str(),
             count_param_count,
             nullptr,
@@ -842,14 +843,14 @@ std::string AlertManagementHandlers::handle_create_notification_channel(const st
         };
 
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "INSERT INTO notification_channels (channel_type, channel_name, configuration) "
             "VALUES ($1, $2, $3::jsonb) RETURNING channel_id, created_at",
             3, nullptr, params, nullptr, nullptr, 0
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to create notification channel: " + error);
             return R"({"error": "Failed to create notification channel"})";
@@ -928,7 +929,7 @@ std::string AlertManagementHandlers::handle_update_notification_channel(const st
         }
 
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             query.c_str(),
             param_values.size(),
             nullptr,
@@ -939,7 +940,7 @@ std::string AlertManagementHandlers::handle_update_notification_channel(const st
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to update notification channel: " + error);
             return R"({"error": "Failed to update notification channel"})";
@@ -978,7 +979,7 @@ std::string AlertManagementHandlers::handle_delete_notification_channel(const st
         // Check if channel is being used by active alert rules
         const char* check_params[1] = {channel_id.c_str()};
         PGresult* check_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "SELECT COUNT(*) FROM alert_rules WHERE notification_channels::jsonb ? $1",
             1, nullptr, check_params, nullptr, nullptr, 0
         );
@@ -995,13 +996,13 @@ std::string AlertManagementHandlers::handle_delete_notification_channel(const st
 
         // Delete the channel
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "DELETE FROM notification_channels WHERE channel_id = $1 RETURNING channel_name",
             1, nullptr, check_params, nullptr, nullptr, 0
         );
 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(result);
             logger_->log(LogLevel::ERROR, "Failed to delete notification channel: " + error);
             return R"({"error": "Failed to delete notification channel"})";
@@ -1037,7 +1038,7 @@ std::string AlertManagementHandlers::handle_test_notification_channel(const std:
         // Get channel details
         const char* params[1] = {channel_id.c_str()};
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "SELECT channel_id, channel_type, channel_name, configuration "
             "FROM notification_channels WHERE channel_id = $1",
             1, nullptr, params, nullptr, nullptr, 0
@@ -1083,7 +1084,7 @@ std::string AlertManagementHandlers::handle_test_notification_channel(const std:
         };
 
         PGresult* update_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "UPDATE notification_channels SET last_tested_at = CURRENT_TIMESTAMP, "
             "test_status = $1 WHERE channel_id = $3",
             3, nullptr, update_params, nullptr, nullptr, 0
@@ -1127,7 +1128,7 @@ std::string AlertManagementHandlers::handle_test_alert_delivery(const std::strin
         // Get rule details
         const char* params[1] = {rule_id.c_str()};
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "SELECT rule_id, rule_name, rule_type, severity, condition, "
             "notification_channels, notification_config FROM alert_rules WHERE rule_id = $1",
             1, nullptr, params, nullptr, nullptr, 0
@@ -1155,14 +1156,14 @@ std::string AlertManagementHandlers::handle_test_alert_delivery(const std::strin
         };
 
         PGresult* incident_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "INSERT INTO alert_incidents (rule_id, severity, title, message, incident_data, status) "
             "VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING incident_id, triggered_at",
             6, nullptr, incident_params, nullptr, nullptr, 0
         );
 
         if (PQresultStatus(incident_result) != PGRES_TUPLES_OK) {
-            std::string error = PQerrorMessage(conn_ptr.get());
+            std::string error = PQerrorMessage(conn);
             PQclear(incident_result);
             logger_->log(LogLevel::ERROR, "Failed to create test incident: " + error);
             return R"({"error": "Failed to create test incident"})";
@@ -1223,7 +1224,7 @@ std::string AlertManagementHandlers::handle_get_alert_metrics(const std::map<std
 
         // Get overall metrics
         PGresult* result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             ("SELECT "
              "COUNT(*) as total_incidents, "
              "COUNT(*) FILTER (WHERE severity = 'critical') as critical_incidents, "
@@ -1257,7 +1258,7 @@ std::string AlertManagementHandlers::handle_get_alert_metrics(const std::map<std
 
         // Get rule-specific metrics
         PGresult* rule_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             ("SELECT "
              "r.rule_id, r.rule_name, r.rule_type, r.severity, "
              "COUNT(i.incident_id) as incident_count, "
@@ -1292,17 +1293,19 @@ std::string AlertManagementHandlers::handle_get_alert_metrics(const std::map<std
         PQclear(rule_result);
 
         // Get notification metrics
+        std::string query = "SELECT "
+                             "c.channel_type, "
+                             "COUNT(n.notification_id) as total_sent, "
+                             "COUNT(*) FILTER (WHERE n.delivery_status = 'delivered') as delivered, "
+                             "COUNT(*) FILTER (WHERE n.delivery_status = 'failed') as failed "
+                             "FROM notification_channels c "
+                             "LEFT JOIN alert_notifications n ON c.channel_id = n.channel_id "
+                             "WHERE n.sent_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours' OR n.sent_at IS NULL "
+                             "GROUP BY c.channel_type";
+
         PGresult* notif_result = PQexecParams(
-            conn_ptr.get(),
-            ("SELECT "
-             "c.channel_type, "
-             "COUNT(n.notification_id) as total_sent, "
-             "COUNT(*) FILTER (WHERE n.delivery_status = 'delivered') as delivered, "
-             "COUNT(*) FILTER (WHERE n.delivery_status = 'failed') as failed "
-             "FROM notification_channels c "
-             "LEFT JOIN alert_notifications n ON c.channel_id = n.channel_id "
-             "WHERE n.sent_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours' OR n.sent_at IS NULL "
-             "GROUP BY c.channel_type").c_str(),
+            conn,
+            query.c_str(),
             0, nullptr, nullptr, nullptr, nullptr, 0
         );
 
@@ -1501,7 +1504,7 @@ std::string AlertManagementHandlers::extract_user_id_from_jwt(const std::map<std
             // Base64 decode
             decoded_payload = base64_decode(payload);
         } catch (const std::exception& e) {
-            logger_->log(LogLevel::WARNING, "Failed to decode JWT payload: " + std::string(e.what()));
+            logger_->log(LogLevel::WARN, "Failed to decode JWT payload: " + std::string(e.what()));
             return "";
         }
         
@@ -1513,7 +1516,7 @@ std::string AlertManagementHandlers::extract_user_id_from_jwt(const std::map<std
         } else if (payload_json.contains("sub")) {
             return payload_json["sub"];
         } else {
-            logger_->log(LogLevel::WARNING, "No user_id or sub claim found in JWT payload");
+            logger_->log(LogLevel::WARN, "No user_id or sub claim found in JWT payload");
             return "";
         }
         
@@ -1605,7 +1608,7 @@ bool AlertManagementHandlers::check_rule_cooldown(const std::string& rule_id) {
     
     const char* params[1] = {rule_id.c_str()};
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
+        conn,
         "SELECT cooldown_minutes, last_triggered_at FROM alert_rules WHERE rule_id = $1 AND is_enabled = true",
         1, nullptr, params, nullptr, nullptr, 0
     );
@@ -1643,7 +1646,7 @@ void AlertManagementHandlers::update_rule_last_triggered(const std::string& rule
     
     const char* params[1] = {rule_id.c_str()};
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
+        conn,
         "UPDATE alert_rules SET last_triggered_at = CURRENT_TIMESTAMP WHERE rule_id = $1",
         1, nullptr, params, nullptr, nullptr, 0
     );
@@ -1659,17 +1662,19 @@ void AlertManagementHandlers::create_alert_incident(const std::string& rule_id, 
     
     std::string title = generate_alert_title(rule, incident_data);
     std::string message = generate_alert_message(rule, incident_data);
-    
+    std::string severity_str = rule["severity"].get<std::string>();
+    std::string incident_data_str = incident_data.dump();
+
     const char* params[5] = {
         rule_id.c_str(),
-        rule["severity"].get<std::string>().c_str(),
+        severity_str.c_str(),
         title.c_str(),
         message.c_str(),
-        incident_data.dump().c_str()
+        incident_data_str.c_str()
     };
     
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
+        conn,
         "INSERT INTO alert_incidents (rule_id, severity, title, message, incident_data) "
         "VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING incident_id",
         5, nullptr, params, nullptr, nullptr, 0
@@ -1698,7 +1703,7 @@ void AlertManagementHandlers::send_alert_notifications(const std::string& incide
     
     const char* params[1] = {incident_id.c_str()};
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
+        conn,
         "SELECT incident_id, title, message, severity, triggered_at FROM alert_incidents WHERE incident_id = $1",
         1, nullptr, params, nullptr, nullptr, 0
     );
@@ -1728,7 +1733,7 @@ void AlertManagementHandlers::send_alert_notifications(const std::string& incide
         // Get channel details
         const char* channel_params[1] = {channel_id_str.c_str()};
         PGresult* channel_result = PQexecParams(
-            conn_ptr.get(),
+            conn,
             "SELECT channel_id, channel_type, configuration FROM notification_channels WHERE channel_id = $1 AND is_enabled = true",
             1, nullptr, channel_params, nullptr, nullptr, 0
         );
@@ -1986,7 +1991,7 @@ void AlertManagementHandlers::log_notification_attempt(const std::string& incide
     };
     
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
+        conn,
         "INSERT INTO alert_notifications (incident_id, channel_id, delivery_status, error_message) "
         "VALUES ($1, $2, $3, $4)",
         4, nullptr, params, nullptr, nullptr, 0
@@ -2003,7 +2008,7 @@ void AlertManagementHandlers::retry_failed_notifications() {
     
     // Get failed notifications that are ready for retry
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
+        conn,
         "SELECT n.notification_id, n.incident_id, n.channel_id, n.retry_count "
         "FROM alert_notifications n "
         "JOIN alert_incidents i ON n.incident_id = i.incident_id "
@@ -2042,17 +2047,19 @@ void AlertManagementHandlers::schedule_notification_retry(const std::string& not
     
     // Calculate next retry time with exponential backoff (2^retry_count minutes, max 2 hours)
     int delay_minutes = std::min(1 << retry_count, 120);
-    
+    std::string retry_count_str = std::to_string(retry_count);
+
     const char* params[2] = {
-        std::to_string(retry_count).c_str(),
+        retry_count_str.c_str(),
         notification_id.c_str()
     };
-    
+
+    std::string query = "UPDATE alert_notifications SET retry_count = $1, next_retry_at = CURRENT_TIMESTAMP + INTERVAL '" +
+                       std::to_string(delay_minutes) + " minutes', delivery_status = 'pending' WHERE notification_id = $2";
+
     PGresult* result = PQexecParams(
-        conn_ptr.get(),
-        "UPDATE alert_notifications SET retry_count = $1, next_retry_at = CURRENT_TIMESTAMP + INTERVAL '" + 
-        std::to_string(delay_minutes) + " minutes', delivery_status = 'pending' "
-        "WHERE notification_id = $2",
+        conn,
+        query.c_str(),
         2, nullptr, params, nullptr, nullptr, 0
     );
     

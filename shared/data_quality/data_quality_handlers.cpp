@@ -92,7 +92,7 @@ std::string DataQualityHandlers::extract_user_id_from_jwt(const std::map<std::st
 
 std::string DataQualityHandlers::validate_json_input(const std::string& json_str) {
     try {
-        json::parse(json_str);
+        (void)json::parse(json_str);
         return "";
     } catch (const json::parse_error& e) {
         return "Invalid JSON: " + std::string(e.what());
@@ -1163,7 +1163,7 @@ bool DataQualityHandlers::check_validity_record(const regulens::PostgreSQLConnec
                 int min_length = validation_config["name_min_length"];
                 std::string name = result.rows[row].at("name");
                 
-                if (name.length() < min_length) {
+                if (static_cast<int>(name.length()) < min_length) {
                     return false;
                 }
             }
@@ -1172,7 +1172,7 @@ bool DataQualityHandlers::check_validity_record(const regulens::PostgreSQLConnec
                 int min_length = validation_config["description_min_length"];
                 std::string description = result.rows[row].at("description");
                 
-                if (description.length() < min_length) {
+                if (static_cast<int>(description.length()) < min_length) {
                     return false;
                 }
             }

@@ -9,6 +9,21 @@
 
 namespace regulens {
 
+ErrorHandler::ErrorHandler(ConfigurationManager* config_manager,
+                          StructuredLogger* logger)
+    : config_manager_(config_manager, [](ConfigurationManager*){}), logger_(logger, [](StructuredLogger*){}) {
+    // Initialize default configuration
+    config_.max_retries = 3;
+    config_.timeout_ms = 30000;
+    config_.circuit_breaker_threshold = 5;
+    config_.circuit_breaker_timeout_ms = 60000;
+    config_.health_check_interval_ms = 30000;
+}
+
+ErrorHandler::~ErrorHandler() {
+    // Cleanup circuit breakers
+    circuit_breakers_.clear();
+}
 
 HealthStatus ErrorHandler::get_component_health(const std::string& component_name) {
     std::lock_guard<std::mutex> lock(error_mutex_);

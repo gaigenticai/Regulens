@@ -125,7 +125,7 @@ std::string AlertManagementHandlers::handle_get_alert_rules(const std::map<std::
                 {"total", total_count},
                 {"limit", limit},
                 {"offset", offset},
-                {"hasMore", (offset + rules.size()) < total_count}
+                {"hasMore", (offset + static_cast<int>(rules.size())) < total_count}
             }}
         };
 
@@ -207,14 +207,18 @@ std::string AlertManagementHandlers::handle_create_alert_rule(const std::string&
         int cooldown_minutes = request.value("cooldown_minutes", 5);
         std::string cooldown_str = std::to_string(cooldown_minutes);
 
+        std::string condition_str = condition.dump();
+        std::string notification_channels_str = notification_channels.dump();
+        std::string notification_config_str = notification_config.dump();
+
         const char* params[9] = {
             rule_name.c_str(),
             description.c_str(),
             rule_type.c_str(),
             severity.c_str(),
-            condition.dump().c_str(),
-            notification_channels.dump().c_str(),
-            notification_config.dump().c_str(),
+            condition_str.c_str(),
+            notification_channels_str.c_str(),
+            notification_config_str.c_str(),
             cooldown_str.c_str(),
             user_id.c_str()
         };
@@ -812,7 +816,7 @@ std::string AlertManagementHandlers::handle_get_notification_channels(const std:
     }
 }
 
-std::string AlertManagementHandlers::handle_create_notification_channel(const std::string& request_body, const std::string& user_id) {
+std::string AlertManagementHandlers::handle_create_notification_channel(const std::string& request_body, [[maybe_unused]] const std::string& user_id) {
     try {
         json request = json::parse(request_body);
 
@@ -835,11 +839,12 @@ std::string AlertManagementHandlers::handle_create_notification_channel(const st
         std::string channel_name = request["channel_name"];
         std::string channel_type = request["channel_type"];
         json configuration = request["configuration"];
+        std::string configuration_str = configuration.dump();
 
         const char* params[3] = {
             channel_type.c_str(),
             channel_name.c_str(),
-            configuration.dump().c_str()
+            configuration_str.c_str()
         };
 
         PGresult* result = PQexecParams(
@@ -1108,7 +1113,7 @@ std::string AlertManagementHandlers::handle_test_notification_channel(const std:
     }
 }
 
-std::string AlertManagementHandlers::handle_test_alert_delivery(const std::string& request_body, const std::string& user_id) {
+std::string AlertManagementHandlers::handle_test_alert_delivery(const std::string& request_body, [[maybe_unused]] const std::string& user_id) {
     try {
         json request = json::parse(request_body);
 
@@ -1145,13 +1150,15 @@ std::string AlertManagementHandlers::handle_test_alert_delivery(const std::strin
         // Create test incident
         std::string test_title = generate_alert_title(rule, test_data);
         std::string test_message = generate_alert_message(rule, test_data);
+        std::string severity_str = rule["severity"].get<std::string>();
+        std::string test_data_str = test_data.dump();
 
         const char* incident_params[6] = {
             rule_id.c_str(),
-            rule["severity"].get<std::string>().c_str(),
+            severity_str.c_str(),
             test_title.c_str(),
             test_message.c_str(),
-            test_data.dump().c_str(),
+            test_data_str.c_str(),
             "true"  // Mark as test
         };
 
@@ -1529,7 +1536,7 @@ std::string AlertManagementHandlers::extract_user_id_from_jwt(const std::map<std
     }
 }
 
-bool AlertManagementHandlers::validate_json_schema(const nlohmann::json& data, const std::string& schema_type) {
+bool AlertManagementHandlers::validate_json_schema([[maybe_unused]] const nlohmann::json& data, [[maybe_unused]] const std::string& schema_type) {
     // This would implement JSON schema validation based on the schema type
     // For now, return true - this should be implemented with proper validation
     return true;
@@ -1569,7 +1576,7 @@ bool AlertManagementHandlers::validate_notification_config(const nlohmann::json&
     return false;
 }
 
-std::string AlertManagementHandlers::generate_alert_title(const nlohmann::json& rule, const nlohmann::json& incident_data) {
+std::string AlertManagementHandlers::generate_alert_title(const nlohmann::json& rule, [[maybe_unused]] const nlohmann::json& incident_data) {
     std::string rule_name = rule["rule_name"];
     std::string severity = rule["severity"];
     

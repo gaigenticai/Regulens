@@ -200,7 +200,7 @@ protected:
     /**
      * @brief Check if agent has permission to use this tool
      */
-    virtual bool check_permissions(const ToolContext& context, const nlohmann::json& parameters) const {
+    virtual bool check_permissions([[maybe_unused]] const ToolContext& context, [[maybe_unused]] const nlohmann::json& parameters) const {
         // Production: Check against permission database or policy engine
         return true; // Override in subclasses for specific permission logic
     }
@@ -258,7 +258,7 @@ protected:
     /**
      * @brief Log tool execution to database for audit trail
      */
-    void log_tool_execution(const ToolContext& context, const nlohmann::json& parameters, const ToolResult& result) {
+    void log_tool_execution([[maybe_unused]] const ToolContext& context, [[maybe_unused]] const nlohmann::json& parameters, [[maybe_unused]] const ToolResult& result) {
         nlohmann::json log_data;
         log_data["agent_id"] = context.agent_id;
         log_data["agent_name"] = context.agent_name;

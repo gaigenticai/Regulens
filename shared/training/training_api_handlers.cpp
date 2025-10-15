@@ -275,7 +275,7 @@ std::string TrainingAPIHandlers::handle_create_course(const std::string& request
     }
 }
 
-std::string TrainingAPIHandlers::handle_enroll_user(const std::string& course_id, const std::string& request_body, const std::string& user_id) {
+std::string TrainingAPIHandlers::handle_enroll_user(const std::string& course_id, [[maybe_unused]] const std::string& request_body, const std::string& user_id) {
     try {
         auto conn = db_conn_->get_connection();
         if (!conn) {
@@ -802,7 +802,7 @@ double TrainingAPIHandlers::calculate_quiz_score(const json& user_answers, const
     return (static_cast<double>(correct_count) / total_questions) * 100.0;
 }
 
-std::string TrainingAPIHandlers::generate_certificate_url(const std::string& user_id, const std::string& course_id) {
+std::string TrainingAPIHandlers::generate_certificate_url([[maybe_unused]] const std::string& user_id, [[maybe_unused]] const std::string& course_id) {
     // In production, this would be a real URL to a certificate service
     // For now, generate a placeholder URL
     return "https://certificates.regulens.com/cert/" + generate_verification_code();
@@ -1475,13 +1475,13 @@ std::string TrainingAPIHandlers::handle_update_course(const std::string& course_
     }
 }
 
-std::string TrainingAPIHandlers::extract_user_id_from_jwt(const std::map<std::string, std::string>& headers) {
+std::string TrainingAPIHandlers::extract_user_id_from_jwt([[maybe_unused]] const std::map<std::string, std::string>& headers) {
     // This would be implemented based on the JWT extraction pattern used in the existing codebase
     // For now, return empty string - this should be implemented according to the existing pattern
     return "";
 }
 
-bool TrainingAPIHandlers::validate_json_schema(const nlohmann::json& data, const std::string& schema_type) {
+bool TrainingAPIHandlers::validate_json_schema([[maybe_unused]] const nlohmann::json& data, [[maybe_unused]] const std::string& schema_type) {
     // This would implement JSON schema validation based on the schema type
     // For now, return true - this should be implemented with proper validation
     return true;

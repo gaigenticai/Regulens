@@ -90,7 +90,7 @@ public:
     }
     
 protected:
-    ToolResult execute_impl(const ToolContext& context, const nlohmann::json& parameters) override {
+    ToolResult execute_impl([[maybe_unused]] const ToolContext& context, const nlohmann::json& parameters) override {
         ToolResult result;
         
         if (!parameters.contains("query_type")) {

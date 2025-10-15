@@ -119,10 +119,10 @@ public:
     // JSON serialization
     nlohmann::json to_json() const {
         nlohmann::json metadata_json;
-        for (const auto& [key, value] : metadata_) {
+        for (const auto& pair : metadata_) {
             std::visit([&](const auto& v) {
-                metadata_json[key] = v;
-            }, value);
+                metadata_json[pair.first] = v;
+            }, pair.second);
         }
 
         return {

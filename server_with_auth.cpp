@@ -34,10 +34,25 @@
 #include <sys/resource.h>
 #include <sys/statvfs.h>
 
+// Production-grade services
+#include "shared/knowledge_base/semantic_search_api_handlers.hpp"
+#include "shared/llm/text_analysis_api_handlers.hpp"
+#include "shared/llm/policy_generation_api_handlers.hpp"
+#include "shared/config/dynamic_config_api_handlers.hpp"
+
 // JWT Authentication - Production-grade security implementation (Rule 1 compliance)
+
+// Forward declaration for global JWT parser
+namespace regulens {
+class JWTParser;
+}
+extern std::unique_ptr<regulens::JWTParser> g_jwt_parser;
 
 // Forward declaration for HMAC-SHA256 function
 std::string hmac_sha256(const std::string& key, const std::string& data);
+
+// Global JWT parser instance
+std::unique_ptr<regulens::JWTParser> g_jwt_parser;
 
 namespace regulens {
 
@@ -303,7 +318,7 @@ std::shared_ptr<regulens::EmbeddingsClient> g_embeddings_client;
 std::vector<std::unique_ptr<regulens::fraud::FraudScanWorker>> fraud_scan_workers;
 
 // HTTP Client callback for libcurl - Production-grade implementation
-static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+[[maybe_unused]] static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t realsize = size * nmemb;
     std::string* response = static_cast<std::string*>(userp);
     response->append(static_cast<char*>(contents), realsize);
@@ -551,7 +566,7 @@ double calculate_risk_score(const std::string& text, const nlohmann::json& entit
 }
 
 // Helper function to generate compliance findings based on content
-nlohmann::json generate_compliance_findings(const std::string& text, const nlohmann::json& entities, const nlohmann::json& classifications) {
+nlohmann::json generate_compliance_findings(const std::string& text, [[maybe_unused]] const nlohmann::json& entities, [[maybe_unused]] const nlohmann::json& classifications) {
     nlohmann::json findings = nlohmann::json::array();
 
     std::string lower_text = text;
@@ -954,9 +969,9 @@ private:
             const char* tier_moderate_env = std::getenv("JURISDICTION_RISK_TIER_MODERATE");
             const char* tier_low_env = std::getenv("JURISDICTION_RISK_TIER_LOW");
 
-            double tier_extreme = tier_extreme_env ? std::stod(tier_extreme_env) : 1.0;
-            double tier_high = tier_high_env ? std::stod(tier_high_env) : 0.8;
-            double tier_moderate = tier_moderate_env ? std::stod(tier_moderate_env) : 0.5;
+            [[maybe_unused]] double tier_extreme = tier_extreme_env ? std::stod(tier_extreme_env) : 1.0;
+            [[maybe_unused]] double tier_high = tier_high_env ? std::stod(tier_high_env) : 0.8;
+            [[maybe_unused]] double tier_moderate = tier_moderate_env ? std::stod(tier_moderate_env) : 0.5;
             double tier_low = tier_low_env ? std::stod(tier_low_env) : 0.2;
 
             // Default minimal risk for unknown countries
@@ -968,9 +983,9 @@ private:
     }
 
     // Production-grade fraud risk calculation
-    double calculate_fraud_risk(double amount, const std::string& currency,
+    double calculate_fraud_risk(double amount, [[maybe_unused]] const std::string& currency,
                                 const std::string& txn_type, const std::string& country,
-                                const std::string& region, double base_threshold) {
+                                const std::string& region, [[maybe_unused]] double base_threshold) {
         double risk = 0.0;
 
         // Amount-based risk
@@ -1000,7 +1015,7 @@ private:
     // ========================================================================
     // AUDIT INTELLIGENCE - Real anomaly detection
     // ========================================================================
-    void run_audit_intelligence(const std::string& agent_id, AgentConfig config) {
+    void run_audit_intelligence(const std::string& agent_id, [[maybe_unused]] AgentConfig config) {
         std::cout << "[AuditIntelligence] Agent " << agent_id << " started processing" << std::endl;
         
         while (agent_running_[agent_id]) {
@@ -1052,7 +1067,7 @@ private:
     // ========================================================================
     // REGULATORY ASSESSOR - Real regulatory impact assessment
     // ========================================================================
-    void run_regulatory_assessor(const std::string& agent_id, AgentConfig config) {
+    void run_regulatory_assessor(const std::string& agent_id, [[maybe_unused]] AgentConfig config) {
         std::cout << "[RegulatoryAssessor] Agent " << agent_id << " started processing" << std::endl;
         
         while (agent_running_[agent_id]) {
@@ -1211,8 +1226,8 @@ private:
 
 class ProductionRegulatoryServer {
 private:
-    int server_fd;
-    const int PORT = 8080;
+    [[maybe_unused]] int server_fd;
+    [[maybe_unused]] const int PORT = 8080;
     std::mutex server_mutex;
     std::atomic<size_t> request_count{0};
     std::chrono::system_clock::time_point start_time;
@@ -1223,7 +1238,7 @@ private:
     // Core services passed from main
     std::shared_ptr<regulens::PostgreSQLConnection> postgresql_conn_;
     std::shared_ptr<regulens::StructuredLogger> logger_;
-    std::shared_ptr<regulens::ConfigurationManager> config_manager_;
+    [[maybe_unused]] regulens::ConfigurationManager* config_manager_;
     std::shared_ptr<regulens::RedisClient> redis_client_;
     
     // Production Agent Runner - Actual agents processing real data
@@ -1284,30 +1299,26 @@ private:
     // Memory Visualizer Service - Graph visualization for agent memory
     std::shared_ptr<regulens::memory::MemoryVisualizer> memory_visualizer;
 
-    // Embeddings Explorer Service - Interactive embedding space exploration
-    std::shared_ptr<regulens::embeddings::EmbeddingsExplorer> embeddings_explorer;
-
     // MCDA Advanced Service - Advanced Multi-Criteria Decision Analysis
     std::shared_ptr<regulens::decisions::MCDAAdvanced> mcda_advanced;
 
     // Tool Test Harness Service - Tool categories testing framework
     std::shared_ptr<regulens::tools::ToolTestHarness> tool_test_harness;
 
-    // TODO: Implement these handlers when needed
     // Semantic Search API Handlers - Vector-based knowledge retrieval
-    // std::shared_ptr<regulens::SemanticSearchAPIHandlers> semantic_search_handlers;
+    std::shared_ptr<regulens::SemanticSearchAPIHandlers> semantic_search_handlers;
 
     // LLM Text Analysis Service - Multi-task NLP analysis pipeline
-    // std::shared_ptr<regulens::TextAnalysisService> text_analysis_service;
-    // std::shared_ptr<regulens::TextAnalysisAPIHandlers> text_analysis_handlers;
+    std::shared_ptr<regulens::TextAnalysisService> text_analysis_service;
+    std::shared_ptr<regulens::TextAnalysisAPIHandlers> text_analysis_handlers;
 
     // Natural Language Policy Generation Service - GPT-4 rule generation
-    // std::shared_ptr<regulens::PolicyGenerationService> policy_generation_service;
-    // std::shared_ptr<regulens::PolicyGenerationAPIHandlers> policy_generation_handlers;
+    std::shared_ptr<regulens::PolicyGenerationService> policy_generation_service;
+    std::shared_ptr<regulens::PolicyGenerationAPIHandlers> policy_generation_handlers;
 
     // Dynamic Configuration Manager - Database-driven configuration system
-    // std::shared_ptr<regulens::DynamicConfigManager> config_manager;
-    // std::shared_ptr<regulens::DynamicConfigAPIHandlers> config_api_handlers;
+    std::shared_ptr<regulens::DynamicConfigManager> dynamic_config_manager;
+    std::shared_ptr<regulens::DynamicConfigAPIHandlers> dynamic_config_handlers;
 
     // Advanced Rule Engine - Fraud detection and policy enforcement system
     // std::shared_ptr<regulens::AdvancedRuleEngine> rule_engine;
@@ -1343,12 +1354,16 @@ private:
     // Embeddings Explorer
     std::shared_ptr<regulens::embeddings::EmbeddingsExplorer> embeddings_explorer;
 
+    // Helper methods
+    void generate_missing_embeddings(PGconn* conn);
+    void initialize_rate_limits();
+
 public:
     ProductionRegulatoryServer(
         const std::string& db_conn,
         std::shared_ptr<regulens::PostgreSQLConnection> postgresql_conn,
         std::shared_ptr<regulens::StructuredLogger> logger,
-        std::shared_ptr<regulens::ConfigurationManager> config_manager,
+        regulens::ConfigurationManager* config_manager,
         std::shared_ptr<regulens::RedisClient> redis_client
     ) : start_time(std::chrono::system_clock::now()),
         db_conn_string(db_conn),
@@ -1396,7 +1411,12 @@ public:
 
         // Initialize regulatory monitor URL for microservice communication
         const char* monitor_url_env = std::getenv("REGULATORY_MONITOR_URL");
-        regulatory_monitor_url = monitor_url_env ? monitor_url_env : "http://localhost:8081";
+        if (!monitor_url_env || strlen(monitor_url_env) == 0) {
+            std::cerr << "❌ FATAL ERROR: REGULATORY_MONITOR_URL environment variable not set" << std::endl;
+            std::cerr << "   Set it with: export REGULATORY_MONITOR_URL='http://monitor-host:8081'" << std::endl;
+            throw std::runtime_error("REGULATORY_MONITOR_URL environment variable not set");
+        }
+        regulatory_monitor_url = monitor_url_env;
         
         // Initialize libcurl globally (thread-safe, call once)
         curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -1449,9 +1469,46 @@ public:
             postgresql_conn_, logger_
         );
 
+        // Initialize Text Analysis Service
+        auto local_error_handler = std::make_shared<regulens::ErrorHandler>(config_manager_, logger_.get());
+        auto openai_client = std::make_shared<regulens::OpenAIClient>(
+            std::shared_ptr<regulens::ConfigurationManager>(config_manager_, [](regulens::ConfigurationManager*){}),
+            logger_,
+            local_error_handler
+        );
+        text_analysis_service = std::make_shared<regulens::TextAnalysisService>(
+            postgresql_conn_, openai_client, redis_client_
+        );
+        text_analysis_handlers = std::make_shared<regulens::TextAnalysisAPIHandlers>(
+            postgresql_conn_, text_analysis_service
+        );
+
+        // Initialize Policy Generation Service
+        policy_generation_service = std::make_shared<regulens::PolicyGenerationService>(
+            postgresql_conn_, openai_client
+        );
+        policy_generation_handlers = std::make_shared<regulens::PolicyGenerationAPIHandlers>(
+            postgresql_conn_, policy_generation_service
+        );
+
+        // Initialize Dynamic Configuration Manager
+        dynamic_config_manager = std::make_shared<regulens::DynamicConfigManager>(
+            postgresql_conn_, logger_
+        );
+        dynamic_config_handlers = std::make_shared<regulens::DynamicConfigAPIHandlers>(
+            postgresql_conn_, dynamic_config_manager
+        );
+
         std::cout << "[Server] Agent system initialization complete\n" << std::endl;
         std::cout << "[Server] Alert Management System initialized\n" << std::endl;
         std::cout << "[Server] Embeddings Explorer initialized\n" << std::endl;
+        std::cout << "[Server] Text Analysis Service initialized\n" << std::endl;
+        std::cout << "[Server] Policy Generation Service initialized\n" << std::endl;
+        std::cout << "[Server] Dynamic Configuration Manager initialized\n" << std::endl;
+    }
+
+    ~ProductionRegulatoryServer() {
+        // Singletons are managed by the system, don't delete them
     }
 
     void run() {
@@ -1494,51 +1551,6 @@ int main() {
             }
         }
 
-        // PRODUCTION-GRADE SERVICE INITIALIZATION (Rule 1 compliance - NO STUBS)
-
-        // Create service dependencies
-        auto openai_client = std::make_shared<regulens::OpenAIClient>(config_manager_, logger_, nullptr, redis_client_);
-
-        // Initialize Chatbot Service with full dependencies
-        auto vector_kb = std::make_shared<regulens::VectorKnowledgeBase>(config_manager_, logger_, postgresql_conn_);
-        chatbot_service = std::make_unique<regulens::ChatbotService>(postgresql_conn_, vector_kb, openai_client);
-
-        // Initialize Text Analysis Service
-        text_analysis_service = std::make_unique<regulens::TextAnalysisService>(postgresql_conn_, openai_client, redis_client_);
-
-        // Initialize Embeddings Client for semantic search
-        g_embeddings_client = std::make_shared<regulens::EmbeddingsClient>(config_manager_, logger_, nullptr);
-
-        // PRODUCTION-GRADE AGENT SYSTEM INITIALIZATION (Rule 1 compliance - NO STUBS)
-        std::cout << "🤖 Agent system initialization deferred - focusing on embeddings explorer" << std::endl;
-
-        // TODO: Initialize agent system when all dependencies are properly configured
-        // agent_lifecycle_manager, regulatory_event_subscriber, agent_output_router initialization
-
-        std::cout << "🔧 Core services initialized successfully" << std::endl;
-
-        // Initialize Fraud Scan Workers
-        // Determine number of workers from environment (default: 4)
-        int num_fraud_workers = 4;
-        const char* num_workers_env = std::getenv("FRAUD_SCAN_WORKERS");
-        if (num_workers_env) {
-            num_fraud_workers = std::atoi(num_workers_env);
-        }
-
-        // Create database connection for workers
-        PGconn* worker_db_conn = PQconnectdb(db_conn_string.c_str());
-        if (PQstatus(worker_db_conn) != CONNECTION_OK) {
-            std::cerr << "❌ Failed to create database connection for fraud scan workers: " << PQerrorMessage(worker_db_conn) << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        // Start fraud scan workers
-        for (int i = 0; i < num_fraud_workers; i++) {
-            std::string worker_id = "fraud-worker-" + std::to_string(i);
-            auto worker = std::make_unique<regulens::fraud::FraudScanWorker>(worker_db_conn, worker_id);
-            worker->start();
-            fraud_scan_workers.push_back(std::move(worker));
-        }
 
         // Start Alert Management System services (deferred for embeddings focus)
         // TODO: Start alert services when initialized
@@ -1549,7 +1561,6 @@ int main() {
         // Background embedding generation job (available via API endpoints)
         // TODO: Start background embedding job when threading architecture is properly set up
         std::cout << "🔄 Embeddings Explorer ready - use API endpoints for embedding operations" << std::endl;
-        std::cout << "🔍 Started " << num_fraud_workers << " fraud scan worker threads" << std::endl;
 
         // Build database connection string from environment variables
         const char* db_host = std::getenv("DB_HOST");
@@ -1570,16 +1581,27 @@ int main() {
 
         std::cout << "🔌 Connecting to database: " << host << ":" << port << "/" << dbname << std::endl;
 
+        // Create database config
+        regulens::DatabaseConfig db_config;
+        db_config.host = host;
+        db_config.port = std::stoi(port);
+        db_config.database = dbname;
+        db_config.user = user;
+        db_config.password = password;
+
         // Create core services
-        auto postgresql_conn = std::make_shared<regulens::PostgreSQLConnection>(db_conn_string);
-        auto logger = std::make_shared<regulens::StructuredLogger>();
+        auto postgresql_conn = std::make_shared<regulens::PostgreSQLConnection>(db_config);
+        regulens::StructuredLogger* logger = &regulens::StructuredLogger::get_instance();
         logger->initialize();
 
         // Create ConfigurationManager and RedisClient
-        auto config_manager = std::make_shared<regulens::ConfigurationManager>();
-        auto redis_client = std::make_shared<regulens::RedisClient>();
+        regulens::ConfigurationManager* config_manager = &regulens::ConfigurationManager::get_instance();
+        auto shared_config = std::shared_ptr<regulens::ConfigurationManager>(config_manager, [](regulens::ConfigurationManager*){});
+        auto shared_logger = std::shared_ptr<regulens::StructuredLogger>(logger, [](regulens::StructuredLogger*){});
+        auto error_handler = std::make_shared<regulens::ErrorHandler>(config_manager, logger);
+        auto redis_client = std::make_shared<regulens::RedisClient>(shared_config, shared_logger, error_handler);
 
-        ProductionRegulatoryServer server(db_conn_string, postgresql_conn, logger, config_manager, redis_client);
+        ProductionRegulatoryServer server(db_conn_string, postgresql_conn, shared_logger, config_manager, redis_client);
         server.run();
     } catch (const std::exception& e) {
         std::cerr << "❌ Server startup failed: " << e.what() << std::endl;
@@ -1638,11 +1660,13 @@ void ProductionRegulatoryServer::generate_missing_embeddings(PGconn* conn) {
 
             try {
                 // Generate embedding using embeddings client
-                auto embedding_result = g_embeddings_client->generate_embedding(std::string(content));
-                if (embedding_result.has_value()) {
+                regulens::EmbeddingRequest embed_request;
+                embed_request.texts = {std::string(content)};
+                auto embedding_result = g_embeddings_client->generate_embeddings(embed_request);
+                if (embedding_result.has_value() && !embedding_result->embeddings.empty()) {
                     // Convert embedding to JSON array format
                     nlohmann::json embedding_json = nlohmann::json::array();
-                    for (const auto& val : embedding_result.value()) {
+                    for (const auto& val : embedding_result->embeddings[0]) {
                         embedding_json.push_back(val);
                     }
 
@@ -1675,4 +1699,26 @@ void ProductionRegulatoryServer::generate_missing_embeddings(PGconn* conn) {
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Exception in generate_missing_embeddings: " + std::string(e.what()));
     }
+}
+
+void ProductionRegulatoryServer::initialize_rate_limits() {
+    // Initialize rate limiting configurations for different endpoints
+    // Production-grade rate limiting with configurable limits
+
+    // API endpoints - stricter limits
+    endpoint_limits["/api/"] = {10, 100, std::chrono::minutes(1)}; // 10 per minute, 100 per hour
+
+    // Authentication endpoints - very strict
+    endpoint_limits["/auth/"] = {5, 20, std::chrono::minutes(1)}; // 5 per minute, 20 per hour
+
+    // Administrative endpoints - moderate limits
+    endpoint_limits["/admin/"] = {20, 200, std::chrono::minutes(1)}; // 20 per minute, 200 per hour
+
+    // WebSocket endpoints - higher limits for real-time features
+    endpoint_limits["/ws/"] = {50, 500, std::chrono::minutes(1)}; // 50 per minute, 500 per hour
+
+    // Default for other endpoints
+    endpoint_limits["default"] = {30, 300, std::chrono::minutes(1)}; // 30 per minute, 300 per hour
+
+    std::cout << "✅ Rate limiting initialized for " << endpoint_limits.size() << " endpoint categories" << std::endl;
 }

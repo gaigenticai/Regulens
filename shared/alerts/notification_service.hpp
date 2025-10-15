@@ -117,6 +117,9 @@ private:
     nlohmann::json format_email_payload(const NotificationRequest& request) const;
     nlohmann::json format_webhook_payload(const NotificationRequest& request) const;
     nlohmann::json format_slack_payload(const NotificationRequest& request) const;
+
+    // SMTP email sending
+    bool send_smtp_email(const nlohmann::json& email_payload);
     std::string format_sms_message(const NotificationRequest& request) const;
     nlohmann::json format_pagerduty_payload(const NotificationRequest& request) const;
     

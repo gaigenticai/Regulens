@@ -223,7 +223,7 @@ public:
             if (output.output_type == output_type) {
                 if (agent_id.empty() || output.agent_id == agent_id) {
                     result.push_back(output);
-                    if (result.size() >= limit) {
+                    if (static_cast<int>(result.size()) >= limit) {
                         break;
                     }
                 }
@@ -647,16 +647,17 @@ private:
             true,  // expose_via_api
             true,  // push_via_websocket
             false, // send_webhook
-            ""     // webhook_url
+            "",    // webhook_url
+            {}     // subscribers
         };
         
         // Standard outputs: persist and API
-        routing_rules_[OutputType::DECISION] = {true, true, false, false, ""};
-        routing_rules_[OutputType::RISK_ASSESSMENT] = {true, true, false, false, ""};
-        routing_rules_[OutputType::COMPLIANCE_CHECK] = {true, true, false, false, ""};
-        routing_rules_[OutputType::PATTERN_DETECTION] = {true, true, false, false, ""};
-        routing_rules_[OutputType::RECOMMENDATION] = {true, true, false, false, ""};
-        routing_rules_[OutputType::ANALYSIS_RESULT] = {true, true, false, false, ""};
+        routing_rules_[OutputType::DECISION] = {true, true, false, false, "", {}};
+        routing_rules_[OutputType::RISK_ASSESSMENT] = {true, true, false, false, "", {}};
+        routing_rules_[OutputType::COMPLIANCE_CHECK] = {true, true, false, false, "", {}};
+        routing_rules_[OutputType::PATTERN_DETECTION] = {true, true, false, false, "", {}};
+        routing_rules_[OutputType::RECOMMENDATION] = {true, true, false, false, "", {}};
+        routing_rules_[OutputType::ANALYSIS_RESULT] = {true, true, false, false, "", {}};
     }
     
     /**

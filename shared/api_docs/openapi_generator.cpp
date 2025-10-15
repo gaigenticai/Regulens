@@ -274,7 +274,9 @@ nlohmann::json OpenAPIGenerator::build_openapi_json() const {
         // Default server
         openapi["servers"] = nlohmann::json::array();
         nlohmann::json default_server;
-        default_server["url"] = "http://localhost:8080/api";
+        // Use environment variable for server URL - PRODUCTION REQUIREMENT: No hardcoded localhost
+        const char* server_url_env = std::getenv("API_SERVER_URL");
+        default_server["url"] = server_url_env ? server_url_env : "https://api.regulens.com";
         default_server["description"] = "Development server";
         openapi["servers"].push_back(default_server);
     }
@@ -490,10 +492,11 @@ nlohmann::json OpenAPIGenerator::build_schema(const SchemaDefinition& schema) co
 // Helper function implementation
 void register_regulens_api_endpoints(OpenAPIGenerator& generator) {
     // Add servers with API versioning
-    generator.add_server("http://localhost:8080/api/v1", "Development server (v1)");
-    generator.add_server("http://localhost:8080/api", "Development server (current)");
-    generator.add_server("https://api.regulens.com/v1", "Production server (v1)");
-    generator.add_server("https://api.regulens.com", "Production server (current)");
+    // Use environment variable for server URLs - PRODUCTION REQUIREMENT: No hardcoded localhost
+    const char* server_url_env = std::getenv("API_SERVER_URL");
+    std::string base_url = server_url_env ? server_url_env : "https://api.regulens.com";
+    generator.add_server(base_url + "/v1", "Production server (v1)");
+    generator.add_server(base_url, "Production server (current)");
 
     // Add security schemes
     generator.add_security_scheme("bearerAuth", "http", "JWT Bearer token authentication");

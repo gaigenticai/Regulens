@@ -54,6 +54,11 @@ struct CircuitBreakerStateInfo {
  * for robust operation of advanced agent capabilities.
  */
 class ErrorHandler {
+public:
+    ErrorHandler(ConfigurationManager* config_manager,
+                 StructuredLogger* logger)
+        : config_manager_(config_manager, [](ConfigurationManager*){}), logger_(logger, [](StructuredLogger*){}) {}
+
     /**
      * @brief Set the Prometheus metrics collector for circuit breakers
      * @param metrics_collector Shared pointer to PrometheusMetricsCollector
@@ -112,9 +117,6 @@ public:
                                                  execution_time, CircuitState::CLOSED);
         }
     }
-public:
-    ErrorHandler(std::shared_ptr<ConfigurationManager> config,
-                std::shared_ptr<StructuredLogger> logger);
 
     ~ErrorHandler();
 

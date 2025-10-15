@@ -275,8 +275,8 @@ private:
      */
     template<typename T>
     std::optional<T> execute_alternative_fallback(
-        std::function<T()> original_operation,
-        const std::unordered_map<std::string, std::string>& context) {
+        [[maybe_unused]] std::function<T()> original_operation,
+        [[maybe_unused]] const std::unordered_map<std::string, std::string>& context) {
 
         // Production: Would invoke alternative service/algorithm
         // Check if alternative endpoint is configured
@@ -304,7 +304,7 @@ private:
         // Production: Would make HTTP request to external service
         // with proper timeout, retry, and circuit breaker protection
         auto timeout_it = fallback_parameters.find("external_timeout_ms");
-        auto external_timeout = timeout_it != fallback_parameters.end()
+        [[maybe_unused]] auto external_timeout = timeout_it != fallback_parameters.end()
             ? std::chrono::milliseconds(std::stoi(timeout_it->second))
             : std::chrono::milliseconds(5000);
 

@@ -6,6 +6,14 @@
 #include <iomanip>
 #include <ctime>
 #include <regex>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cstring>
+
+// Forward declaration for base64 encoding
+static std::string base64_encode(const std::string& input);
 
 namespace regulens {
 namespace alerts {
@@ -457,21 +465,218 @@ bool NotificationService::send_email_notification(const NotificationRequest& req
             return false;
         }
         
-        // In a real implementation, this would use an SMTP library or service
-        // For now, we'll simulate email sending
-        logger_->log(LogLevel::INFO, "Sending email notification to: " + email_payload["to"].get<std::string>());
-        
-        // Simulate email delivery
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
-        // Update status to sent
-        update_notification_status(request.notification_id, "sent");
-        
-        return true;
+        // Production-grade SMTP email sending
+        bool email_sent = send_smtp_email(email_payload);
+
+        if (email_sent) {
+            logger_->log(LogLevel::INFO, "Email notification sent successfully to: " + email_payload["to"].get<std::string>());
+            update_notification_status(request.notification_id, "sent");
+            return true;
+        } else {
+            logger_->log(LogLevel::ERROR, "Failed to send email notification to: " + email_payload["to"].get<std::string>());
+            return false;
+        }
     } catch (const std::exception& e) {
         logger_->log(LogLevel::ERROR, "Failed to send email notification: " + std::string(e.what()));
         return false;
     }
+}
+
+bool NotificationService::send_smtp_email(const nlohmann::json& email_payload) {
+    try {
+        // Get SMTP configuration from environment
+        const char* smtp_host = std::getenv("SMTP_HOST");
+        const char* smtp_port = std::getenv("SMTP_PORT");
+        const char* smtp_user = std::getenv("SMTP_USER");
+        const char* smtp_pass = std::getenv("SMTP_PASS");
+        const char* smtp_from = std::getenv("SMTP_FROM");
+
+        if (!smtp_host || !smtp_port || !smtp_user || !smtp_pass || !smtp_from) {
+            logger_->log(LogLevel::ERROR, "SMTP configuration not complete - missing environment variables");
+            return false;
+        }
+
+        std::string to = email_payload["to"];
+        std::string subject = email_payload["subject"];
+        std::string body = email_payload["body"];
+
+        // Create socket for SMTP connection
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) {
+            logger_->log(LogLevel::ERROR, "Failed to create SMTP socket");
+            return false;
+        }
+
+        // Configure server address
+        struct sockaddr_in server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(std::stoi(smtp_port));
+
+        if (inet_pton(AF_INET, smtp_host, &server_addr.sin_addr) <= 0) {
+            logger_->log(LogLevel::ERROR, "Invalid SMTP host address: " + std::string(smtp_host));
+            close(sock);
+            return false;
+        }
+
+        // Connect to SMTP server
+        if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            logger_->log(LogLevel::ERROR, "Failed to connect to SMTP server");
+            close(sock);
+            return false;
+        }
+
+        // SMTP conversation
+        auto send_command = [&](const std::string& cmd) -> std::string {
+            send(sock, cmd.c_str(), cmd.length(), 0);
+            send(sock, "\r\n", 2, 0);
+
+            char buffer[1024] = {0};
+            recv(sock, buffer, sizeof(buffer), 0);
+            return std::string(buffer);
+        };
+
+        // Read initial greeting
+        char buffer[1024] = {0};
+        recv(sock, buffer, sizeof(buffer), 0);
+
+        // EHLO command
+        std::string ehlo_response = send_command("EHLO localhost");
+        if (ehlo_response.substr(0, 3) != "250") {
+            logger_->log(LogLevel::ERROR, "SMTP EHLO failed: " + ehlo_response);
+            close(sock);
+            return false;
+        }
+
+        // AUTH LOGIN
+        std::string auth_response = send_command("AUTH LOGIN");
+        if (auth_response.substr(0, 3) != "334") {
+            logger_->log(LogLevel::ERROR, "SMTP AUTH LOGIN failed: " + auth_response);
+            close(sock);
+            return false;
+        }
+
+        // Send username (base64 encoded)
+        std::string username_b64 = base64_encode(smtp_user);
+        std::string user_response = send_command(username_b64);
+        if (user_response.substr(0, 3) != "334") {
+            logger_->log(LogLevel::ERROR, "SMTP username auth failed: " + user_response);
+            close(sock);
+            return false;
+        }
+
+        // Send password (base64 encoded)
+        std::string password_b64 = base64_encode(smtp_pass);
+        std::string pass_response = send_command(password_b64);
+        if (pass_response.substr(0, 3) != "235") {
+            logger_->log(LogLevel::ERROR, "SMTP password auth failed: " + pass_response);
+            close(sock);
+            return false;
+        }
+
+        // MAIL FROM
+        std::string mail_from = "MAIL FROM:<" + std::string(smtp_from) + ">";
+        std::string from_response = send_command(mail_from);
+        if (from_response.substr(0, 3) != "250") {
+            logger_->log(LogLevel::ERROR, "SMTP MAIL FROM failed: " + from_response);
+            close(sock);
+            return false;
+        }
+
+        // RCPT TO
+        std::string rcpt_to = "RCPT TO:<" + to + ">";
+        std::string rcpt_response = send_command(rcpt_to);
+        if (rcpt_response.substr(0, 3) != "250") {
+            logger_->log(LogLevel::ERROR, "SMTP RCPT TO failed: " + rcpt_response);
+            close(sock);
+            return false;
+        }
+
+        // DATA
+        std::string data_response = send_command("DATA");
+        if (data_response.substr(0, 3) != "354") {
+            logger_->log(LogLevel::ERROR, "SMTP DATA failed: " + data_response);
+            close(sock);
+            return false;
+        }
+
+        // Send email content
+        std::string email_content = "From: " + std::string(smtp_from) + "\r\n";
+        email_content += "To: " + to + "\r\n";
+        email_content += "Subject: " + subject + "\r\n";
+        email_content += "\r\n";
+        email_content += body + "\r\n";
+        email_content += ".\r\n";
+
+        send(sock, email_content.c_str(), email_content.length(), 0);
+
+        // Read response
+        memset(buffer, 0, sizeof(buffer));
+        recv(sock, buffer, sizeof(buffer), 0);
+        std::string data_end_response(buffer);
+
+        if (data_end_response.substr(0, 3) != "250") {
+            logger_->log(LogLevel::ERROR, "SMTP email send failed: " + data_end_response);
+            close(sock);
+            return false;
+        }
+
+        // QUIT
+        send_command("QUIT");
+        close(sock);
+
+        return true;
+
+    } catch (const std::exception& e) {
+        logger_->log(LogLevel::ERROR, "Exception in SMTP email sending: " + std::string(e.what()));
+        return false;
+    }
+}
+
+// Base64 encoding utility for SMTP authentication
+std::string base64_encode(const std::string& input) {
+    static const std::string base64_chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789+/";
+
+    std::string encoded;
+    int i = 0;
+    int j = 0;
+    unsigned char char_array_3[3];
+    unsigned char char_array_4[4];
+
+    for (char c : input) {
+        char_array_3[i++] = c;
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+
+            for(i = 0; i < 4; i++)
+                encoded += base64_chars[char_array_4[i]];
+            i = 0;
+        }
+    }
+
+    if (i) {
+        for(j = i; j < 3; j++)
+            char_array_3[j] = '\0';
+
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        char_array_4[3] = char_array_3[2] & 0x3f;
+
+        for (j = 0; j < i + 1; j++)
+            encoded += base64_chars[char_array_4[j]];
+
+        while((i++ < 3))
+            encoded += '=';
+    }
+
+    return encoded;
 }
 
 bool NotificationService::send_webhook_notification(const NotificationRequest& request) {

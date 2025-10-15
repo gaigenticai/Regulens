@@ -580,6 +580,18 @@ CREATE TABLE IF NOT EXISTS regulatory_alerts (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+-- System metrics history for anomaly detection
+CREATE TABLE IF NOT EXISTS metric_history (
+    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    metric_name VARCHAR(100) NOT NULL,
+    value DOUBLE PRECISION NOT NULL,
+    unit VARCHAR(50),
+    tags JSONB DEFAULT '{}'::jsonb,
+    collected_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    source VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 -- =============================================================================
 -- POC 3: AUDIT TRAIL INTELLIGENCE AGENT TABLES
 -- =============================================================================
@@ -1218,6 +1230,11 @@ CREATE INDEX IF NOT EXISTS idx_regulatory_alerts_document_id ON regulatory_alert
 CREATE INDEX IF NOT EXISTS idx_regulatory_alerts_priority ON regulatory_alerts(priority);
 CREATE INDEX IF NOT EXISTS idx_regulatory_alerts_status ON regulatory_alerts(action_status);
 CREATE INDEX IF NOT EXISTS idx_regulatory_alerts_sent_at ON regulatory_alerts(sent_at);
+
+-- Metric history indexes for anomaly detection
+CREATE INDEX IF NOT EXISTS idx_metric_history_name_time ON metric_history(metric_name, collected_at);
+CREATE INDEX IF NOT EXISTS idx_metric_history_source ON metric_history(source);
+CREATE INDEX IF NOT EXISTS idx_metric_history_tags ON metric_history USING GIN(tags);
 
 -- POC 3: Audit Intelligence indexes
 CREATE INDEX IF NOT EXISTS idx_system_audit_logs_system_name ON system_audit_logs(system_name);

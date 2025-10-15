@@ -310,8 +310,7 @@ void AlertEvaluationEngine::evaluate_anomaly_rule(const nlohmann::json& rule, co
     }
     
     // Get baseline data (historical averages)
-    // nlohmann::json baseline_data = get_baseline_data(metric_name); // Method not implemented
-    nlohmann::json baseline_data; // Placeholder
+    nlohmann::json baseline_data = get_baseline_data(metric_name);
     if (baseline_data.empty() || !baseline_data.contains("mean") || !baseline_data.contains("std_dev")) {
         logger_->log(LogLevel::WARN, "No baseline data available for anomaly detection: " + metric_name);
         return;
@@ -408,15 +407,21 @@ nlohmann::json AlertEvaluationEngine::collect_transaction_metrics() {
         return nlohmann::json{};
     }
     
+    double transaction_count = static_cast<double>(std::stoi(PQgetvalue(result, 0, 0)));
+
     nlohmann::json metrics = {
         {"metric", "transaction_volume"},
-        {"value", static_cast<double>(std::stoi(PQgetvalue(result, 0, 0)))},
+        {"value", transaction_count},
         {"avg_amount", !PQgetisnull(result, 0, 1) ? std::stod(PQgetvalue(result, 0, 1)) : 0.0},
         {"max_amount", !PQgetisnull(result, 0, 2) ? std::stod(PQgetvalue(result, 0, 2)) : 0.0},
         {"timestamp", std::to_string(std::time(nullptr))}
     };
-    
+
     PQclear(result);
+
+    // Store metric in history for anomaly detection
+    store_metric_history("transaction_volume", transaction_count, "transactions", "evaluation_engine");
+
     return metrics;
 }
 
@@ -440,15 +445,21 @@ nlohmann::json AlertEvaluationEngine::collect_system_metrics() {
         return nlohmann::json{};
     }
     
+    double active_sessions = static_cast<double>(std::stoi(PQgetvalue(result, 0, 0)));
+
     nlohmann::json metrics = {
         {"metric", "system_load"},
-        {"value", static_cast<double>(std::stoi(PQgetvalue(result, 0, 0)))},
+        {"value", active_sessions},
         {"active_sessions", std::stoi(PQgetvalue(result, 0, 0))},
         {"recent_log_entries", std::stoi(PQgetvalue(result, 0, 1))},
         {"timestamp", std::to_string(std::time(nullptr))}
     };
-    
+
     PQclear(result);
+
+    // Store metric in history for anomaly detection
+    store_metric_history("system_load", active_sessions, "sessions", "evaluation_engine");
+
     return metrics;
 }
 
@@ -473,13 +484,16 @@ nlohmann::json AlertEvaluationEngine::collect_compliance_metrics() {
     
     double score = std::stod(PQgetvalue(result, 0, 0));
     PQclear(result);
-    
+
+    // Store metric in history for anomaly detection
+    store_metric_history("compliance_score", score, "percentage", "evaluation_engine");
+
     nlohmann::json metrics = {
         {"metric", "compliance_score"},
         {"value", score},
         {"timestamp", std::to_string(std::time(nullptr))}
     };
-    
+
     return metrics;
 }
 
@@ -504,13 +518,16 @@ nlohmann::json AlertEvaluationEngine::collect_performance_metrics() {
     
     double response_time = std::stod(PQgetvalue(result, 0, 0));
     PQclear(result);
-    
+
+    // Store metric in history for anomaly detection
+    store_metric_history("response_time", response_time, "milliseconds", "evaluation_engine");
+
     nlohmann::json metrics = {
         {"metric", "response_time"},
         {"value", response_time},
         {"timestamp", std::to_string(std::time(nullptr))}
     };
-    
+
     return metrics;
 }
 
@@ -608,6 +625,35 @@ nlohmann::json AlertEvaluationEngine::get_baseline_data(const std::string& metri
     
     PQclear(result);
     return baseline;
+}
+
+void AlertEvaluationEngine::store_metric_history(const std::string& metric_name, double value,
+                                                const std::string& unit, const std::string& source) {
+    auto conn = db_conn_->get_connection();
+    if (!conn) {
+        logger_->log(LogLevel::ERROR, "Failed to store metric history: no database connection");
+        return;
+    }
+
+    const char* param_values[4] = {
+        metric_name.c_str(),
+        std::to_string(value).c_str(),
+        unit.c_str(),
+        source.c_str()
+    };
+
+    PGresult* result = PQexecParams(
+        conn,
+        "INSERT INTO metric_history (metric_name, value, unit, source) "
+        "VALUES ($1, $2::double precision, $3, $4)",
+        4, nullptr, param_values, nullptr, nullptr, 0
+    );
+
+    if (PQresultStatus(result) != PGRES_COMMAND_OK) {
+        logger_->log(LogLevel::ERROR, "Failed to store metric history: " + std::string(PQerrorMessage(conn)));
+    }
+
+    PQclear(result);
 }
 
 bool AlertEvaluationEngine::is_schedule_time(const std::string& schedule) {
@@ -733,7 +779,7 @@ void AlertEvaluationEngine::update_rule_last_triggered(const std::string& rule_i
     PQclear(result);
 }
 
-void AlertEvaluationEngine::trigger_notifications(const std::string& incident_id, const nlohmann::json& rule) {
+void AlertEvaluationEngine::trigger_notifications(const std::string& incident_id, [[maybe_unused]] const nlohmann::json& rule) {
     // This would integrate with the notification service
     // For now, just log that notifications should be triggered
     logger_->log(LogLevel::INFO, "Triggering notifications for incident: " + incident_id);

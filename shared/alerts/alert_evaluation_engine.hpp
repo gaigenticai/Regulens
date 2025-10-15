@@ -82,6 +82,8 @@ private:
     
     // Baseline data for anomaly detection
     nlohmann::json get_baseline_data(const std::string& metric_name);
+    void store_metric_history(const std::string& metric_name, double value,
+                             const std::string& unit, const std::string& source);
     
     // Schedule evaluation
     bool is_schedule_time(const std::string& schedule);

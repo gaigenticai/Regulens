@@ -51,7 +51,7 @@ void PatternRecognitionEngine::shutdown() {
 
     // Wake up analysis thread
     {
-        std::unique_lock<std::mutex> lock(analysis_cv_mutex_);
+        std::unique_lock<std::mutex> lock(analysis_mutex_);
         analysis_cv_.notify_one();
     }
 
@@ -928,7 +928,7 @@ void PatternRecognitionEngine::analysis_worker() {
     logger_->info("Pattern recognition analysis worker started");
 
     while (running_) {
-        std::unique_lock<std::mutex> lock(analysis_cv_mutex_);
+        std::unique_lock<std::mutex> lock(analysis_mutex_);
 
         // Wait for analysis interval or shutdown
         analysis_cv_.wait_for(lock, std::chrono::minutes(30)); // Analyze every 30 minutes

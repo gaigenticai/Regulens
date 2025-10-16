@@ -670,7 +670,9 @@ bool OpenAIClient::check_rate_limit() {
 
 void OpenAIClient::update_usage_stats(const OpenAIResponse& response) {
     total_tokens_used_ += static_cast<size_t>(response.usage.total_tokens);
-    estimated_cost_usd_ += calculate_cost(response.model, response.usage.total_tokens);
+    double cost = calculate_cost(response.model, response.usage.total_tokens);
+    double current_cost = estimated_cost_usd_.load();
+    estimated_cost_usd_.store(current_cost + cost);
 
     logger_->debug("OpenAI usage updated - Tokens: " + std::to_string(response.usage.total_tokens) +
                   ", Cost: $" + std::to_string(calculate_cost(response.model, response.usage.total_tokens)));
@@ -937,10 +939,10 @@ OpenAICompletionRequest OpenAIClient::create_tool_completion_request(
     return OpenAICompletionRequest{
         .model = model,
         .messages = messages,
-        .tools = tools,
-        .tool_choice = tool_choice,
         .temperature = 0.1,  // Lower temperature for more consistent tool calling
-        .max_tokens = 2000
+        .max_tokens = 2000,
+        .tools = {tools},
+        .tool_choice = tool_choice
     };
 }
 

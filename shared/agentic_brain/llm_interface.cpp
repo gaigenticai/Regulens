@@ -60,7 +60,7 @@ void LLMInterface::initialize_default_configs() {
         throw std::runtime_error("LOCAL_LLM_BASE_URL environment variable must be configured");
     }
 
-    provider_configs_[LLMProvider::LOCAL] = {
+    provider_configs_[LLMProvider::LOCAL_LLM_LLM] = {
         {"base_url", local_llm_url},
         {"timeout_seconds", 120},
         {"max_retries", 2},
@@ -115,7 +115,7 @@ bool LLMInterface::validate_provider_config(LLMProvider provider, const nlohmann
         case LLMProvider::ANTHROPIC:
             if (!config.contains("api_key")) return false;
             break;
-        case LLMProvider::LOCAL:
+        case LLMProvider::LOCAL_LLM:
             if (!config.contains("base_url")) return false;
             break;
         default:
@@ -138,7 +138,7 @@ bool LLMInterface::test_provider_connection(LLMProvider provider) {
                 return test_openai_connection();
             case LLMProvider::ANTHROPIC:
                 return test_anthropic_connection();
-            case LLMProvider::LOCAL:
+            case LLMProvider::LOCAL_LLM:
                 return test_local_connection();
             default:
                 return false;
@@ -174,6 +174,17 @@ bool LLMInterface::set_model(LLMModel model) {
     return true;
 }
 
+LLMResponse LLMInterface::analyze_with_context(const std::string& prompt, const nlohmann::json& context) {
+    // Create a request with context-enhanced prompt
+    LLMRequest request;
+    request.model = current_model_;
+    request.model_preference = current_model_;
+    request.messages = {{{"role", "user"}, {"content", prompt + "\n\nContext: " + context.dump(2)}}};
+    request.temperature = 0.7;
+
+    return generate_completion(request);
+}
+
 LLMResponse LLMInterface::generate_completion(const LLMRequest& request) {
     LLMResponse response;
     response.model_used = current_model_;
@@ -205,7 +216,7 @@ LLMResponse LLMInterface::generate_completion(const LLMRequest& request) {
             case LLMProvider::ANTHROPIC:
                 response = generate_anthropic_completion(request);
                 break;
-            case LLMProvider::LOCAL:
+            case LLMProvider::LOCAL_LLM:
                 response = generate_local_completion(request);
                 break;
             default:
@@ -364,7 +375,7 @@ LLMResponse LLMInterface::generate_anthropic_completion(const LLMRequest& reques
 
 LLMResponse LLMInterface::generate_local_completion(const LLMRequest& request) {
     LLMResponse response;
-    auto& config = provider_configs_[LLMProvider::LOCAL];
+    auto& config = provider_configs_[LLMProvider::LOCAL_LLM];
 
     try {
         // Production-grade conversation context with full message history
@@ -474,7 +485,7 @@ bool LLMInterface::test_anthropic_connection() {
 
 bool LLMInterface::test_local_connection() {
     try {
-        auto& config = provider_configs_[LLMProvider::LOCAL];
+        auto& config = provider_configs_[LLMProvider::LOCAL_LLM];
         HttpResponse resp = http_client_->get(config["base_url"] + "/health");
         return resp.status_code == 200;
     } catch (...) {
@@ -518,7 +529,7 @@ std::vector<std::string> LLMInterface::get_available_models_for_provider(LLMProv
         case LLMProvider::ANTHROPIC:
             return {"claude-3-opus-20240229", "claude-3-sonnet-20240229",
                    "claude-3-haiku-20240307", "claude-2"};
-        case LLMProvider::LOCAL:
+        case LLMProvider::LOCAL_LLM:
             return {"llama-3-70b", "mistral-7b", "codellama", "phi-2"};
         default:
             return {};
@@ -529,13 +540,13 @@ nlohmann::json LLMInterface::get_available_models() {
     nlohmann::json result = nlohmann::json::object();
 
     for (const auto& [provider, config] : provider_configs_) {
-        if (!config.contains("api_key") && provider != LLMProvider::LOCAL) continue;
+        if (!config.contains("api_key") && provider != LLMProvider::LOCAL_LLM) continue;
 
         std::string provider_name;
         switch (provider) {
             case LLMProvider::OPENAI: provider_name = "openai"; break;
             case LLMProvider::ANTHROPIC: provider_name = "anthropic"; break;
-            case LLMProvider::LOCAL: provider_name = "local"; break;
+            case LLMProvider::LOCAL_LLM: provider_name = "local"; break;
             default: continue;
         }
 

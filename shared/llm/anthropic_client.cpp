@@ -665,7 +665,9 @@ bool AnthropicClient::check_rate_limit() {
 void AnthropicClient::update_usage_stats(const ClaudeResponse& response) {
     total_input_tokens_ += static_cast<size_t>(response.usage.input_tokens);
     total_output_tokens_ += static_cast<size_t>(response.usage.output_tokens);
-    estimated_cost_usd_ += calculate_cost(response.model, response.usage.input_tokens, response.usage.output_tokens);
+    double cost = calculate_cost(response.model, response.usage.input_tokens, response.usage.output_tokens);
+    double current_cost = estimated_cost_usd_.load();
+    estimated_cost_usd_.store(current_cost + cost);
 
     logger_->debug("Anthropic usage updated - Input: " + std::to_string(response.usage.input_tokens) +
                   ", Output: " + std::to_string(response.usage.output_tokens) +

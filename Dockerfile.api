@@ -10,9 +10,14 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     cmake \
     g++ \
     libpq-dev \
+    libpqxx-dev \
     libssl-dev \
     libcurl4-openssl-dev \
     nlohmann-json3-dev \
+    libspdlog-dev \
+    libhiredis-dev \
+    zlib1g-dev \
+    libbz2-dev \
     curl \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
@@ -20,9 +25,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 # Set working directory
 WORKDIR /build
 
-# Copy source file
+# Copy source files
 COPY server_with_auth.cpp .
 COPY Makefile .
+COPY shared/ shared/
+COPY core/ core/
+COPY agents/ agents/
 
 # Build the application
 RUN make clean && make

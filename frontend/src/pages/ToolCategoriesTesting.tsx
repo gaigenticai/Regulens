@@ -7,6 +7,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Activity, BarChart3, Workflow, Shield, Monitor, CheckCircle, XCircle, Loader } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import apiClient from '../services/api';
 
 interface ToolTestResult {
   tool_name: string;
@@ -154,31 +155,22 @@ const ToolCategoriesTesting: React.FC = () => {
 
     setIsRunning(true);
     try {
-      const response = await fetch(`/api/tools/categories/${activeCategory}/execute`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          tool_name: selectedTool,
-          operation: selectedOperation,
-          parameters: {
-            test_mode: true,
-            timestamp: new Date().toISOString()
-          }
-        })
+      const response = await apiClient.post(`/api/tools/categories/${activeCategory}/execute`, {
+        tool_name: selectedTool,
+        operation: selectedOperation,
+        parameters: {
+          test_mode: true,
+          timestamp: new Date().toISOString()
+        }
       });
-
-      const result = await response.json();
 
       const testResult: ToolTestResult = {
         tool_name: selectedTool,
         operation: selectedOperation,
-        success: response.ok && result.success,
-        execution_time_ms: result.execution_time_ms || 0,
-        result_data: result.data,
-        error_message: result.error_message
+        success: response.data.success,
+        execution_time_ms: response.data.execution_time_ms || 0,
+        result_data: response.data.result_data,
+        error_message: response.data.error_message
       };
 
       setTestResults(prev => [testResult, ...prev.slice(0, 9)]); // Keep last 10 results

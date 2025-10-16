@@ -47,10 +47,7 @@ export function useAuditTrail(options: UseAuditTrailOptions = {}) {
 
   // WebSocket for real-time audit events
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_API_PORT || '8080';
-    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/audit`;
+    const wsUrl = `${apiClient.wsBaseURL}/audit`;
 
     const connectWebSocket = () => {
       try {

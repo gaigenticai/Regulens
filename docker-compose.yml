@@ -50,42 +50,42 @@ services:
     networks:
       - regulens-network
 
-  # Regulatory Monitor Service (main.cpp)
-  regulatory-monitor:
-    build:
-      context: .
-      dockerfile: Dockerfile.regulatory
-    container_name: regulens-regulatory-monitor
-    ports:
-      - "8081:8081"
-    environment:
-      # SECURITY: No default passwords - must be provided via environment variables
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=${DB_NAME:?DB_NAME environment variable is required}
-      - DB_USER=${DB_USER:?DB_USER environment variable is required}
-      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD environment variable is required}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD environment variable is required}
-      - WEB_UI_PORT=8081
-      - WEB_UI_HOST=0.0.0.0
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-    networks:
-      - regulens-network
-    volumes:
-      - ./logs:/app/logs
+  # Regulatory Monitor Service (main.cpp) - Temporarily disabled due to build issues
+  # regulatory-monitor:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.regulatory
+  #   container_name: regulens-regulatory-monitor
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     # SECURITY: No default passwords - must be provided via environment variables
+  #     - DB_HOST=postgres
+  #     - DB_PORT=5432
+  #     - DB_NAME=${DB_NAME:?DB_NAME environment variable is required}
+  #     - DB_USER=${DB_USER:?DB_USER environment variable is required}
+  #     - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD environment variable is required}
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD environment variable is required}
+  #     - WEB_UI_PORT=8081
+  #     - WEB_UI_HOST=0.0.0.0
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 40s
+  #   restart: unless-stopped
+  #   networks:
+  #     - regulens-network
+  #   volumes:
+  #     - ./logs:/app/logs
 
   # API Server (server_with_auth.cpp)
   api-server:
@@ -115,8 +115,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      regulatory-monitor:
-        condition: service_healthy
+      # regulatory-monitor:
+      #   condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

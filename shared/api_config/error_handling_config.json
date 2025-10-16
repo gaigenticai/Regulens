@@ -1,0 +1,278 @@
+{
+  "error_handling": {
+    "standard_format": {
+      "structure": {
+        "error": {
+          "code": "MACHINE_READABLE_ERROR_CODE",
+          "message": "Human readable error message",
+          "details": "Optional detailed error information",
+          "field": "Optional field that caused the error",
+          "timestamp": "ISO 8601 timestamp",
+          "request_id": "Unique request identifier",
+          "path": "API endpoint path",
+          "method": "HTTP method used"
+        },
+        "meta": {
+          "version": "API version",
+          "compatibility_mode": "Whether compatibility mode is active",
+          "deprecation_warning": "Optional deprecation notice"
+        }
+      },
+      "http_status_mapping": {
+        "VALIDATION_ERROR": 400,
+        "AUTHENTICATION_ERROR": 401,
+        "AUTHORIZATION_ERROR": 403,
+        "NOT_FOUND": 404,
+        "CONFLICT": 409,
+        "RATE_LIMIT_EXCEEDED": 429,
+        "INTERNAL_ERROR": 500,
+        "SERVICE_UNAVAILABLE": 503,
+        "MAINTENANCE_MODE": 503
+      }
+    },
+    "error_codes": {
+      "VALIDATION_ERROR": {
+        "category": "client_error",
+        "description": "Request validation failed",
+        "examples": ["Invalid email format", "Missing required field", "Invalid parameter value"],
+        "user_action": "Check request parameters and try again",
+        "retryable": false
+      },
+      "AUTHENTICATION_ERROR": {
+        "category": "authentication_error",
+        "description": "Authentication credentials are invalid or missing",
+        "examples": ["Invalid API key", "Expired token", "Missing authorization header"],
+        "user_action": "Check credentials and re-authenticate",
+        "retryable": false
+      },
+      "AUTHORIZATION_ERROR": {
+        "category": "authorization_error",
+        "description": "User does not have permission for this operation",
+        "examples": ["Insufficient privileges", "Role not authorized", "Resource access denied"],
+        "user_action": "Contact administrator or check permissions",
+        "retryable": false
+      },
+      "NOT_FOUND": {
+        "category": "client_error",
+        "description": "Requested resource does not exist",
+        "examples": ["User not found", "Transaction not found", "Endpoint not found"],
+        "user_action": "Verify resource identifier and try again",
+        "retryable": false
+      },
+      "CONFLICT": {
+        "category": "client_error",
+        "description": "Request conflicts with current state",
+        "examples": ["Resource already exists", "Version conflict", "Concurrent modification"],
+        "user_action": "Refresh data and retry with updated information",
+        "retryable": false
+      },
+      "RATE_LIMIT_EXCEEDED": {
+        "category": "rate_limit_error",
+        "description": "Too many requests in given time period",
+        "examples": ["API rate limit exceeded", "User quota exceeded"],
+        "user_action": "Wait and retry after rate limit resets",
+        "retryable": true,
+        "retry_after_seconds": 60
+      },
+      "INTERNAL_ERROR": {
+        "category": "server_error",
+        "description": "Unexpected internal server error",
+        "examples": ["Database connection failed", "Service unavailable", "Configuration error"],
+        "user_action": "Try again later or contact support",
+        "retryable": true,
+        "retry_after_seconds": 30
+      },
+      "SERVICE_UNAVAILABLE": {
+        "category": "server_error",
+        "description": "Service is temporarily unavailable",
+        "examples": ["Maintenance mode", "Service overload", "Dependency failure"],
+        "user_action": "Try again later",
+        "retryable": true,
+        "retry_after_seconds": 300
+      },
+      "MAINTENANCE_MODE": {
+        "category": "server_error",
+        "description": "Service is under maintenance",
+        "examples": ["Scheduled maintenance", "Emergency maintenance"],
+        "user_action": "Check status page for updates",
+        "retryable": true,
+        "retry_after_seconds": 3600
+      },
+      "NETWORK_ERROR": {
+        "category": "network_error",
+        "description": "Network connectivity issue",
+        "examples": ["Connection timeout", "DNS resolution failed", "SSL handshake failed"],
+        "user_action": "Check network connection and try again",
+        "retryable": true,
+        "retry_after_seconds": 5
+      },
+      "DATABASE_ERROR": {
+        "category": "server_error",
+        "description": "Database operation failed",
+        "examples": ["Connection failed", "Query timeout", "Constraint violation"],
+        "user_action": "Try again or contact support if persistent",
+        "retryable": true,
+        "retry_after_seconds": 10
+      },
+      "EXTERNAL_SERVICE_ERROR": {
+        "category": "server_error",
+        "description": "External service dependency failed",
+        "examples": ["LLM service unavailable", "Payment processor down", "External API timeout"],
+        "user_action": "Try again later",
+        "retryable": true,
+        "retry_after_seconds": 60
+      }
+    },
+    "error_localization": {
+      "supported_languages": ["en", "es", "fr", "de", "zh", "ja"],
+      "fallback_language": "en",
+      "message_templates": {
+        "VALIDATION_ERROR": {
+          "en": "Validation failed: {details}",
+          "es": "Validación fallida: {details}",
+          "fr": "Échec de validation: {details}",
+          "de": "Validierung fehlgeschlagen: {details}",
+          "zh": "验证失败：{details}",
+          "ja": "検証に失敗しました：{details}"
+        },
+        "AUTHENTICATION_ERROR": {
+          "en": "Authentication failed",
+          "es": "Error de autenticación",
+          "fr": "Échec d'authentification",
+          "de": "Authentifizierung fehlgeschlagen",
+          "zh": "身份验证失败",
+          "ja": "認証に失敗しました"
+        }
+      }
+    },
+    "error_logging": {
+      "log_levels": {
+        "VALIDATION_ERROR": "warn",
+        "AUTHENTICATION_ERROR": "warn",
+        "AUTHORIZATION_ERROR": "warn",
+        "NOT_FOUND": "info",
+        "RATE_LIMIT_EXCEEDED": "warn",
+        "INTERNAL_ERROR": "error",
+        "SERVICE_UNAVAILABLE": "error",
+        "DATABASE_ERROR": "error",
+        "NETWORK_ERROR": "warn"
+      },
+      "sensitive_data_masking": {
+        "enabled": true,
+        "mask_patterns": [
+          "password",
+          "token",
+          "secret",
+          "key",
+          "authorization"
+        ],
+        "mask_character": "*",
+        "mask_length": 8
+      },
+      "error_tracking": {
+        "enabled": true,
+        "sample_rate": 1.0,
+        "include_stack_traces": true,
+        "include_request_context": true,
+        "exclude_patterns": [
+          "*.css",
+          "*.js",
+          "*.png",
+          "*.jpg",
+          "*.ico"
+        ]
+      }
+    },
+    "error_recovery": {
+      "automatic_retry": {
+        "enabled": true,
+        "max_retries": 3,
+        "retryable_errors": ["NETWORK_ERROR", "INTERNAL_ERROR", "SERVICE_UNAVAILABLE"],
+        "backoff_strategy": "exponential",
+        "base_delay_ms": 1000,
+        "max_delay_ms": 30000
+      },
+      "circuit_breaker": {
+        "enabled": true,
+        "failure_threshold": 5,
+        "recovery_timeout_ms": 60000,
+        "monitoring_window_ms": 300000
+      },
+      "fallback_responses": {
+        "enabled": true,
+        "cache_fallback": true,
+        "cache_ttl_seconds": 300,
+        "static_responses": {
+          "MAINTENANCE_MODE": {
+            "message": "Service is currently under maintenance",
+            "estimated_downtime": "2 hours",
+            "contact_support": "support@company.com"
+          }
+        }
+      }
+    },
+    "client_error_handling": {
+      "response_transformation": {
+        "enabled": true,
+        "transform_to_legacy_format": false,
+        "include_debug_info": false
+      },
+      "error_boundary": {
+        "enabled": true,
+        "fallback_ui": true,
+        "error_reporting": true
+      },
+      "user_notifications": {
+        "toast_notifications": true,
+        "error_pages": true,
+        "recovery_suggestions": true
+      }
+    },
+    "monitoring_and_alerts": {
+      "error_rate_monitoring": {
+        "enabled": true,
+        "alert_thresholds": {
+          "error_rate_5xx": 5.0,
+          "error_rate_4xx": 10.0,
+          "error_rate_total": 15.0
+        },
+        "alert_channels": ["email", "slack", "pagerduty"],
+        "cooldown_period_minutes": 5
+      },
+      "error_pattern_detection": {
+        "enabled": true,
+        "patterns_to_monitor": [
+          "database_connection",
+          "external_api_timeout",
+          "authentication_failure_burst",
+          "rate_limit_spike"
+        ],
+        "analysis_window_minutes": 15
+      },
+      "performance_impact": {
+        "enabled": true,
+        "slow_error_threshold_ms": 5000,
+        "high_frequency_threshold_per_minute": 100
+      }
+    },
+    "compliance_and_security": {
+      "error_data_retention": {
+        "error_logs_days": 90,
+        "audit_logs_days": 365,
+        "anonymize_after_days": 30
+      },
+      "security_headers": {
+        "x_content_type_options": "nosniff",
+        "x_frame_options": "DENY",
+        "x_xss_protection": "1; mode=block",
+        "strict_transport_security": "max-age=31536000; includeSubDomains"
+      },
+      "information_disclosure": {
+        "hide_internal_errors": true,
+        "mask_sensitive_data": true,
+        "include_error_ids": true,
+        "expose_stack_traces": false
+      }
+    }
+  }
+}

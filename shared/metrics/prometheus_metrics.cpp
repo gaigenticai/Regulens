@@ -222,7 +222,8 @@ void LLMMetricsCollector::record_api_call(const std::string& provider, const std
         }
 
         openai_total_tokens_ += (input_tokens + output_tokens);
-        openai_total_cost_ += cost_usd;
+        double current_openai_cost = openai_total_cost_.load();
+        openai_total_cost_.store(current_openai_cost + cost_usd);
 
     } else if (provider == "anthropic") {
         anthropic_calls_++;
@@ -234,7 +235,8 @@ void LLMMetricsCollector::record_api_call(const std::string& provider, const std
         }
 
         anthropic_total_tokens_ += (input_tokens + output_tokens);
-        anthropic_total_cost_ += cost_usd;
+        double current_anthropic_cost = anthropic_total_cost_.load();
+        anthropic_total_cost_.store(current_anthropic_cost + cost_usd);
     }
 
     if (logger_ && !success) {

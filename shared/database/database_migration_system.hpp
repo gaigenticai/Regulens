@@ -14,7 +14,7 @@
 #include <functional>
 #include <memory>
 #include <chrono>
-#include <postgresql/libpq-fe.h>
+#include <libpq-fe.h>
 
 namespace regulens {
 

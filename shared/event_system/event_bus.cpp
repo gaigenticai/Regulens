@@ -417,7 +417,7 @@ void EventBus::cleanup_expired_events() {
                 std::to_string(now_timestamp)
             });
             
-            size_t cleaned_count = result.size();
+            size_t cleaned_count = result.rows.size();
             
             if (cleaned_count > 0) {
                 logger_->log(LogLevel::INFO, "Cleaned up " + std::to_string(cleaned_count) + 
@@ -434,7 +434,7 @@ void EventBus::cleanup_expired_events() {
         std::lock_guard<std::mutex> lock(event_cache_mutex_);
         size_t memory_cleaned = 0;
         for (auto it = event_cache_.begin(); it != event_cache_.end();) {
-            if (it->second->get_timestamp() < cutoff_time) {
+            if (it->second->get_created_at() < cutoff_time) {
                 it = event_cache_.erase(it);
                 memory_cleaned++;
             } else {

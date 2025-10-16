@@ -45,7 +45,7 @@ export function useTransactions(options: UseTransactionsOptions = {}) {
       if (minAmount !== undefined) params.append('min_amount', minAmount.toString());
       if (maxAmount !== undefined) params.append('max_amount', maxAmount.toString());
 
-      const data = await apiClient.getTransactions(params);
+      const data = await apiClient.getTransactions(Object.fromEntries(params));
       return data;
     },
     refetchInterval: 15000, // Polling fallback every 15 seconds
@@ -53,10 +53,7 @@ export function useTransactions(options: UseTransactionsOptions = {}) {
 
   // WebSocket for real-time transaction updates
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_API_PORT || '8080';
-    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/transactions`;
+    const wsUrl = `${apiClient.wsBaseURL}/transactions`;
 
     const connectWebSocket = () => {
       try {
@@ -218,8 +215,8 @@ export function useApproveTransaction() {
       const data = await apiClient.approveTransaction(transactionId);
       return data;
     },
-    onSuccess: (updatedTx) => {
-      queryClient.setQueryData(['transaction', updatedTx.id], updatedTx);
+    onSuccess: (updatedTx, transactionId) => {
+      queryClient.setQueryData(['transaction', transactionId], updatedTx);
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['transaction-stats'] });
     },
@@ -237,8 +234,8 @@ export function useRejectTransaction() {
       const data = await apiClient.rejectTransaction(transactionId, reason);
       return data;
     },
-    onSuccess: (updatedTx) => {
-      queryClient.setQueryData(['transaction', updatedTx.id], updatedTx);
+    onSuccess: (updatedTx, { transactionId }) => {
+      queryClient.setQueryData(['transaction', transactionId], updatedTx);
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['transaction-stats'] });
     },
@@ -252,7 +249,7 @@ export function useTransactionPatterns(timeRange: '24h' | '7d' | '30d' = '7d') {
   return useQuery({
     queryKey: ['transaction-patterns', timeRange],
     queryFn: async () => {
-      const data = await apiClient.getTransactionPatterns(timeRange);
+      const data = await apiClient.getTransactionPatterns();
       return data;
     },
     refetchInterval: 60000, // Refresh every minute
@@ -274,11 +271,11 @@ export function useAnomalyDetection() {
 /**
  * Get real-time transaction metrics
  */
-export function useTransactionMetrics() {
+export function useTransactionMetrics(timeRange: string = '24h') {
   return useQuery({
-    queryKey: ['transaction-metrics'],
+    queryKey: ['transaction-metrics', timeRange],
     queryFn: async () => {
-      const data = await apiClient.getTransactionMetrics();
+      const data = await apiClient.getTransactionMetrics(timeRange);
       return data;
     },
     refetchInterval: 5000, // Refresh every 5 seconds for real-time metrics

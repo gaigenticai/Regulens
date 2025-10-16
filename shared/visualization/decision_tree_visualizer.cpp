@@ -161,9 +161,14 @@ std::vector<DecisionTreeEdge> DecisionTreeVisualizer::create_tree_edges(const st
     // Connect root to all factor nodes
     for (const auto& node : nodes) {
         if (node.node_type == DecisionNodeType::FACTOR) {
-            DecisionTreeEdge edge(generate_edge_id(root_node->node_id, node.node_id),
-                                root_node->node_id, node.node_id,
-                                "Factor", "factor", node.weight);
+            DecisionTreeEdge edge{
+                .edge_id = generate_edge_id(root_node->node_id, node.node_id),
+                .source_node_id = root_node->node_id,
+                .target_node_id = node.node_id,
+                .label = "Factor",
+                .edge_type = "factor",
+                .weight = node.weight
+            };
             edges.push_back(edge);
         }
     }
@@ -175,9 +180,14 @@ std::vector<DecisionTreeEdge> DecisionTreeVisualizer::create_tree_edges(const st
         for (const auto& evidence_node : nodes) {
             if (evidence_node.node_type == DecisionNodeType::EVIDENCE &&
                 evidence_node.metadata.at("factor") == factor_node.label) {
-                DecisionTreeEdge edge(generate_edge_id(factor_node.node_id, evidence_node.node_id),
-                                    factor_node.node_id, evidence_node.node_id,
-                                    "Evidence", "evidence", 1.0);
+                DecisionTreeEdge edge{
+                    .edge_id = generate_edge_id(factor_node.node_id, evidence_node.node_id),
+                    .source_node_id = factor_node.node_id,
+                    .target_node_id = evidence_node.node_id,
+                    .label = "Evidence",
+                    .edge_type = "evidence",
+                    .weight = 1.0
+                };
                 edges.push_back(edge);
             }
         }
@@ -188,9 +198,14 @@ std::vector<DecisionTreeEdge> DecisionTreeVisualizer::create_tree_edges(const st
         if (node.node_type == DecisionNodeType::OUTCOME) {
             for (const auto& factor_node : nodes) {
                 if (factor_node.node_type == DecisionNodeType::FACTOR) {
-                    DecisionTreeEdge edge(generate_edge_id(factor_node.node_id, node.node_id),
-                                        factor_node.node_id, node.node_id,
-                                        "Contributes", "factor_contribution", factor_node.weight);
+                    DecisionTreeEdge edge{
+                        .edge_id = generate_edge_id(factor_node.node_id, node.node_id),
+                        .source_node_id = factor_node.node_id,
+                        .target_node_id = node.node_id,
+                        .label = "Contributes",
+                        .edge_type = "factor_contribution",
+                        .weight = factor_node.weight
+                    };
                     edges.push_back(edge);
                 }
             }
@@ -204,9 +219,14 @@ std::vector<DecisionTreeEdge> DecisionTreeVisualizer::create_tree_edges(const st
 
         for (const auto& action_node : nodes) {
             if (action_node.node_type == DecisionNodeType::ACTION) {
-                DecisionTreeEdge edge(generate_edge_id(outcome_node.node_id, action_node.node_id),
-                                    outcome_node.node_id, action_node.node_id,
-                                    "Requires", "action_required", 1.0);
+                DecisionTreeEdge edge{
+                    .edge_id = generate_edge_id(outcome_node.node_id, action_node.node_id),
+                    .source_node_id = outcome_node.node_id,
+                    .target_node_id = action_node.node_id,
+                    .label = "Requires",
+                    .edge_type = "action_required",
+                    .weight = 1.0
+                };
                 edges.push_back(edge);
             }
         }

@@ -25,7 +25,7 @@
 #include <unordered_map>
 #include <functional>
 #include <nlohmann/json.hpp>
-#include "../database/connection_pool.hpp"
+#include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
 
 namespace regulens {

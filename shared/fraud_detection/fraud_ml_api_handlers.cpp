@@ -378,6 +378,7 @@ std::string run_batch_fraud_scan(PGconn* db_conn, const std::string& request_bod
             "RETURNING job_id";
 
         std::string filters_json = job_filters.dump();
+        int priority = 5; // Default priority for fraud scan jobs
         std::string priority_str = std::to_string(priority);
 
         const char* queue_params[3] = {

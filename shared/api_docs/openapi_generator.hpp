@@ -12,6 +12,9 @@
 #include <map>
 #include <nlohmann/json.hpp>
 
+// Forward declaration for APIEndpoint from api_registry
+#include "../api_registry/api_registry.hpp"
+
 namespace regulens {
 
 // HTTP method enum
@@ -65,19 +68,8 @@ struct APIResponse {
     std::string example;
 };
 
-// API endpoint
-struct APIEndpoint {
-    std::string path;
-    HTTPMethod method;
-    std::string operation_id;
-    std::string summary;
-    std::string description;
-    std::vector<std::string> tags;
-    std::vector<APIParameter> parameters;
-    std::map<int, APIResponse> responses;
-    bool requires_authentication;
-    std::vector<std::string> security_schemes;
-};
+// API endpoint - Forward declaration, defined in api_registry.hpp
+struct APIEndpoint;
 
 // Schema definition
 struct SchemaDefinition {
@@ -227,6 +219,7 @@ private:
     std::vector<APIEndpoint> endpoints_;
     std::map<std::string, SchemaDefinition> schemas_;
     std::map<std::string, nlohmann::json> security_schemes_;
+    nlohmann::json spec_;  // OpenAPI specification JSON
 
     /**
      * Convert HTTPMethod to string

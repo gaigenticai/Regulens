@@ -9,6 +9,7 @@ import type * as API from '@/types/api';
 
 class APIClient {
   private client: AxiosInstance;
+  private currentVersion: string = 'v1';
 
   constructor(baseURL: string = '/api') {
     this.client = axios.create({
@@ -22,14 +23,72 @@ class APIClient {
     this.setupInterceptors();
   }
 
+  // Version management methods
+  setVersion(version: string): void {
+    this.currentVersion = version;
+  }
+
+  getVersion(): string {
+    return this.currentVersion;
+  }
+
+  // Build versioned endpoint
+  private buildVersionedEndpoint(endpoint: string, version?: string): string {
+    const apiVersion = version || this.currentVersion;
+
+    // If endpoint already starts with /api/v{version}, return as-is
+    if (endpoint.startsWith(`/api/${apiVersion}/`)) {
+      return endpoint;
+    }
+
+    // If endpoint starts with /api/, insert version after /api/
+    if (endpoint.startsWith('/api/')) {
+      return `/api/${apiVersion}${endpoint.substring(4)}`;
+    }
+
+    // For relative endpoints, prepend version
+    return `/${apiVersion}${endpoint}`;
+  }
+
+  // Make request with specific version override
+  private async makeVersionedRequest<T>(
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
+    endpoint: string,
+    config?: any,
+    version?: string
+  ): Promise<T> {
+    const versionedEndpoint = this.buildVersionedEndpoint(endpoint, version);
+    const fullConfig = { ...config };
+
+    // Temporarily override the version for this request
+    if (version && version !== this.currentVersion) {
+      fullConfig.url = versionedEndpoint;
+    }
+
+    switch (method) {
+      case 'get': return (await this.client.get<T>(versionedEndpoint, fullConfig)).data;
+      case 'post': return (await this.client.post<T>(versionedEndpoint, fullConfig?.data, fullConfig)).data;
+      case 'put': return (await this.client.put<T>(versionedEndpoint, fullConfig?.data, fullConfig)).data;
+      case 'patch': return (await this.client.patch<T>(versionedEndpoint, fullConfig?.data, fullConfig)).data;
+      case 'delete': return (await this.client.delete<T>(versionedEndpoint, fullConfig)).data;
+      default: throw new Error(`Unsupported HTTP method: ${method}`);
+    }
+  }
+
   private setupInterceptors(): void {
-    // Request interceptor to add token
+    // Request interceptor to add token and handle versioning
     this.client.interceptors.request.use(
       (config) => {
         const token = localStorage.getItem('token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
+
+        // Handle API versioning
+        if (config.url) {
+          config.url = this.buildVersionedEndpoint(config.url, this.currentVersion);
+        }
+
         return config;
       },
       (error) => Promise.reject(error)
@@ -56,7 +115,7 @@ class APIClient {
       async (error: AxiosError) => {
         const originalRequest = error.config;
 
-        if (error.response?.status === 401 && !originalRequest?._retry) {
+        if (error.response?.status === 401 && !(originalRequest as any)._retry) {
           if (isRefreshing) {
             return new Promise((resolve, reject) => {
               failedQueue.push({ resolve, reject });
@@ -68,7 +127,7 @@ class APIClient {
               .catch((err) => Promise.reject(err));
           }
 
-          originalRequest!._retry = true;
+          (originalRequest as any)._retry = true;
           isRefreshing = true;
 
           try {
@@ -346,7 +405,7 @@ class APIClient {
     for (const endpoint of endpoints) {
       try {
         const response = await this.client.get<API.AgentTask[]>(endpoint);
-        return Array.isArray(response.data) ? response.data : response.data.tasks || [];
+        return Array.isArray(response.data) ? response.data : (response.data as any)?.tasks || [];
       } catch (error: any) {
         if (error?.response?.status !== 404) {
           console.warn(`Agent tasks endpoint ${endpoint} failed:`, error?.message);
@@ -493,7 +552,8 @@ class APIClient {
         riskLevel: riskLevel,
         flags: tx.flags || [],
         fraudIndicators: tx.fraudIndicators || (tx.flagged ? ['High Risk Score'] : undefined),
-        description: tx.description || 'Transaction'
+        description: tx.description || 'Transaction',
+        metadata: tx.metadata || {}
       };
     });
   }
@@ -527,7 +587,8 @@ class APIClient {
         riskLevel: riskLevel,
         flags: tx.flags || [],
         fraudIndicators: tx.fraudIndicators || (tx.flagged ? ['High Risk Score'] : undefined),
-        description: tx.description || 'Transaction'
+        description: tx.description || 'Transaction',
+        metadata: tx.metadata || {}
       };
     } catch (error: any) {
       // Fallback: If single transaction endpoint fails, search in transactions list
@@ -1100,6 +1161,10 @@ class APIClient {
     return `${base}/ws`;
   }
 
+  getToken(): string | null {
+    return localStorage.getItem('token');
+  }
+
   async getLLMModels(): Promise<API.LLMModel[]> {
     const response = await this.client.get<API.LLMModel[]>('/llm/models');
     return response.data;
@@ -1350,17 +1415,135 @@ class APIClient {
     const response = await this.client.get<API.LLMKeyUsageStats[]>('/v1/llm-keys/usage');
     return response.data;
   }
+
+  // ============================================================================
+  // MEMORY MANAGEMENT (Backend Endpoints)
+  // ============================================================================
+
+  async getMemoryGraph(params?: Record<string, string>): Promise<any> {
+    const response = await this.client.get('/memory/graph', { params });
+    return response.data;
+  }
+
+  async generateMemoryVisualization(data: {
+    agent_id?: string;
+    visualization_type?: string;
+  }): Promise<any> {
+    const response = await this.client.post('/memory/visualize', data);
+    return response.data;
+  }
+
+  async getMemoryNodeDetails(nodeId: string): Promise<any> {
+    const response = await this.client.get(`/memory/nodes/${nodeId}`);
+    return response.data;
+  }
+
+  async searchMemory(data: {
+    query?: string;
+    filters?: Record<string, any>;
+  }): Promise<any> {
+    const response = await this.client.post('/memory/search', data);
+    return response.data;
+  }
+
+  async getMemoryRelationships(nodeId: string, params?: Record<string, string>): Promise<any> {
+    const response = await this.client.get(`/memory/nodes/${nodeId}/relationships`, { params });
+    return response.data;
+  }
+
+  async getMemoryStats(params?: Record<string, string>): Promise<any> {
+    const response = await this.client.get('/memory/stats', { params });
+    return response.data;
+  }
+
+  async getMemoryClusters(params?: Record<string, string>): Promise<any> {
+    const response = await this.client.get('/memory/clusters', { params });
+    return response.data;
+  }
+
+  async createMemoryNode(data: {
+    node_type: string;
+    content: string;
+    metadata?: Record<string, any>;
+  }): Promise<any> {
+    const response = await this.client.post('/memory/nodes', data);
+    return response.data;
+  }
+
+  async updateMemoryNode(nodeId: string, data: {
+    node_type?: string;
+    content?: string;
+    metadata?: Record<string, any>;
+  }): Promise<any> {
+    const response = await this.client.put(`/memory/nodes/${nodeId}`, data);
+    return response.data;
+  }
+
+  async deleteMemoryNode(nodeId: string): Promise<void> {
+    await this.client.delete(`/memory/nodes/${nodeId}`);
+  }
+
+  async createMemoryRelationship(data: {
+    source_node_id: string;
+    target_node_id: string;
+    relationship_type: string;
+    weight?: number;
+    metadata?: Record<string, any>;
+  }): Promise<any> {
+    const response = await this.client.post('/memory/relationships', data);
+    return response.data;
+  }
+
+  async updateMemoryRelationship(relationshipId: string, data: {
+    relationship_type?: string;
+    weight?: number;
+    metadata?: Record<string, any>;
+  }): Promise<any> {
+    const response = await this.client.put(`/memory/relationships/${relationshipId}`, data);
+    return response.data;
+  }
+
+  async deleteMemoryRelationship(relationshipId: string): Promise<void> {
+    await this.client.delete(`/memory/relationships/${relationshipId}`);
+  }
 }
 
-// Export singleton instance
+// Export singleton instance with API versioning support
 // Development vs Production strategy:
 // - Development: Direct connection to backend (works for Chrome, Firefox, Edge)
-// Export singleton instance
-// Development vs Production strategy:
-// - Development: Direct connection to backend (works for Chrome, Firefox, Edge)
-// - Production: Environment variable or relative URL
+// - Production: Environment variable or relative URL with version handling
 const isDevelopment = import.meta.env.MODE === 'development';
 const baseURL = import.meta.env.VITE_API_BASE_URL ||
-  (isDevelopment ? 'http://localhost:8080/api' : '/api');
-export const apiClient = new RegulesAPIClient(baseURL);
+  (isDevelopment ? 'http://localhost:8080' : '');
+
+// Create API client instance
+export const apiClient = new APIClient(baseURL);
 export default apiClient;
+
+// Version management utilities
+export const apiVersion = {
+  // Get current API version
+  get current(): string {
+    return apiClient.getVersion();
+  },
+
+  // Set API version for all future requests
+  set(version: string): void {
+    apiClient.setVersion(version);
+  },
+
+  // Available API versions
+  versions: ['v1'] as const,
+
+  // Check if version is supported
+  isSupported(version: string): boolean {
+    return apiVersion.versions.includes(version as any);
+  },
+
+  // Get version-specific client (creates new instance)
+  forVersion(version: string): APIClient {
+    const client = new APIClient(baseURL);
+    client.setVersion(version);
+    return client;
+  }
+};

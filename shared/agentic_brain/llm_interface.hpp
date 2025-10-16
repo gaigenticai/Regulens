@@ -18,6 +18,7 @@
 namespace regulens {
 
 enum class LLMProvider {
+    NONE,
     OPENAI,
     ANTHROPIC,
     LOCAL_LLM
@@ -53,6 +54,7 @@ struct LLMMessage {
 
 struct LLMRequest {
     std::string model;
+    LLMModel model_preference = LLMModel::GPT_4;
     std::vector<LLMMessage> messages;
     double temperature = 0.7;
     int max_tokens = 2000;
@@ -125,6 +127,7 @@ public:
     // Core LLM operations
     LLMResponse generate_completion(const LLMRequest& request);
     LLMResponse analyze_text(const std::string& text, const std::string& task);
+    LLMResponse analyze_with_context(const std::string& prompt, const nlohmann::json& context);
     LLMResponse make_decision(const nlohmann::json& context, const std::string& decision_type);
 
     // Specialized agentic operations
@@ -167,6 +170,14 @@ private:
 
     // Configuration validation
     bool validate_config(const nlohmann::json& config);
+    void initialize_default_configs();
+    bool validate_provider_config(LLMProvider provider, const nlohmann::json& config);
+    bool test_provider_connection(LLMProvider provider);
+    std::vector<LLMModel> get_available_models_for_provider(LLMProvider provider);
+    std::string model_to_string(LLMModel model);
+    bool test_openai_connection();
+    bool test_anthropic_connection();
+    bool test_local_connection();
 
     // Internal state
     std::shared_ptr<HttpClient> http_client_;
@@ -190,6 +201,15 @@ private:
     int consecutive_failures_;
     bool circuit_breaker_open_;
     std::chrono::steady_clock::time_point last_failure_time_;
+
+private:
+    // Helper methods
+    bool check_rate_limit(LLMProvider provider);
+    void update_usage_stats(const LLMResponse& response);
+    double calculate_cost(const LLMResponse& response);
+    LLMResponse generate_openai_completion(const LLMRequest& request);
+    LLMResponse generate_anthropic_completion(const LLMRequest& request);
+    LLMResponse generate_local_completion(const LLMRequest& request);
 };
 
 } // namespace regulens

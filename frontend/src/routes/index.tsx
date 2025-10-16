@@ -29,6 +29,7 @@ const Transactions = lazy(() => import('@/pages/Transactions'));
 const TransactionDetail = lazy(() => import('@/pages/TransactionDetail'));
 const CustomerProfile = lazy(() => import('@/pages/CustomerProfile'));
 const FraudRules = lazy(() => import('@/pages/FraudRules'));
+const AdvancedRuleEngine = lazy(() => import('@/pages/AdvancedRuleEngine'));
 
 // Data & Analytics
 const KnowledgeBase = lazy(() => import('@/pages/KnowledgeBase'));
@@ -48,6 +49,15 @@ const AlertManagement = lazy(() => import('@/pages/AlertManagement'));
 // Feature 3: Export/Reporting Module
 const ExportsReports = lazy(() => import('@/pages/ExportsReports'));
 
+// Simulator Management
+const SimulatorManagement = lazy(() => import('@/pages/SimulatorManagement'));
+
+// Additional Simulator Components
+const ScenarioCreation = lazy(() => import('@/pages/ScenarioCreation'));
+const SimulationExecution = lazy(() => import('@/pages/SimulationExecution'));
+const SimulationResults = lazy(() => import('@/pages/SimulationResults'));
+const ImpactAnalysis = lazy(() => import('@/pages/ImpactAnalysis'));
+
 // Feature 4: API Key Management UI
 const LLMKeyManagement = lazy(() => import('@/pages/LLMKeyManagement'));
 
@@ -63,6 +73,9 @@ const AnalyticsDashboard = lazy(() => import('@/pages/AnalyticsDashboard'));
 // Feature 10: Natural Language Policy Builder
 const NLPolicyBuilder = lazy(() => import('@/pages/NLPolicyBuilder'));
 
+// Policy Generation System
+const PolicyGeneration = lazy(() => import('@/pages/PolicyGeneration'));
+
 // Feature 12: Regulatory Chatbot
 const RegulatoryChatbot = lazy(() => import('@/pages/RegulatoryChatbot'));
 
@@ -74,6 +87,9 @@ const ToolCategoriesTesting = lazy(() => import('@/pages/ToolCategoriesTesting')
 
 // Feature 15: Compliance Training Module
 const ComplianceTraining = lazy(() => import('@/pages/ComplianceTraining'));
+
+// Training Management System
+const TrainingManagement = lazy(() => import('@/pages/TrainingManagement'));
 
 // System & Monitoring - Production-grade implementations
 const SystemMetrics = lazy(() => import('@/pages/SystemMetrics'));
@@ -189,6 +205,14 @@ export const routes: AppRoute[] = [
     showInNav: false,
   },
   {
+    path: '/advanced-rule-engine',
+    name: 'Advanced Rule Engine',
+    element: AdvancedRuleEngine,
+    showInNav: true,
+    icon: 'Shield',
+    requiredPermissions: ['rules.manage'],
+  },
+  {
     path: '/knowledge',
     name: 'Knowledge Base',
     element: KnowledgeBase,
@@ -265,6 +289,43 @@ export const routes: AppRoute[] = [
     icon: 'Play',
   },
   {
+    path: '/simulator-management',
+    name: 'Simulator Management',
+    element: SimulatorManagement,
+    showInNav: true,
+    icon: 'Settings',
+    requiredPermissions: ['simulator.admin'],
+  },
+  {
+    path: '/impact-analysis',
+    name: 'Impact Analysis',
+    element: ImpactAnalysis,
+    showInNav: true,
+    icon: 'Calculator',
+    requiredPermissions: ['simulator.view'],
+  },
+  {
+    path: '/scenario-creation',
+    name: 'Create Scenario',
+    element: ScenarioCreation,
+    showInNav: false,
+    icon: 'Plus',
+  },
+  {
+    path: '/simulation-execution',
+    name: 'Simulation Execution',
+    element: SimulationExecution,
+    showInNav: false,
+    icon: 'Play',
+  },
+  {
+    path: '/simulation-results',
+    name: 'Simulation Results',
+    element: SimulationResults,
+    showInNav: false,
+    icon: 'BarChart3',
+  },
+  {
     path: '/analytics',
     name: 'Analytics Dashboard',
     element: AnalyticsDashboard,
@@ -277,6 +338,14 @@ export const routes: AppRoute[] = [
     element: NLPolicyBuilder,
     showInNav: true,
     icon: 'Sparkles',
+  },
+  {
+    path: '/policy-generation',
+    name: 'Policy Generation',
+    element: PolicyGeneration,
+    showInNav: true,
+    icon: 'FileText',
+    requiredPermissions: ['policies.generate'],
   },
   {
     path: '/chatbot',
@@ -305,6 +374,14 @@ export const routes: AppRoute[] = [
     element: ComplianceTraining,
     showInNav: true,
     icon: 'GraduationCap',
+  },
+  {
+    path: '/training-management',
+    name: 'Training Management',
+    element: TrainingManagement,
+    showInNav: true,
+    icon: 'GraduationCap',
+    requiredPermissions: ['training.view'],
   },
   {
     path: '/metrics',

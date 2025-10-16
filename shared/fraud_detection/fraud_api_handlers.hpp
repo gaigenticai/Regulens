@@ -14,6 +14,7 @@ namespace regulens {
 namespace fraud {
 
 // Fraud Rules Management
+std::string get_fraud_rules(PGconn* db_conn, const std::map<std::string, std::string>& query_params);
 std::string get_fraud_rule_by_id(PGconn* db_conn, const std::string& rule_id);
 std::string create_fraud_rule(PGconn* db_conn, const std::string& request_body, const std::string& user_id);
 std::string update_fraud_rule(PGconn* db_conn, const std::string& rule_id, const std::string& request_body);

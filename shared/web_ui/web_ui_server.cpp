@@ -26,6 +26,11 @@
 #endif
 #include "../config/configuration_manager.hpp"
 #include "../metrics/metrics_collector.hpp"
+#include "../api_config/api_endpoint_config.hpp"
+#include "../structured_logger.hpp"
+#include "../api_config/api_versioning_service.hpp"
+#include "../api_config/api_version_router.hpp"
+#include "../api_config/error_handling_service.hpp"
 
 namespace regulens {
 
@@ -47,8 +52,48 @@ bool WebUIServer::start() {
         running_ = true;
         server_thread_ = std::thread(&WebUIServer::server_loop, this);
 
+        // Initialize API endpoint configuration for systematic endpoint management
+        std::string config_path = "shared/api_config/api_endpoints_config.json";
+        if (!APIEndpointConfig::get_instance().initialize(config_path, logger_)) {
+            if (logger_) {
+                logger_->error("Failed to initialize API endpoint configuration");
+            }
+            running_ = false;
+            return false;
+        }
+
+        // Initialize API versioning service for version negotiation and compatibility
+        std::string versioning_config_path = "shared/api_config/api_versioning_config.json";
+        if (!APIVersioningService::get_instance().initialize(versioning_config_path, logger_)) {
+            if (logger_) {
+                logger_->error("Failed to initialize API versioning service");
+            }
+            running_ = false;
+            return false;
+        }
+
+        // Initialize API version router for version-aware request routing
+        if (!APIVersionRouter::get_instance().initialize(logger_)) {
+            if (logger_) {
+                logger_->error("Failed to initialize API version router");
+            }
+            running_ = false;
+            return false;
+        }
+
+        // Initialize error handling service for standardized error responses
+        std::string error_config_path = "shared/api_config/error_handling_config.json";
+        if (!ErrorHandlingService::get_instance().initialize(error_config_path, logger_)) {
+            if (logger_) {
+                logger_->error("Failed to initialize error handling service");
+            }
+            running_ = false;
+            return false;
+        }
+
         if (logger_) {
             logger_->info("Web UI server started on port " + std::to_string(port_));
+            logger_->info("API endpoint configuration loaded successfully");
         }
 
         return true;

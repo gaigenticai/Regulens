@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <cstring>
 
-// Forward declaration for base64 encoding
+// Base64 encoding utility for SMTP authentication
 static std::string base64_encode(const std::string& input);
 
 namespace regulens {

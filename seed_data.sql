@@ -806,6 +806,61 @@ SELECT 'Agent Performance Metrics', COUNT(*) FROM agent_performance_metrics
 ORDER BY record_count DESC;
 
 -- =============================================================================
+-- USER PERMISSIONS SEED DATA
+-- =============================================================================
+
+-- Grant admin user all permissions
+INSERT INTO user_permissions (user_id, permission, granted_by, granted_at, is_active) VALUES
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'dashboard.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'transactions.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'transactions.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'fraud.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'fraud.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'decisions.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'decisions.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'agents.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'agents.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'audit.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'knowledge.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'knowledge.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'rules.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'rules.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'policies.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'policies.generate', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'policies.deploy', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'alerts.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'alerts.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'exports.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'exports.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'risk.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'llm.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'llm.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'simulator.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'simulator.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'training.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'training.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'analytics.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'settings.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440000'::uuid, 'settings.manage', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true);
+
+-- Grant demo user basic permissions
+INSERT INTO user_permissions (user_id, permission, granted_by, granted_at, is_active) VALUES
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'dashboard.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'transactions.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'knowledge.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'alerts.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'policies.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'policies.generate', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440001'::uuid, 'analytics.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true);
+
+-- Grant test user limited permissions
+INSERT INTO user_permissions (user_id, permission, granted_by, granted_at, is_active) VALUES
+('550e8400-e29b-41d4-a716-446655440002'::uuid, 'dashboard.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440002'::uuid, 'transactions.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440002'::uuid, 'knowledge.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true),
+('550e8400-e29b-41d4-a716-446655440002'::uuid, 'policies.view', '550e8400-e29b-41d4-a716-446655440000'::uuid, CURRENT_TIMESTAMP, true);
+
+-- =============================================================================
 -- SYSTEM CONFIGURATION SEED DATA
 -- =============================================================================
 

@@ -1,0 +1,920 @@
+{
+  "version": "1.0.0",
+  "description": "Centralized API endpoints configuration for Regulens",
+  "base_url": "/api",
+  "endpoints": {
+    "auth": {
+      "login": {
+        "method": "POST",
+        "path": "/auth/login",
+        "description": "User authentication with JWT token generation",
+        "category": "authentication",
+        "requires_auth": false,
+        "permissions": []
+      },
+      "logout": {
+        "method": "POST",
+        "path": "/auth/logout",
+        "description": "User logout with token revocation",
+        "category": "authentication",
+        "requires_auth": true,
+        "permissions": ["user", "admin"]
+      },
+      "me": {
+        "method": "GET",
+        "path": "/auth/me",
+        "description": "Get current user information",
+        "category": "authentication",
+        "requires_auth": true,
+        "permissions": ["user", "admin"]
+      },
+      "refresh": {
+        "method": "POST",
+        "path": "/auth/refresh",
+        "description": "Refresh JWT access token",
+        "category": "authentication",
+        "requires_auth": false,
+        "permissions": []
+      }
+    },
+    "transactions": {
+      "list": {
+        "method": "GET",
+        "path": "/transactions",
+        "description": "Get paginated list of transactions",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.view"]
+      },
+      "get": {
+        "method": "GET",
+        "path": "/transactions/{id}",
+        "description": "Get specific transaction details",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.view"]
+      },
+      "approve": {
+        "method": "POST",
+        "path": "/transactions/{id}/approve",
+        "description": "Approve a transaction",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.approve"]
+      },
+      "reject": {
+        "method": "POST",
+        "path": "/transactions/{id}/reject",
+        "description": "Reject a transaction",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.reject"]
+      },
+      "analyze": {
+        "method": "POST",
+        "path": "/transactions/{id}/analysis",
+        "description": "Run fraud analysis on transaction",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.analyze"]
+      },
+      "stats": {
+        "method": "GET",
+        "path": "/transactions/stats",
+        "description": "Get transaction statistics",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.view"]
+      },
+      "patterns": {
+        "method": "GET",
+        "path": "/transactions/patterns",
+        "description": "Get transaction pattern analysis",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.analyze"]
+      },
+      "anomalies": {
+        "method": "POST",
+        "path": "/transactions/anomalies",
+        "description": "Detect transaction anomalies",
+        "category": "transactions",
+        "requires_auth": true,
+        "permissions": ["transactions.analyze"]
+      }
+    },
+    "fraud": {
+      "rules": {
+        "list": {
+          "method": "GET",
+          "path": "/fraud/rules",
+          "description": "Get fraud detection rules",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.view"]
+        },
+        "get": {
+          "method": "GET",
+          "path": "/fraud/rules/{id}",
+          "description": "Get specific fraud rule",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.view"]
+        },
+        "create": {
+          "method": "POST",
+          "path": "/fraud/rules",
+          "description": "Create new fraud rule",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.create"]
+        },
+        "update": {
+          "method": "PUT",
+          "path": "/fraud/rules/{id}",
+          "description": "Update fraud rule",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.edit"]
+        },
+        "delete": {
+          "method": "DELETE",
+          "path": "/fraud/rules/{id}",
+          "description": "Delete fraud rule",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.delete"]
+        },
+        "test": {
+          "method": "POST",
+          "path": "/fraud/rules/{id}/test",
+          "description": "Test fraud rule",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.test"]
+        }
+      },
+      "models": {
+        "list": {
+          "method": "GET",
+          "path": "/fraud/models",
+          "description": "Get fraud detection models",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.view"]
+        },
+        "train": {
+          "method": "POST",
+          "path": "/fraud/models/train",
+          "description": "Train fraud detection model",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.train"]
+        },
+        "performance": {
+          "method": "GET",
+          "path": "/fraud/models/{id}/performance",
+          "description": "Get model performance metrics",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.view"]
+        },
+        "train": {
+          "method": "POST",
+          "path": "/fraud/models/train",
+          "description": "Train fraud detection model",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.train"]
+        }
+      },
+      "scan": {
+        "batch": {
+          "method": "POST",
+          "path": "/fraud/scan/batch",
+          "description": "Batch fraud scan",
+          "category": "fraud_detection",
+          "requires_auth": true,
+          "permissions": ["fraud.scan"]
+        }
+      }
+    },
+    "memory": {
+      "visualize": {
+        "method": "POST",
+        "path": "/memory/visualize",
+        "description": "Create memory visualization",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.view"]
+      },
+      "graph": {
+        "method": "GET",
+        "path": "/memory/graph",
+        "description": "Get memory graph data",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.view"]
+      },
+      "nodes": {
+        "list": {
+          "method": "GET",
+          "path": "/memory/nodes",
+          "description": "Get memory nodes",
+          "category": "memory",
+          "requires_auth": true,
+          "permissions": ["memory.view"]
+        },
+        "get": {
+          "method": "GET",
+          "path": "/memory/nodes/{id}",
+          "description": "Get specific memory node",
+          "category": "memory",
+          "requires_auth": true,
+          "permissions": ["memory.view"]
+        },
+        "create": {
+          "method": "POST",
+          "path": "/memory/nodes",
+          "description": "Create memory node",
+          "category": "memory",
+          "requires_auth": true,
+          "permissions": ["memory.create"]
+        },
+        "update": {
+          "method": "PUT",
+          "path": "/memory/nodes/{id}",
+          "description": "Update memory node",
+          "category": "memory",
+          "requires_auth": true,
+          "permissions": ["memory.edit"]
+        },
+        "delete": {
+          "method": "DELETE",
+          "path": "/memory/nodes/{id}",
+          "description": "Delete memory node",
+          "category": "memory",
+          "requires_auth": true,
+          "permissions": ["memory.delete"]
+        }
+      },
+      "search": {
+        "method": "POST",
+        "path": "/memory/search",
+        "description": "Search memory",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.view"]
+      },
+      "stats": {
+        "method": "GET",
+        "path": "/memory/stats",
+        "description": "Get memory statistics",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.view"]
+      },
+      "clusters": {
+        "method": "GET",
+        "path": "/memory/clusters",
+        "description": "Get memory clusters",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.view"]
+      },
+      "relationships": {
+        "method": "GET",
+        "path": "/memory/relationships",
+        "description": "Get memory relationships",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.view"]
+      },
+      "relationships_create": {
+        "method": "POST",
+        "path": "/memory/relationships",
+        "description": "Create memory relationship",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.edit"]
+      },
+      "relationships_update": {
+        "method": "PUT",
+        "path": "/memory/relationships/{id}",
+        "description": "Update memory relationship",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.edit"]
+      },
+      "relationships_delete": {
+        "method": "DELETE",
+        "path": "/memory/relationships/{id}",
+        "description": "Delete memory relationship",
+        "category": "memory",
+        "requires_auth": true,
+        "permissions": ["memory.delete"]
+      }
+    },
+    "knowledge": {
+      "search": {
+        "method": "GET",
+        "path": "/knowledge/search",
+        "description": "Search knowledge base",
+        "category": "knowledge",
+        "requires_auth": true,
+        "permissions": ["knowledge.view"]
+      },
+      "entries": {
+        "list": {
+          "method": "GET",
+          "path": "/knowledge/entries",
+          "description": "Get knowledge entries",
+          "category": "knowledge",
+          "requires_auth": true,
+          "permissions": ["knowledge.view"]
+        },
+        "get": {
+          "method": "GET",
+          "path": "/knowledge/entries/{id}",
+          "description": "Get specific knowledge entry",
+          "category": "knowledge",
+          "requires_auth": true,
+          "permissions": ["knowledge.view"]
+        },
+        "create": {
+          "method": "POST",
+          "path": "/knowledge/entries",
+          "description": "Create knowledge entry",
+          "category": "knowledge",
+          "requires_auth": true,
+          "permissions": ["knowledge.create"]
+        },
+        "update": {
+          "method": "PUT",
+          "path": "/knowledge/entries/{id}",
+          "description": "Update knowledge entry",
+          "category": "knowledge",
+          "requires_auth": true,
+          "permissions": ["knowledge.edit"]
+        },
+        "delete": {
+          "method": "DELETE",
+          "path": "/knowledge/entries/{id}",
+          "description": "Delete knowledge entry",
+          "category": "knowledge",
+          "requires_auth": true,
+          "permissions": ["knowledge.delete"]
+        }
+      },
+      "ask": {
+        "method": "POST",
+        "path": "/knowledge/ask",
+        "description": "Ask knowledge base question",
+        "category": "knowledge",
+        "requires_auth": true,
+        "permissions": ["knowledge.view"]
+      },
+      "embeddings": {
+        "method": "POST",
+        "path": "/knowledge/embeddings",
+        "description": "Generate embeddings for knowledge",
+        "category": "knowledge",
+        "requires_auth": true,
+        "permissions": ["knowledge.create"]
+      },
+      "stats": {
+        "method": "GET",
+        "path": "/knowledge/stats",
+        "description": "Get knowledge statistics",
+        "category": "knowledge",
+        "requires_auth": true,
+        "permissions": ["knowledge.view"]
+      },
+      "reindex": {
+        "method": "POST",
+        "path": "/knowledge/reindex",
+        "description": "Reindex knowledge base",
+        "category": "knowledge",
+        "requires_auth": true,
+        "permissions": ["knowledge.admin"]
+      }
+    },
+    "decisions": {
+      "list": {
+        "method": "GET",
+        "path": "/decisions",
+        "description": "Get decisions list",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.view"]
+      },
+      "get": {
+        "method": "GET",
+        "path": "/decisions/{id}",
+        "description": "Get specific decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.view"]
+      },
+      "create": {
+        "method": "POST",
+        "path": "/decisions",
+        "description": "Create new decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.create"]
+      },
+      "update": {
+        "method": "PUT",
+        "path": "/decisions/{id}",
+        "description": "Update decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.edit"]
+      },
+      "delete": {
+        "method": "DELETE",
+        "path": "/decisions/{id}",
+        "description": "Delete decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.delete"]
+      },
+      "visualize": {
+        "method": "POST",
+        "path": "/decisions/visualize",
+        "description": "Visualize decision tree",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.view"]
+      },
+      "tree": {
+        "method": "GET",
+        "path": "/decisions/tree",
+        "description": "Get decision tree data",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.view"]
+      },
+      "stats": {
+        "method": "GET",
+        "path": "/decisions/stats",
+        "description": "Get decision statistics",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.view"]
+      },
+      "reviews": {
+        "method": "POST",
+        "path": "/decisions/{id}/reviews",
+        "description": "Review decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.review"]
+      },
+      "approvals": {
+        "method": "POST",
+        "path": "/decisions/{id}/approvals",
+        "description": "Approve decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.approve"]
+      },
+      "rejections": {
+        "method": "POST",
+        "path": "/decisions/{id}/rejections",
+        "description": "Reject decision",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.reject"]
+      },
+      "impact-analysis": {
+        "method": "POST",
+        "path": "/decisions/impact-analysis",
+        "description": "Analyze decision impact",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.analyze"]
+      },
+      "mcda": {
+        "method": "POST",
+        "path": "/decisions/mcda",
+        "description": "Run MCDA analysis",
+        "category": "decisions",
+        "requires_auth": true,
+        "permissions": ["decisions.analyze"]
+      }
+    },
+    "simulator": {
+      "scenarios": {
+        "list": {
+          "method": "GET",
+          "path": "/simulator/scenarios",
+          "description": "Get simulation scenarios",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.view"]
+        },
+        "get": {
+          "method": "GET",
+          "path": "/simulator/scenarios/{id}",
+          "description": "Get specific scenario",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.view"]
+        },
+        "create": {
+          "method": "POST",
+          "path": "/simulator/scenarios",
+          "description": "Create simulation scenario",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.create"]
+        },
+        "update": {
+          "method": "PUT",
+          "path": "/simulator/scenarios/{id}",
+          "description": "Update scenario",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.edit"]
+        },
+        "delete": {
+          "method": "DELETE",
+          "path": "/simulator/scenarios/{id}",
+          "description": "Delete scenario",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.delete"]
+        },
+        "metrics": {
+          "method": "GET",
+          "path": "/simulator/scenarios/{id}/metrics",
+          "description": "Get scenario performance metrics",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.view"]
+        }
+      },
+      "templates": {
+        "list": {
+          "method": "GET",
+          "path": "/simulator/templates",
+          "description": "Get simulation templates",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.view"]
+        },
+        "get": {
+          "method": "GET",
+          "path": "/simulator/templates/{id}",
+          "description": "Get specific template",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.view"]
+        },
+        "create_scenario": {
+          "method": "POST",
+          "path": "/simulator/templates/{id}/create-scenario",
+          "description": "Create scenario from template",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.create"]
+        }
+      },
+      "run": {
+        "method": "POST",
+        "path": "/simulator/run",
+        "description": "Run regulatory simulation",
+        "category": "simulator",
+        "requires_auth": true,
+        "permissions": ["simulator.run"]
+      },
+      "executions": {
+        "get": {
+          "method": "GET",
+          "path": "/simulator/executions/{id}",
+          "description": "Get simulation execution status",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.view"]
+        },
+        "cancel": {
+          "method": "DELETE",
+          "path": "/simulator/executions/{id}",
+          "description": "Cancel simulation execution",
+          "category": "simulator",
+          "requires_auth": true,
+          "permissions": ["simulator.cancel"]
+        }
+      },
+      "results": {
+        "method": "GET",
+        "path": "/simulator/results/{id}",
+        "description": "Get simulation results",
+        "category": "simulator",
+        "requires_auth": true,
+        "permissions": ["simulator.view"]
+      },
+      "history": {
+        "method": "GET",
+        "path": "/simulator/history",
+        "description": "Get simulation history",
+        "category": "simulator",
+        "requires_auth": true,
+        "permissions": ["simulator.view"]
+      },
+      "analytics": {
+        "method": "GET",
+        "path": "/simulator/analytics",
+        "description": "Get simulation analytics",
+        "category": "simulator",
+        "requires_auth": true,
+        "permissions": ["simulator.analytics"]
+      },
+      "popular_scenarios": {
+        "method": "GET",
+        "path": "/simulator/popular-scenarios",
+        "description": "Get popular simulation scenarios",
+        "category": "simulator",
+        "requires_auth": true,
+        "permissions": ["simulator.view"]
+      }
+    },
+    "tools": {
+      "register": {
+        "method": "POST",
+        "path": "/tools/register",
+        "description": "Register new tools in the system",
+        "category": "tools",
+        "requires_auth": true,
+        "permissions": ["tools.register"]
+      },
+      "available": {
+        "method": "GET",
+        "path": "/tools/available",
+        "description": "Get available tools for current user",
+        "category": "tools",
+        "requires_auth": true,
+        "permissions": ["tools.view"]
+      },
+      "categories": {
+        "method": "GET",
+        "path": "/tools/categories/{category}",
+        "description": "Get tools by category",
+        "category": "tools",
+        "requires_auth": true,
+        "permissions": ["tools.view"]
+      },
+      "execute": {
+        "method": "POST",
+        "path": "/tools/categories/{category}/execute",
+        "description": "Execute a tool in the specified category",
+        "category": "tools",
+        "requires_auth": true,
+        "permissions": ["tools.execute"]
+      },
+      "info": {
+        "method": "GET",
+        "path": "/tools/{tool_name}/info",
+        "description": "Get information about a specific tool",
+        "category": "tools",
+        "requires_auth": true,
+        "permissions": ["tools.view"]
+      },
+      "analytics": {
+        "analyze_dataset": {
+          "method": "POST",
+          "path": "/tools/analytics/analyze-dataset",
+          "description": "Analyze dataset using analytics tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.analytics"]
+        },
+        "generate_report": {
+          "method": "POST",
+          "path": "/tools/analytics/generate-report",
+          "description": "Generate report using analytics tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.analytics"]
+        },
+        "build_dashboard": {
+          "method": "POST",
+          "path": "/tools/analytics/build-dashboard",
+          "description": "Build dashboard using analytics tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.analytics"]
+        },
+        "run_prediction": {
+          "method": "POST",
+          "path": "/tools/analytics/run-prediction",
+          "description": "Run prediction using analytics tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.analytics"]
+        }
+      },
+      "workflow": {
+        "automate_task": {
+          "method": "POST",
+          "path": "/tools/workflow/automate-task",
+          "description": "Automate task using workflow tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.workflow"]
+        },
+        "optimize_process": {
+          "method": "POST",
+          "path": "/tools/workflow/optimize-process",
+          "description": "Optimize process using workflow tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.workflow"]
+        },
+        "manage_approval": {
+          "method": "POST",
+          "path": "/tools/workflow/manage-approval",
+          "description": "Manage approval using workflow tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.workflow"]
+        }
+      },
+      "security": {
+        "scan_vulnerabilities": {
+          "method": "POST",
+          "path": "/tools/security/scan-vulnerabilities",
+          "description": "Scan for vulnerabilities using security tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.security"]
+        },
+        "check_compliance": {
+          "method": "POST",
+          "path": "/tools/security/check-compliance",
+          "description": "Check compliance using security tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.security"]
+        },
+        "analyze_access": {
+          "method": "POST",
+          "path": "/tools/security/analyze-access",
+          "description": "Analyze access using security tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.security"]
+        },
+        "log_audit_event": {
+          "method": "POST",
+          "path": "/tools/security/log-audit-event",
+          "description": "Log audit event using security tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.security"]
+        }
+      },
+      "monitoring": {
+        "monitor_system": {
+          "method": "POST",
+          "path": "/tools/monitoring/monitor-system",
+          "description": "Monitor system using monitoring tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.monitoring"]
+        },
+        "track_performance": {
+          "method": "POST",
+          "path": "/tools/monitoring/track-performance",
+          "description": "Track performance using monitoring tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.monitoring"]
+        },
+        "manage_alerts": {
+          "method": "POST",
+          "path": "/tools/monitoring/manage-alerts",
+          "description": "Manage alerts using monitoring tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.monitoring"]
+        },
+        "check_health": {
+          "method": "POST",
+          "path": "/tools/monitoring/check-health",
+          "description": "Check health using monitoring tools",
+          "category": "tools",
+          "requires_auth": true,
+          "permissions": ["tools.monitoring"]
+        }
+      }
+    }
+  },
+  "categories": {
+    "authentication": {
+      "description": "User authentication and authorization endpoints",
+      "priority": "critical"
+    },
+    "transactions": {
+      "description": "Transaction processing and management",
+      "priority": "high"
+    },
+    "fraud_detection": {
+      "description": "Fraud detection and prevention",
+      "priority": "high"
+    },
+    "memory": {
+      "description": "Memory management and knowledge storage",
+      "priority": "medium"
+    },
+    "knowledge": {
+      "description": "Knowledge base operations",
+      "priority": "medium"
+    },
+    "decisions": {
+      "description": "Decision management and analysis",
+      "priority": "high"
+    },
+    "simulator": {
+      "description": "Regulatory impact simulation",
+      "priority": "medium"
+    },
+    "tools": {
+      "description": "Tool category execution endpoints",
+      "priority": "medium"
+    }
+  },
+  "permissions": {
+    "user": "Basic user access",
+    "admin": "Administrative access",
+    "transactions.view": "View transactions",
+    "transactions.approve": "Approve transactions",
+    "transactions.reject": "Reject transactions",
+    "transactions.analyze": "Analyze transactions",
+    "fraud.view": "View fraud rules and models",
+    "fraud.create": "Create fraud rules",
+    "fraud.edit": "Edit fraud rules",
+    "fraud.delete": "Delete fraud rules",
+    "fraud.test": "Test fraud rules",
+    "fraud.train": "Train fraud models",
+    "fraud.scan": "Run fraud scans",
+    "memory.view": "View memory data",
+    "memory.create": "Create memory nodes",
+    "memory.edit": "Edit memory data",
+    "memory.delete": "Delete memory data",
+    "knowledge.view": "View knowledge base",
+    "knowledge.create": "Create knowledge entries",
+    "knowledge.edit": "Edit knowledge entries",
+    "knowledge.delete": "Delete knowledge entries",
+    "knowledge.admin": "Knowledge base administration",
+    "decisions.view": "View decisions",
+    "decisions.create": "Create decisions",
+    "decisions.edit": "Edit decisions",
+    "decisions.delete": "Delete decisions",
+    "decisions.review": "Review decisions",
+    "decisions.approve": "Approve decisions",
+    "decisions.reject": "Reject decisions",
+    "decisions.analyze": "Analyze decision impact",
+    "simulator.view": "View simulation scenarios",
+    "simulator.create": "Create simulation scenarios",
+    "simulator.edit": "Edit simulation scenarios",
+    "simulator.delete": "Delete simulation scenarios",
+    "simulator.run": "Run simulations",
+    "simulator.cancel": "Cancel simulations",
+    "simulator.analytics": "View simulation analytics",
+    "tools.view": "View available tools",
+    "tools.register": "Register new tools",
+    "tools.execute": "Execute tools",
+    "tools.analytics": "Use analytics tools",
+    "tools.workflow": "Use workflow tools",
+    "tools.security": "Use security tools",
+    "tools.monitoring": "Use monitoring tools"
+  },
+  "naming_conventions": {
+    "description": "RESTful API naming conventions applied",
+    "rules": [
+      "Use plural nouns for resource collections (e.g., /transactions, /decisions)",
+      "Use kebab-case for multi-word resources (e.g., /regulatory-changes)",
+      "Use hierarchical relationships for sub-resources (e.g., /transactions/{id}/analysis)",
+      "Avoid action verbs in URLs - rely on HTTP methods (POST /approve, not /transactions/approve)",
+      "Use consistent parameter naming with curly braces (e.g., {id}, {category})",
+      "Resource names should be lowercase and descriptive",
+      "Sub-resources should be plural when representing collections"
+    ],
+    "examples": {
+      "good": [
+        "GET /api/transactions",
+        "GET /api/transactions/{id}",
+        "POST /api/transactions/{id}/analysis",
+        "POST /api/decisions/{id}/approvals"
+      ],
+      "avoid": [
+        "GET /api/getTransactions",
+        "POST /api/transactions/approve/{id}",
+        "GET /api/transaction_analysis"
+      ]
+    }
+  }
+}

@@ -6,6 +6,14 @@
 
 #include "rest_api_server.hpp"
 #include <iostream>
+
+// Include all API handlers
+#include "../shared/auth/auth_api_handlers.hpp"
+#include "../shared/transactions/transaction_api_handlers.hpp"
+#include "../shared/fraud_detection/fraud_api_handlers.hpp"
+#include "../shared/knowledge_base/knowledge_api_handlers_complete.hpp"
+#include "../shared/memory/memory_api_handlers.hpp"
+#include "../shared/decisions/decision_api_handlers_complete.hpp"
 #include <sstream>
 #include <cstring>
 #include <algorithm>
@@ -321,11 +329,38 @@ void RESTAPIServer::route_request(const APIRequest& req, APIResponse& resp) {
         resp = handle_monitoring_stats(req);
     } else if (req.path == "/api/monitoring/force-check") {
         resp = handle_force_check(req);
-    } else if (req.path == "/api/auth/login") {
+    }
+    // Authentication endpoints
+    else if (req.path == "/api/auth/login") {
         resp = handle_login(req);
+    } else if (req.path == "/api/auth/logout") {
+        resp = handle_logout(req);
     } else if (req.path == "/api/auth/refresh") {
         resp = handle_token_refresh(req);
-    } else {
+    } else if (req.path == "/api/auth/me") {
+        resp = handle_get_current_user(req);
+    }
+    // Transaction endpoints
+    else if (req.path.find("/api/transactions") == 0) {
+        resp = handle_transaction_routes(req);
+    }
+    // Fraud detection endpoints
+    else if (req.path.find("/api/fraud") == 0) {
+        resp = handle_fraud_routes(req);
+    }
+    // Knowledge base endpoints
+    else if (req.path.find("/api/knowledge") == 0) {
+        resp = handle_knowledge_routes(req);
+    }
+    // Memory management endpoints
+    else if (req.path.find("/api/memory") == 0) {
+        resp = handle_memory_routes(req);
+    }
+    // Decision management endpoints
+    else if (req.path.find("/api/decisions") == 0) {
+        resp = handle_decision_routes(req);
+    }
+    else {
         resp = APIResponse(404, "application/json");
         resp.body = nlohmann::json{{"error", "Endpoint not found"}}.dump();
     }
@@ -682,7 +717,19 @@ bool RESTAPIServer::is_public_endpoint(const std::string& path) {
         "/api/auth/login"
     };
 
-    return public_endpoints.find(path) != public_endpoints.end();
+    // Check if the path is exactly a public endpoint
+    if (public_endpoints.find(path) != public_endpoints.end()) {
+        return true;
+    }
+
+    // Check if the path starts with any public endpoint pattern
+    for (const auto& endpoint : public_endpoints) {
+        if (path.find(endpoint) == 0) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool RESTAPIServer::authorize_request(const APIRequest& req) {
@@ -1305,6 +1352,557 @@ std::string RESTAPIServer::compute_password_hash(const std::string& password) {
     std::string hash_b64 = base64_encode(std::string(reinterpret_cast<char*>(derived_key), key_length));
 
     return "pbkdf2_sha256$" + std::to_string(iterations) + "$" + salt_b64 + "$" + hash_b64;
+}
+
+APIResponse RESTAPIServer::handle_logout(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    
+    if (req.method != "POST") {
+        resp.status_code = 405;
+        resp.body = nlohmann::json{{"error", "Method not allowed"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user from token for audit logging (not validation which already happened)
+        std::string user_id = "unknown";
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            // Parse token to get user ID for logging
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // In a real implementation, you would invalidate the refresh token here
+        logger_->info("User logged out: " + user_id);
+        
+        resp.body = nlohmann::json{{"message", "Logged out successfully"}}.dump();
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error in logout: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Logout failed"}}.dump();
+    }
+    
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_get_current_user(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    
+    if (req.method != "GET") {
+        resp.status_code = 405;
+        resp.body = nlohmann::json{{"error", "Method not allowed"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user from token
+        std::string user_id = "unknown";
+        std::vector<std::string> roles;
+        
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            // Parse token to get user info
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                    if (payload_json.contains("roles")) {
+                        for (const auto& role : payload_json["roles"]) {
+                            roles.push_back(role);
+                        }
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // Get user details from database
+        auto connection = db_pool_->get_connection();
+        if (!connection) {
+            resp.status_code = 500;
+            resp.body = nlohmann::json{{"error", "Database unavailable"}}.dump();
+            return resp;
+        }
+        
+        auto query = "SELECT user_id, username, email, full_name, is_active, created_at "
+                    "FROM user_authentication WHERE username = $1";
+        
+        auto result = connection->execute_query(query, {user_id});
+        db_pool_->return_connection(connection);
+        
+        if (result.rows.empty()) {
+            resp.status_code = 404;
+            resp.body = nlohmann::json{{"error", "User not found"}}.dump();
+            return resp;
+        }
+        
+        const auto& row = result.rows[0];
+        
+        nlohmann::json user_info;
+        user_info["id"] = row.at("user_id");
+        user_info["username"] = row.at("username");
+        user_info["email"] = row.at("email");
+        user_info["fullName"] = row.at("full_name");
+        user_info["isActive"] = row.at("is_active") == "true" || row.at("is_active") == "1";
+        user_info["createdAt"] = row.at("created_at");
+        user_info["roles"] = roles;
+        
+        resp.body = user_info.dump();
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error getting current user: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Failed to get user information"}}.dump();
+    }
+    
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_transaction_routes(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    auto connection = db_pool_->get_connection();
+    
+    if (!connection) {
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Database unavailable"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user ID from token
+        std::string user_id = "system";
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // Route transaction endpoints
+        if (req.path == "/api/transactions" && req.method == "GET") {
+            resp.body = regulens::transactions::get_transactions(connection->get(), req.query_params);
+        } else if (req.path.find("/api/transactions/") == 0 && req.method == "GET") {
+            std::string transaction_id = req.path.substr(19); // Extract ID from path
+            resp.body = regulens::transactions::get_transaction_by_id(connection->get(), transaction_id);
+        } else if (req.path == "/api/transactions" && req.method == "POST") {
+            resp.body = regulens::transactions::create_transaction(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/transactions/") == 0 && req.method == "PUT") {
+            std::string transaction_id = req.path.substr(19); // Extract ID from path
+            resp.body = regulens::transactions::update_transaction(connection->get(), transaction_id, req.body);
+        } else if (req.path.find("/api/transactions/") == 0 && req.method == "DELETE") {
+            std::string transaction_id = req.path.substr(19); // Extract ID from path
+            resp.body = regulens::transactions::delete_transaction(connection->get(), transaction_id);
+        } else if (req.path.find("/api/transactions/") == 0 && req.path.find("/analyze") != std::string::npos && req.method == "POST") {
+            std::string transaction_id = req.path.substr(19, req.path.find("/analyze") - 19);
+            resp.body = regulens::transactions::analyze_transaction(connection->get(), transaction_id, req.body);
+        } else if (req.path.find("/api/transactions/") == 0 && req.path.find("/fraud-analysis") != std::string::npos && req.method == "GET") {
+            std::string transaction_id = req.path.substr(19, req.path.find("/fraud-analysis") - 19);
+            resp.body = regulens::transactions::get_fraud_analysis(connection->get(), transaction_id);
+        } else if (req.path.find("/api/transactions/") == 0 && req.path.find("/approve") != std::string::npos && req.method == "POST") {
+            std::string transaction_id = req.path.substr(19, req.path.find("/approve") - 19);
+            resp.body = regulens::transactions::approve_transaction(connection->get(), transaction_id, req.body);
+        } else if (req.path.find("/api/transactions/") == 0 && req.path.find("/reject") != std::string::npos && req.method == "POST") {
+            std::string transaction_id = req.path.substr(19, req.path.find("/reject") - 19);
+            resp.body = regulens::transactions::reject_transaction(connection->get(), transaction_id, req.body);
+        } else if (req.path == "/api/transactions/patterns" && req.method == "GET") {
+            resp.body = regulens::transactions::get_transaction_patterns(connection->get(), req.query_params);
+        } else if (req.path == "/api/transactions/detect-anomalies" && req.method == "POST") {
+            resp.body = regulens::transactions::detect_anomalies(connection->get(), req.body);
+        } else if (req.path == "/api/transactions/stats" && req.method == "GET") {
+            resp.body = regulens::transactions::get_transaction_stats(connection->get(), req.query_params);
+        } else if (req.path == "/api/transactions/metrics" && req.method == "GET") {
+            resp.body = regulens::transactions::get_transaction_metrics(connection->get(), req.query_params);
+        } else {
+            resp.status_code = 404;
+            resp.body = nlohmann::json{{"error", "Transaction endpoint not found"}}.dump();
+        }
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error handling transaction request: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Internal server error"}}.dump();
+    }
+    
+    db_pool_->return_connection(connection);
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_fraud_routes(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    auto connection = db_pool_->get_connection();
+    
+    if (!connection) {
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Database unavailable"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user ID from token
+        std::string user_id = "system";
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // Route fraud endpoints
+        if (req.path == "/api/fraud/rules" && req.method == "GET") {
+            resp.body = regulens::fraud::get_fraud_rules(connection->get(), req.query_params);
+        } else if (req.path.find("/api/fraud/rules/") == 0 && req.method == "GET") {
+            std::string rule_id = req.path.substr(16); // Extract ID from path
+            resp.body = regulens::fraud::get_fraud_rule_by_id(connection->get(), rule_id);
+        } else if (req.path == "/api/fraud/rules" && req.method == "POST") {
+            resp.body = regulens::fraud::create_fraud_rule(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/fraud/rules/") == 0 && req.method == "PUT") {
+            std::string rule_id = req.path.substr(16); // Extract ID from path
+            resp.body = regulens::fraud::update_fraud_rule(connection->get(), rule_id, req.body);
+        } else if (req.path.find("/api/fraud/rules/") == 0 && req.method == "DELETE") {
+            std::string rule_id = req.path.substr(16); // Extract ID from path
+            resp.body = regulens::fraud::delete_fraud_rule(connection->get(), rule_id);
+        } else if (req.path.find("/api/fraud/rules/") == 0 && req.path.find("/toggle") != std::string::npos && req.method == "PATCH") {
+            std::string rule_id = req.path.substr(16, req.path.find("/toggle") - 16);
+            resp.body = regulens::fraud::toggle_fraud_rule(connection->get(), rule_id, req.body);
+        } else if (req.path.find("/api/fraud/rules/") == 0 && req.path.find("/test") != std::string::npos && req.method == "POST") {
+            std::string rule_id = req.path.substr(16, req.path.find("/test") - 16);
+            resp.body = regulens::fraud::test_fraud_rule(connection->get(), rule_id, req.body);
+        } else if (req.path == "/api/fraud/alerts" && req.method == "GET") {
+            resp.body = regulens::fraud::get_fraud_alerts(connection->get(), req.query_params);
+        } else if (req.path.find("/api/fraud/alerts/") == 0 && req.method == "GET") {
+            std::string alert_id = req.path.substr(17); // Extract ID from path
+            resp.body = regulens::fraud::get_fraud_alert_by_id(connection->get(), alert_id);
+        } else if (req.path.find("/api/fraud/alerts/") == 0 && req.path.find("/status") != std::string::npos && req.method == "PUT") {
+            std::string alert_id = req.path.substr(17, req.path.find("/status") - 17);
+            resp.body = regulens::fraud::update_fraud_alert_status(connection->get(), alert_id, req.body);
+        } else if (req.path == "/api/fraud/stats" && req.method == "GET") {
+            resp.body = regulens::fraud::get_fraud_stats(connection->get(), req.query_params);
+        } else if (req.path == "/api/fraud/models" && req.method == "GET") {
+            resp.body = regulens::fraud::get_fraud_models(connection->get());
+        } else if (req.path == "/api/fraud/models/train" && req.method == "POST") {
+            resp.body = regulens::fraud::train_fraud_model(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/fraud/models/") == 0 && req.path.find("/performance") != std::string::npos && req.method == "GET") {
+            std::string model_id = req.path.substr(17, req.path.find("/performance") - 17);
+            resp.body = regulens::fraud::get_model_performance(connection->get(), model_id);
+        } else if (req.path == "/api/fraud/scan/batch" && req.method == "POST") {
+            resp.body = regulens::fraud::run_batch_fraud_scan(connection->get(), req.body, user_id);
+        } else if (req.path == "/api/fraud/export" && req.method == "POST") {
+            resp.body = regulens::fraud::export_fraud_report(connection->get(), req.body, user_id);
+        } else {
+            resp.status_code = 404;
+            resp.body = nlohmann::json{{"error", "Fraud endpoint not found"}}.dump();
+        }
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error handling fraud request: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Internal server error"}}.dump();
+    }
+    
+    db_pool_->return_connection(connection);
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_knowledge_routes(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    auto connection = db_pool_->get_connection();
+    
+    if (!connection) {
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Database unavailable"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user ID from token
+        std::string user_id = "system";
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // Route knowledge endpoints
+        if (req.path == "/api/knowledge/search" && req.method == "GET") {
+            resp.body = regulens::knowledge::search_knowledge_base(connection->get(), req.query_params);
+        } else if (req.path == "/api/knowledge/entries" && req.method == "GET") {
+            resp.body = regulens::knowledge::get_knowledge_entries(connection->get(), req.query_params);
+        } else if (req.path.find("/api/knowledge/entries/") == 0 && req.method == "GET") {
+            std::string entry_id = req.path.substr(20); // Extract ID from path
+            resp.body = regulens::knowledge::get_knowledge_entry_by_id(connection->get(), entry_id);
+        } else if (req.path == "/api/knowledge/entries" && req.method == "POST") {
+            resp.body = regulens::knowledge::create_knowledge_entry(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/knowledge/entries/") == 0 && req.method == "PUT") {
+            std::string entry_id = req.path.substr(20); // Extract ID from path
+            resp.body = regulens::knowledge::update_knowledge_entry(connection->get(), entry_id, req.body);
+        } else if (req.path.find("/api/knowledge/entries/") == 0 && req.method == "DELETE") {
+            std::string entry_id = req.path.substr(20); // Extract ID from path
+            resp.body = regulens::knowledge::delete_knowledge_entry(connection->get(), entry_id);
+        } else if (req.path.find("/api/knowledge/entries/") == 0 && req.path.find("/similar") != std::string::npos && req.method == "GET") {
+            std::string entry_id = req.path.substr(20, req.path.find("/similar") - 20);
+            resp.body = regulens::knowledge::get_similar_entries(connection->get(), entry_id, req.query_params);
+        } else if (req.path == "/api/knowledge/cases" && req.method == "GET") {
+            resp.body = regulens::knowledge::get_knowledge_cases(connection->get(), req.query_params);
+        } else if (req.path.find("/api/knowledge/cases/") == 0 && req.method == "GET") {
+            std::string case_id = req.path.substr(18); // Extract ID from path
+            resp.body = regulens::knowledge::get_knowledge_case_by_id(connection->get(), case_id);
+        } else if (req.path == "/api/knowledge/ask" && req.method == "POST") {
+            resp.body = regulens::knowledge::ask_knowledge_base(connection->get(), req.body, user_id);
+        } else if (req.path == "/api/knowledge/embeddings" && req.method == "POST") {
+            resp.body = regulens::knowledge::generate_embeddings(connection->get(), req.body, user_id);
+        } else if (req.path == "/api/knowledge/reindex" && req.method == "POST") {
+            resp.body = regulens::knowledge::reindex_knowledge(connection->get(), req.body, user_id);
+        } else if (req.path == "/api/knowledge/stats" && req.method == "GET") {
+            resp.body = regulens::knowledge::get_knowledge_stats(connection->get(), req.query_params);
+        } else {
+            resp.status_code = 404;
+            resp.body = nlohmann::json{{"error", "Knowledge endpoint not found"}}.dump();
+        }
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error handling knowledge request: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Internal server error"}}.dump();
+    }
+    
+    db_pool_->return_connection(connection);
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_memory_routes(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    auto connection = db_pool_->get_connection();
+    
+    if (!connection) {
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Database unavailable"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user ID from token
+        std::string user_id = "system";
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // Route memory endpoints
+        if (req.path == "/api/memory/visualize" && req.method == "POST") {
+            resp.body = regulens::memory::generate_graph_visualization(connection->get(), req.body);
+        } else if (req.path == "/api/memory/graph" && req.method == "GET") {
+            resp.body = regulens::memory::get_memory_graph(connection->get(), req.query_params);
+        } else if (req.path.find("/api/memory/nodes/") == 0 && req.method == "GET") {
+            std::string node_id = req.path.substr(17); // Extract ID from path
+            resp.body = regulens::memory::get_memory_node_details(connection->get(), node_id);
+        } else if (req.path == "/api/memory/search" && req.method == "POST") {
+            resp.body = regulens::memory::search_memory(connection->get(), req.body);
+        } else if (req.path.find("/api/memory/nodes/") == 0 && req.path.find("/relationships") != std::string::npos && req.method == "GET") {
+            std::string node_id = req.path.substr(17, req.path.find("/relationships") - 17);
+            resp.body = regulens::memory::get_memory_relationships(connection->get(), node_id, req.query_params);
+        } else if (req.path == "/api/memory/stats" && req.method == "GET") {
+            resp.body = regulens::memory::get_memory_stats(connection->get(), req.query_params);
+        } else if (req.path == "/api/memory/clusters" && req.method == "GET") {
+            resp.body = regulens::memory::get_memory_clusters(connection->get(), req.query_params);
+        } else if (req.path == "/api/memory/nodes" && req.method == "POST") {
+            resp.body = regulens::memory::create_memory_node(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/memory/nodes/") == 0 && req.method == "PUT") {
+            std::string node_id = req.path.substr(17); // Extract ID from path
+            resp.body = regulens::memory::update_memory_node(connection->get(), node_id, req.body);
+        } else if (req.path.find("/api/memory/nodes/") == 0 && req.method == "DELETE") {
+            std::string node_id = req.path.substr(17); // Extract ID from path
+            resp.body = regulens::memory::delete_memory_node(connection->get(), node_id);
+        } else if (req.path == "/api/memory/relationships" && req.method == "POST") {
+            resp.body = regulens::memory::create_memory_relationship(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/memory/relationships/") == 0 && req.method == "PUT") {
+            std::string relationship_id = req.path.substr(24); // Extract ID from path
+            resp.body = regulens::memory::update_memory_relationship(connection->get(), relationship_id, req.body);
+        } else if (req.path.find("/api/memory/relationships/") == 0 && req.method == "DELETE") {
+            std::string relationship_id = req.path.substr(24); // Extract ID from path
+            resp.body = regulens::memory::delete_memory_relationship(connection->get(), relationship_id);
+        } else {
+            resp.status_code = 404;
+            resp.body = nlohmann::json{{"error", "Memory endpoint not found"}}.dump();
+        }
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error handling memory request: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Internal server error"}}.dump();
+    }
+    
+    db_pool_->return_connection(connection);
+    return resp;
+}
+
+APIResponse RESTAPIServer::handle_decision_routes(const APIRequest& req) {
+    APIResponse resp(200, "application/json");
+    auto connection = db_pool_->get_connection();
+    
+    if (!connection) {
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Database unavailable"}}.dump();
+        return resp;
+    }
+    
+    try {
+        // Extract user ID from token
+        std::string user_id = "system";
+        auto auth_it = req.headers.find("Authorization");
+        if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
+            std::string token = auth_it->second.substr(7);
+            size_t first_dot = token.find('.');
+            size_t second_dot = token.find('.', first_dot + 1);
+            if (first_dot != std::string::npos && second_dot != std::string::npos) {
+                std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
+                std::string payload = base64_decode(payload_b64);
+                try {
+                    nlohmann::json payload_json = nlohmann::json::parse(payload);
+                    if (payload_json.contains("sub")) {
+                        user_id = payload_json["sub"];
+                    }
+                } catch (...) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        // Route decision endpoints
+        if (req.path == "/api/decisions" && req.method == "GET") {
+            resp.body = regulens::decisions::get_decisions(connection->get(), req.query_params);
+        } else if (req.path.find("/api/decisions/") == 0 && req.method == "GET") {
+            std::string decision_id = req.path.substr(15); // Extract ID from path
+            resp.body = regulens::decisions::get_decision_by_id(connection->get(), decision_id);
+        } else if (req.path == "/api/decisions" && req.method == "POST") {
+            resp.body = regulens::decisions::create_decision(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/decisions/") == 0 && req.method == "PUT") {
+            std::string decision_id = req.path.substr(15); // Extract ID from path
+            resp.body = regulens::decisions::update_decision(connection->get(), decision_id, req.body);
+        } else if (req.path.find("/api/decisions/") == 0 && req.method == "DELETE") {
+            std::string decision_id = req.path.substr(15); // Extract ID from path
+            resp.body = regulens::decisions::delete_decision(connection->get(), decision_id);
+        } else if (req.path == "/api/decisions/stats" && req.method == "GET") {
+            resp.body = regulens::decisions::get_decision_stats(connection->get(), req.query_params);
+        } else if (req.path == "/api/decisions/outcomes" && req.method == "GET") {
+            resp.body = regulens::decisions::get_decision_outcomes(connection->get(), req.query_params);
+        } else if (req.path == "/api/decisions/timeline" && req.method == "GET") {
+            resp.body = regulens::decisions::get_decision_timeline(connection->get(), req.query_params);
+        } else if (req.path.find("/api/decisions/") == 0 && req.path.find("/review") != std::string::npos && req.method == "POST") {
+            std::string decision_id = req.path.substr(15, req.path.find("/review") - 15);
+            resp.body = regulens::decisions::review_decision(connection->get(), decision_id, req.body, user_id);
+        } else if (req.path.find("/api/decisions/") == 0 && req.path.find("/approve") != std::string::npos && req.method == "POST") {
+            std::string decision_id = req.path.substr(15, req.path.find("/approve") - 15);
+            resp.body = regulens::decisions::approve_decision(connection->get(), decision_id, req.body, user_id);
+        } else if (req.path.find("/api/decisions/") == 0 && req.path.find("/reject") != std::string::npos && req.method == "POST") {
+            std::string decision_id = req.path.substr(15, req.path.find("/reject") - 15);
+            resp.body = regulens::decisions::reject_decision(connection->get(), decision_id, req.body, user_id);
+        } else if (req.path == "/api/decisions/templates" && req.method == "GET") {
+            resp.body = regulens::decisions::get_decision_templates(connection->get(), req.query_params);
+        } else if (req.path == "/api/decisions/from-template" && req.method == "POST") {
+            resp.body = regulens::decisions::create_decision_from_template(connection->get(), req.body, user_id);
+        } else if (req.path == "/api/decisions/analyze-impact" && req.method == "POST") {
+            resp.body = regulens::decisions::analyze_decision_impact(connection->get(), req.body);
+        } else if (req.path.find("/api/decisions/") == 0 && req.path.find("/impact") != std::string::npos && req.method == "GET") {
+            std::string decision_id = req.path.substr(15, req.path.find("/impact") - 15);
+            resp.body = regulens::decisions::get_decision_impact_report(connection->get(), decision_id);
+        } else if (req.path == "/api/decisions/mcda" && req.method == "POST") {
+            resp.body = regulens::decisions::create_mcda_analysis(connection->get(), req.body, user_id);
+        } else if (req.path.find("/api/decisions/mcda/") == 0 && req.method == "GET") {
+            std::string analysis_id = req.path.substr(18); // Extract ID from path
+            resp.body = regulens::decisions::get_mcda_analysis(connection->get(), analysis_id);
+        } else if (req.path.find("/api/decisions/mcda/") == 0 && req.path.find("/criteria") != std::string::npos && req.method == "PUT") {
+            std::string analysis_id = req.path.substr(18, req.path.find("/criteria") - 18);
+            resp.body = regulens::decisions::update_mcda_criteria(connection->get(), analysis_id, req.body);
+        } else if (req.path.find("/api/decisions/mcda/") == 0 && req.path.find("/evaluate") != std::string::npos && req.method == "POST") {
+            std::string analysis_id = req.path.substr(18, req.path.find("/evaluate") - 18);
+            resp.body = regulens::decisions::evaluate_mcda_alternatives(connection->get(), analysis_id, req.body);
+        } else {
+            resp.status_code = 404;
+            resp.body = nlohmann::json{{"error", "Decision endpoint not found"}}.dump();
+        }
+        
+    } catch (const std::exception& e) {
+        logger_->error("Error handling decision request: " + std::string(e.what()), "RESTAPIServer", __func__);
+        resp.status_code = 500;
+        resp.body = nlohmann::json{{"error", "Internal server error"}}.dump();
+    }
+    
+    db_pool_->return_connection(connection);
+    return resp;
 }
 
 } // namespace regulens

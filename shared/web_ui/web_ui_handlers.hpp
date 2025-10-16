@@ -47,6 +47,10 @@
 #include "../agentic_brain/communication_mediator.hpp"
 #include "../agentic_brain/inter_agent_communicator.hpp"
 #include "../../agents/real_agent.hpp"
+
+// Forward declarations for agent communication components
+class AgentCommRegistry;
+class DecisionAuditTrailManager;
 #include "../knowledge_base.hpp"
 #include "../regulatory_knowledge_base.hpp"
 #include "../agentic_brain/inter_agent_api_handlers.hpp"

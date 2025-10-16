@@ -86,6 +86,17 @@ add_library(regulens_shared STATIC
     tools/tool_test_harness.cpp
     # OpenAPI Documentation Generator - Production-grade API documentation (Rule 6 compliance)
     api_docs/openapi_generator.cpp
+    # API Registry System - Systematic API endpoint registration and management
+    api_registry/api_registry.cpp
+    api_registry/api_endpoint_registrations.cpp
+    # API Configuration System - Centralized endpoint configuration management
+    api_config/api_endpoint_config.cpp
+    api_config/http_method_validator.cpp
+    api_config/api_versioning_service.cpp
+    api_config/api_version_router.cpp
+    api_config/api_migration_helper.cpp
+    api_config/error_handling_service.cpp
+    api_config/error_response_helpers.cpp
 )
 
 # Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)
@@ -105,6 +116,8 @@ target_include_directories(regulens_shared
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_CURRENT_SOURCE_DIR}/api_docs
+        ${CMAKE_CURRENT_SOURCE_DIR}/api_registry
+        ${CMAKE_CURRENT_SOURCE_DIR}/api_config
         ${CMAKE_CURRENT_SOURCE_DIR}/database
         ${CMAKE_CURRENT_SOURCE_DIR}/logging
         ${CMAKE_CURRENT_SOURCE_DIR}/models

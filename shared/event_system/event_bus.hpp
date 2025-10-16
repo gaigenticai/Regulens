@@ -201,6 +201,20 @@ private:
     std::atomic<size_t> events_failed_;
     std::atomic<size_t> events_expired_;
     std::atomic<size_t> events_dead_lettered_;
+
+    // Processing state tracking
+    mutable std::mutex processing_mutex_;
+    std::unordered_set<std::string> currently_processing_events_;
+
+    // Database connection for persistence
+    std::shared_ptr<PostgreSQLConnection> db_connection_;
+
+    // Metrics integration (optional)
+    std::shared_ptr<class MetricsCollector> metrics_;
+
+    // Event caching for performance
+    mutable std::mutex event_cache_mutex_;
+    std::unordered_map<std::string, std::unique_ptr<Event>> event_cache_;
 };
 
 // Pre-built event handlers for common use cases

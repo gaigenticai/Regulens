@@ -45,10 +45,7 @@ export function useRegulatoryChanges(options: UseRegulatoryChangesOptions = {}) 
 
   // WebSocket connection for real-time updates
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_API_PORT || '8080';
-    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/regulatory`;
+    const wsUrl = `${apiClient.wsBaseURL}/regulatory`;
 
     const connectWebSocket = () => {
       try {

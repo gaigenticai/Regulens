@@ -87,7 +87,9 @@ private:
     bool validate_jwt_token(const std::string& token);
     bool validate_api_key(const std::string& api_key);
     APIResponse handle_login(const APIRequest& req);
+    APIResponse handle_logout(const APIRequest& req);
     APIResponse handle_token_refresh(const APIRequest& req);
+    APIResponse handle_get_current_user(const APIRequest& req);
     std::string generate_jwt_token(const std::string& username);
     bool validate_refresh_token(const std::string& token);
     std::string base64_encode(const std::string& input);
@@ -96,6 +98,13 @@ private:
     std::string compute_sha256_hash(const std::string& input);
     std::string compute_password_hash(const std::string& password);
     bool authenticate_user(const std::string& username, const std::string& password);
+    
+    // New API route handlers
+    APIResponse handle_transaction_routes(const APIRequest& req);
+    APIResponse handle_fraud_routes(const APIRequest& req);
+    APIResponse handle_knowledge_routes(const APIRequest& req);
+    APIResponse handle_memory_routes(const APIRequest& req);
+    APIResponse handle_decision_routes(const APIRequest& req);
 
     // Member variables
     std::shared_ptr<ConnectionPool> db_pool_;

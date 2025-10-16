@@ -69,10 +69,7 @@ export const useActivityFeed = (
     if (!enableRealtime) return;
 
     // Connect to WebSocket for real-time activity updates
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_WS_PORT || '8080';
-    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/activity`;
+    const wsUrl = `${apiClient.wsBaseURL}/activity`;
 
     let ws: WebSocket | null = null;
     let reconnectTimeout: NodeJS.Timeout;

@@ -450,12 +450,12 @@ std::vector<nlohmann::json> AgenticOrchestrator::analyze_situation_and_recommend
                         throw std::runtime_error("LLM response not a JSON array");
                     }
                 } catch (const std::exception& parse_error) {
-                    logger_->log(LogLevel::WARNING, "Failed to parse LLM recommendations, using fallback: " + 
+                    logger_->log(LogLevel::WARN, "Failed to parse LLM recommendations, using fallback: " + 
                                std::string(parse_error.what()));
                     recommendations = generate_fallback_tool_recommendations(agent_type, situation_context);
                 }
             } else {
-                logger_->log(LogLevel::WARNING, "LLM analysis failed, using fallback recommendations");
+                logger_->log(LogLevel::WARN, "LLM analysis failed, using fallback recommendations");
                 recommendations = generate_fallback_tool_recommendations(agent_type, situation_context);
             }
         } else {

@@ -1453,7 +1453,7 @@ bool VectorKnowledgeBase::import_knowledge_base(const nlohmann::json& knowledge_
                 entity.access_count = entity_json.value("access_count", 0);
                 entity.created_at = std::chrono::system_clock::now();
                 entity.last_accessed = std::chrono::system_clock::now();
-                entity.expires_at = std::chrono::system_clock::now() + std::chrono::years(1);
+                entity.expires_at = std::chrono::system_clock::now() + std::chrono::hours(24*365); // 1 year
 
                 // Handle tags - assume they are stored as array in JSON
                 if (entity_json.contains("tags")) {
@@ -1684,7 +1684,7 @@ std::chrono::system_clock::time_point VectorKnowledgeBase::calculate_expiry_time
         case MemoryRetention::PERSISTENT:
             return now + config_.archival_retention; // Very long retention
         case MemoryRetention::ARCHIVAL:
-            return now + std::chrono::years(10); // Even longer
+            return now + std::chrono::hours(24*365*10); // Even longer - 10 years
         default:
             return now + config_.session_retention;
     }

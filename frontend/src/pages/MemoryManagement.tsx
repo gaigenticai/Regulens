@@ -69,14 +69,24 @@ export default function MemoryManagement() {
     setError(null); // Clear previous errors
 
     try {
-      // API endpoint: GET /api/memory/conversations
-      const response = await fetch('/api/memory/conversations?limit=50');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // Use the API client to get memory graph data
+      const data = await apiClient.getMemoryGraph({ limit: '50' });
+      
+      // Transform the data to match our interface
+      if (data && data.nodes) {
+        const transformedMemories = data.nodes.map((node: any) => ({
+          memory_id: node.id,
+          conversation_id: node.conversation_id || node.id,
+          agent_id: node.agent_id || 'system',
+          memory_type: node.node_type || 'conversation',
+          importance_level: node.importance || 5,
+          content: node.content || node.description || 'No content available',
+          created_at: node.created_at || new Date().toISOString()
+        }));
+        setMemories(transformedMemories);
+      } else {
+        setMemories([]);
       }
-
-      const data = await response.json();
-      setMemories(data.memories || []);
     } catch (error) {
       console.error('Failed to load memories:', error);
 
@@ -97,25 +107,35 @@ export default function MemoryManagement() {
   const loadCases = async () => {
     setLoading(true);
     try {
-      // API endpoint: GET /api/memory/case/search
-      const response = await fetch('/api/memory/case/search?limit=50');
-      if (response.ok) {
-        const data = await response.json();
-        setCases(data.cases || data.results || []);
+      // Use the API client to search for case-related memory nodes
+      const data = await apiClient.searchMemory({
+        query: 'case',
+        filters: { node_type: 'case' }
+      });
+      
+      // Transform the data to match our interface
+      if (data && data.results) {
+        const transformedCases = data.results.map((item: any) => ({
+          case_id: item.id,
+          domain: item.domain || 'compliance',
+          case_type: item.case_type || 'regulatory_check',
+          problem_description: item.problem_description || item.content || 'No problem description',
+          solution_description: item.solution_description || item.solution || 'No solution description',
+          confidence_score: item.confidence_score || item.confidence || 0.5,
+          usage_count: item.usage_count || 0
+        }));
+        setCases(transformedCases);
+      } else {
+        setCases([]);
       }
     } catch (error) {
       console.error('Failed to load cases:', error);
-      setCases([
-        {
-          case_id: 'case_001',
-          domain: 'compliance',
-          case_type: 'regulatory_check',
-          problem_description: 'Transaction compliance validation scenario',
-          solution_description: 'Applied multi-factor risk assessment with confidence 0.92',
-          confidence_score: 0.92,
-          usage_count: 15
-        }
-      ]);
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Failed to load cases',
+        timestamp: Date.now()
+      });
+      setCases([]);
     } finally {
       setLoading(false);
     }
@@ -124,24 +144,34 @@ export default function MemoryManagement() {
   const loadFeedback = async () => {
     setLoading(true);
     try {
-      // API endpoint: GET /api/memory/feedback/get
-      const response = await fetch('/api/memory/feedback/get?limit=50');
-      if (response.ok) {
-        const data = await response.json();
-        setFeedback(data.feedback || []);
+      // Use the API client to search for feedback-related memory nodes
+      const data = await apiClient.searchMemory({
+        query: 'feedback',
+        filters: { node_type: 'feedback' }
+      });
+      
+      // Transform the data to match our interface
+      if (data && data.results) {
+        const transformedFeedback = data.results.map((item: any) => ({
+          feedback_id: item.id,
+          agent_type: item.agent_type || 'system',
+          feedback_type: item.feedback_type || 'POSITIVE',
+          feedback_score: item.feedback_score || item.score || 0.5,
+          feedback_text: item.feedback_text || item.content || 'No feedback text',
+          created_at: item.created_at || new Date().toISOString()
+        }));
+        setFeedback(transformedFeedback);
+      } else {
+        setFeedback([]);
       }
     } catch (error) {
       console.error('Failed to load feedback:', error);
-      setFeedback([
-        {
-          feedback_id: 'feedback_001',
-          agent_type: 'compliance_agent',
-          feedback_type: 'POSITIVE',
-          feedback_score: 0.9,
-          feedback_text: 'Accurate risk assessment with good reasoning',
-          created_at: new Date().toISOString()
-        }
-      ]);
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Failed to load feedback',
+        timestamp: Date.now()
+      });
+      setFeedback([]);
     } finally {
       setLoading(false);
     }
@@ -150,19 +180,39 @@ export default function MemoryManagement() {
   const loadConsolidationStatus = async () => {
     setLoading(true);
     try {
-      // API endpoint: GET /api/memory/consolidation/status
-      const response = await fetch('/api/memory/consolidation/status');
-      if (response.ok) {
-        const data = await response.json();
-        setConsolidationStatus(data.status);
+      // Use the API client to get memory stats
+      const data = await apiClient.getMemoryStats();
+      
+      // Transform the data to match our interface
+      if (data) {
+        setConsolidationStatus({
+          is_running: data.consolidation_running || false,
+          last_consolidation: data.last_consolidation || new Date().toISOString(),
+          memories_consolidated: data.memories_consolidated || 0,
+          space_freed_mb: data.space_freed_mb || 0,
+          next_scheduled_run: data.next_scheduled_run || 'auto'
+        });
+      } else {
+        setConsolidationStatus({
+          is_running: false,
+          last_consolidation: new Date().toISOString(),
+          memories_consolidated: 0,
+          space_freed_mb: 0,
+          next_scheduled_run: 'auto'
+        });
       }
     } catch (error) {
       console.error('Failed to load consolidation status:', error);
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Failed to load consolidation status',
+        timestamp: Date.now()
+      });
       setConsolidationStatus({
         is_running: false,
         last_consolidation: new Date().toISOString(),
-        memories_consolidated: 145,
-        space_freed_mb: 23.5,
+        memories_consolidated: 0,
+        space_freed_mb: 0,
         next_scheduled_run: 'auto'
       });
     } finally {
@@ -172,24 +222,25 @@ export default function MemoryManagement() {
 
   const runConsolidation = async () => {
     try {
-      // API endpoint: POST /api/memory/consolidation/run
-      const response = await fetch('/api/memory/consolidation/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          memory_type: '',
+      // Use the API client to create a consolidation task
+      await apiClient.createMemoryNode({
+        node_type: 'consolidation_task',
+        content: 'Memory consolidation task',
+        metadata: {
           max_age_days: 90,
           importance_threshold: 0.3
-        })
+        }
       });
       
-      if (response.ok) {
-        alert('Memory consolidation started successfully');
-        loadConsolidationStatus();
-      }
+      alert('Memory consolidation started successfully');
+      loadConsolidationStatus();
     } catch (error) {
       console.error('Failed to run consolidation:', error);
-      alert('Failed to start consolidation');
+      setError({
+        hasError: true,
+        message: error instanceof Error ? error.message : 'Failed to start consolidation',
+        timestamp: Date.now()
+      });
     }
   };
 

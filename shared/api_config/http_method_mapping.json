@@ -1,0 +1,287 @@
+{
+  "version": "1.0.0",
+  "description": "HTTP Method Mapping Configuration for RESTful API Design",
+  "last_updated": "2024-01-15",
+  "method_guidelines": {
+    "GET": {
+      "description": "Retrieve data from the server",
+      "safe": true,
+      "idempotent": true,
+      "cacheable": true,
+      "use_cases": [
+        "Retrieve resource collections",
+        "Retrieve individual resources",
+        "Retrieve resource metadata",
+        "Search and filter operations",
+        "Get statistics and analytics"
+      ],
+      "examples": [
+        "GET /api/users - List all users",
+        "GET /api/users/123 - Get user with ID 123",
+        "GET /api/transactions?status=pending - Filter transactions",
+        "GET /api/reports/summary - Get summary statistics"
+      ]
+    },
+    "POST": {
+      "description": "Create new resources or perform actions",
+      "safe": false,
+      "idempotent": false,
+      "cacheable": false,
+      "use_cases": [
+        "Create new resources",
+        "Execute operations that don't fit CRUD",
+        "Process data and return results",
+        "Trigger asynchronous operations",
+        "Upload files or large data"
+      ],
+      "examples": [
+        "POST /api/users - Create new user",
+        "POST /api/transactions/123/approve - Approve transaction",
+        "POST /api/reports/generate - Generate report",
+        "POST /api/simulations/run - Start simulation"
+      ]
+    },
+    "PUT": {
+      "description": "Update entire resources or create if not exists",
+      "safe": false,
+      "idempotent": true,
+      "cacheable": false,
+      "use_cases": [
+        "Update complete resource representation",
+        "Create resource if it doesn't exist (with client-provided ID)",
+        "Replace entire resource state"
+      ],
+      "examples": [
+        "PUT /api/users/123 - Update entire user profile",
+        "PUT /api/settings/preferences - Update all user preferences",
+        "PUT /api/policies/active - Replace active policy set"
+      ]
+    },
+    "PATCH": {
+      "description": "Partially update resources",
+      "safe": false,
+      "idempotent": true,
+      "cacheable": false,
+      "use_cases": [
+        "Partial resource updates",
+        "Modify specific fields",
+        "Append to collections",
+        "State transitions"
+      ],
+      "examples": [
+        "PATCH /api/users/123 - Update user email only",
+        "PATCH /api/tasks/456/status - Change task status",
+        "PATCH /api/profiles/789/preferences - Update specific preferences"
+      ]
+    },
+    "DELETE": {
+      "description": "Remove resources from the server",
+      "safe": false,
+      "idempotent": true,
+      "cacheable": false,
+      "use_cases": [
+        "Delete resources",
+        "Cancel operations",
+        "Remove relationships",
+        "Archive or soft-delete"
+      ],
+      "examples": [
+        "DELETE /api/users/123 - Delete user",
+        "DELETE /api/sessions/current - Logout",
+        "DELETE /api/cache/all - Clear cache"
+      ]
+    },
+    "HEAD": {
+      "description": "Retrieve headers without body (same as GET but no response body)",
+      "safe": true,
+      "idempotent": true,
+      "cacheable": true,
+      "use_cases": [
+        "Check resource existence",
+        "Get metadata without downloading content",
+        "Validate caching headers"
+      ],
+      "examples": [
+        "HEAD /api/documents/123 - Check if document exists",
+        "HEAD /api/files/large.zip - Get file size without downloading"
+      ]
+    },
+    "OPTIONS": {
+      "description": "Describe communication options for the target resource",
+      "safe": true,
+      "idempotent": true,
+      "cacheable": false,
+      "use_cases": [
+        "CORS preflight requests",
+        "Discover allowed methods",
+        "Get resource capabilities"
+      ],
+      "examples": [
+        "OPTIONS /api/users - Get allowed methods for users endpoint",
+        "OPTIONS /api/transactions/123 - Check transaction capabilities"
+      ]
+    }
+  },
+  "resource_operation_mapping": {
+    "collection_operations": {
+      "list": "GET",
+      "create": "POST",
+      "bulk_update": "PUT",
+      "bulk_delete": "DELETE",
+      "search": "GET",
+      "filter": "GET"
+    },
+    "item_operations": {
+      "retrieve": "GET",
+      "update": "PUT",
+      "partial_update": "PATCH",
+      "delete": "DELETE",
+      "replace": "PUT"
+    },
+    "action_operations": {
+      "execute": "POST",
+      "process": "POST",
+      "calculate": "POST",
+      "validate": "POST",
+      "analyze": "POST",
+      "generate": "POST",
+      "import": "POST",
+      "export": "POST"
+    },
+    "relationship_operations": {
+      "associate": "POST",
+      "dissociate": "DELETE",
+      "update_relationship": "PUT",
+      "get_related": "GET"
+    }
+  },
+  "http_status_codes": {
+    "successful": {
+      "200": "OK - Request succeeded",
+      "201": "Created - Resource created successfully",
+      "202": "Accepted - Request accepted for processing",
+      "204": "No Content - Request succeeded but no content to return"
+    },
+    "redirection": {
+      "301": "Moved Permanently - Resource moved to new URL",
+      "302": "Found - Resource temporarily moved",
+      "304": "Not Modified - Resource not changed since last request"
+    },
+    "client_error": {
+      "400": "Bad Request - Invalid request syntax",
+      "401": "Unauthorized - Authentication required",
+      "403": "Forbidden - Insufficient permissions",
+      "404": "Not Found - Resource does not exist",
+      "405": "Method Not Allowed - HTTP method not supported",
+      "409": "Conflict - Request conflicts with current state",
+      "422": "Unprocessable Entity - Validation failed",
+      "429": "Too Many Requests - Rate limit exceeded"
+    },
+    "server_error": {
+      "500": "Internal Server Error - Unexpected server error",
+      "502": "Bad Gateway - Invalid response from upstream server",
+      "503": "Service Unavailable - Server temporarily unavailable",
+      "504": "Gateway Timeout - Upstream server timeout"
+    }
+  },
+  "method_validation_rules": {
+    "GET": {
+      "body_allowed": false,
+      "query_parameters_allowed": true,
+      "path_parameters_allowed": true,
+      "headers_required": ["Accept"],
+      "content_types": ["application/json", "application/xml", "text/plain"]
+    },
+    "POST": {
+      "body_allowed": true,
+      "query_parameters_allowed": true,
+      "path_parameters_allowed": true,
+      "headers_required": ["Content-Type"],
+      "content_types": ["application/json", "application/xml", "multipart/form-data", "application/x-www-form-urlencoded"]
+    },
+    "PUT": {
+      "body_allowed": true,
+      "query_parameters_allowed": false,
+      "path_parameters_allowed": true,
+      "headers_required": ["Content-Type"],
+      "content_types": ["application/json", "application/xml"]
+    },
+    "PATCH": {
+      "body_allowed": true,
+      "query_parameters_allowed": false,
+      "path_parameters_allowed": true,
+      "headers_required": ["Content-Type"],
+      "content_types": ["application/json", "application/merge-patch+json"]
+    },
+    "DELETE": {
+      "body_allowed": false,
+      "query_parameters_allowed": false,
+      "path_parameters_allowed": true,
+      "headers_required": [],
+      "content_types": []
+    }
+  },
+  "common_patterns": {
+    "crud_endpoints": [
+      {
+        "resource": "users",
+        "endpoints": [
+          "GET /api/users - List users",
+          "POST /api/users - Create user",
+          "GET /api/users/{id} - Get user",
+          "PUT /api/users/{id} - Update user",
+          "DELETE /api/users/{id} - Delete user"
+        ]
+      },
+      {
+        "resource": "transactions",
+        "endpoints": [
+          "GET /api/transactions - List transactions",
+          "POST /api/transactions - Create transaction",
+          "GET /api/transactions/{id} - Get transaction",
+          "PUT /api/transactions/{id} - Update transaction",
+          "POST /api/transactions/{id}/approve - Approve transaction",
+          "POST /api/transactions/{id}/reject - Reject transaction"
+        ]
+      }
+    ],
+    "action_endpoints": [
+      "POST /api/reports/generate - Generate report",
+      "POST /api/simulations/run - Run simulation",
+      "POST /api/backups/create - Create backup",
+      "POST /api/notifications/send - Send notification"
+    ],
+    "bulk_operations": [
+      "POST /api/users/bulk-import - Import multiple users",
+      "PUT /api/transactions/bulk-update - Update multiple transactions",
+      "DELETE /api/sessions/bulk-cleanup - Clean up old sessions"
+    ]
+  },
+  "validation_rules": [
+    {
+      "rule": "GET methods should not have request bodies",
+      "severity": "error",
+      "check": "method == 'GET' && has_request_body"
+    },
+    {
+      "rule": "POST/PUT/PATCH methods should specify Content-Type",
+      "severity": "warning",
+      "check": "method in ['POST', 'PUT', 'PATCH'] && !has_content_type_header"
+    },
+    {
+      "rule": "DELETE methods should not have request bodies",
+      "severity": "warning",
+      "check": "method == 'DELETE' && has_request_body"
+    },
+    {
+      "rule": "Resource creation should return 201 status",
+      "severity": "info",
+      "check": "method == 'POST' && creates_resource && !returns_201"
+    },
+    {
+      "rule": "Idempotent operations should use PUT instead of POST",
+      "severity": "warning",
+      "check": "method == 'POST' && is_idempotent && !has_unique_identifier"
+    }
+  ]
+}

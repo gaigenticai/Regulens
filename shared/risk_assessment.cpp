@@ -1371,7 +1371,7 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     // Factor 1: Number of ownership layers (depth of ownership chain)
     // Research shows >3 layers significantly increases AML risk
     int ownership_layers = 0;
-    if (entity.metadata.contains("ownership_layers")) {
+    if (entity.metadata.find("ownership_layers") != entity.metadata.end()) {
         try {
             ownership_layers = std::stoi(entity.metadata.at("ownership_layers"));
         } catch (...) {
@@ -1396,7 +1396,7 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 2: Number of beneficial owners and concentration
     int num_beneficial_owners = 0;
-    if (entity.metadata.contains("num_beneficial_owners")) {
+    if (entity.metadata.find("num_beneficial_owners") != entity.metadata.end()) {
         try {
             num_beneficial_owners = std::stoi(entity.metadata.at("num_beneficial_owners"));
         } catch (...) {
@@ -1421,7 +1421,7 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 3: Use of offshore entities in ownership structure
     int offshore_entities_count = 0;
-    if (entity.metadata.contains("offshore_entities_in_structure")) {
+    if (entity.metadata.find("offshore_entities_in_structure") != entity.metadata.end()) {
         try {
             offshore_entities_count = std::stoi(entity.metadata.at("offshore_entities_in_structure"));
         } catch (...) {
@@ -1444,7 +1444,7 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 4: Use of nominee directors/shareholders
     bool has_nominee_directors = false;
-    if (entity.metadata.contains("has_nominee_directors")) {
+    if (entity.metadata.find("has_nominee_directors") != entity.metadata.end()) {
         const auto& value = entity.metadata.at("has_nominee_directors");
         has_nominee_directors = (value == "true" || value == "1" || value == "yes");
     }
@@ -1454,7 +1454,7 @@ double RiskAssessmentEngine::analyze_ownership_complexity(const EntityProfile& e
     
     // Factor 5: Cross-border ownership complexity
     int num_jurisdictions = 0;
-    if (entity.metadata.contains("num_jurisdictions_in_structure")) {
+    if (entity.metadata.find("num_jurisdictions_in_structure") != entity.metadata.end()) {
         try {
             num_jurisdictions = std::stoi(entity.metadata.at("num_jurisdictions_in_structure"));
         } catch (...) {

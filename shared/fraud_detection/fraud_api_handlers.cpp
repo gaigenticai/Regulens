@@ -780,5 +780,429 @@ std::string get_fraud_stats(PGconn* db_conn, const std::map<std::string, std::st
     return response.dump();
 }
 
+/**
+ * GET /fraud/rules
+ * Get all fraud rules with filtering
+ * Production: Queries fraud_rules table with pagination
+ */
+std::string get_fraud_rules(PGconn* db_conn, const std::map<std::string, std::string>& query_params) {
+    std::string query = "SELECT rule_id, rule_name, rule_type, severity, is_enabled, "
+                       "priority, description, created_at, updated_at, created_by, "
+                       "alert_count, last_triggered_at "
+                       "FROM fraud_rules WHERE 1=1 ";
+
+    std::vector<std::string> params;
+    int param_idx = 1;
+
+    // Add filters
+    if (query_params.find("enabled") != query_params.end()) {
+        query += " AND is_enabled = $" + std::to_string(param_idx++);
+        params.push_back(query_params.at("enabled"));
+    }
+    if (query_params.find("rule_type") != query_params.end()) {
+        query += " AND rule_type = $" + std::to_string(param_idx++);
+        params.push_back(query_params.at("rule_type"));
+    }
+    if (query_params.find("severity") != query_params.end()) {
+        query += " AND severity = $" + std::to_string(param_idx++);
+        params.push_back(query_params.at("severity"));
+    }
+
+    query += " ORDER BY priority ASC, created_at DESC";
+
+    // Add pagination
+    int limit = 50;
+    int offset = 0;
+    
+    if (query_params.find("limit") != query_params.end()) {
+        limit = std::atoi(query_params.at("limit").c_str());
+        limit = std::min(limit, 1000);
+    }
+    if (query_params.find("offset") != query_params.end()) {
+        offset = std::atoi(query_params.at("offset").c_str());
+    }
+    
+    query += " LIMIT $" + std::to_string(param_idx++) + " OFFSET $" + std::to_string(param_idx++);
+    params.push_back(std::to_string(limit));
+    params.push_back(std::to_string(offset));
+
+    std::vector<const char*> paramValues;
+    for (const auto& p : params) {
+        paramValues.push_back(p.c_str());
+    }
+
+    PGresult* result = PQexecParams(db_conn, query.c_str(), paramValues.size(), NULL,
+                                   paramValues.empty() ? NULL : paramValues.data(), NULL, NULL, 0);
+
+    if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+        std::string error = PQerrorMessage(db_conn);
+        PQclear(result);
+        return "{\"error\":\"Database query failed: " + error + "\"}";
+    }
+
+    json rules = json::array();
+    int count = PQntuples(result);
+
+    for (int i = 0; i < count; i++) {
+        json rule;
+        rule["id"] = PQgetvalue(result, i, 0);
+        rule["name"] = PQgetvalue(result, i, 1);
+        rule["type"] = PQgetvalue(result, i, 2);
+        rule["severity"] = PQgetvalue(result, i, 3);
+        rule["enabled"] = std::string(PQgetvalue(result, i, 4)) == "t";
+        rule["priority"] = std::atoi(PQgetvalue(result, i, 5));
+        rule["description"] = PQgetvalue(result, i, 6);
+        rule["createdAt"] = PQgetvalue(result, i, 7);
+        rule["updatedAt"] = PQgetvalue(result, i, 8);
+        rule["createdBy"] = PQgetvalue(result, i, 9);
+        rule["alertCount"] = std::atoi(PQgetvalue(result, i, 10));
+        if (!PQgetisnull(result, i, 11)) {
+            rule["lastTriggeredAt"] = PQgetvalue(result, i, 11);
+        }
+
+        rules.push_back(rule);
+    }
+
+    PQclear(result);
+
+    // Get total count
+    std::string count_query = "SELECT COUNT(*) FROM fraud_rules WHERE 1=1 ";
+    std::vector<std::string> count_params;
+    int count_param_idx = 1;
+
+    if (query_params.find("enabled") != query_params.end()) {
+        count_query += " AND is_enabled = $" + std::to_string(count_param_idx++);
+        count_params.push_back(query_params.at("enabled"));
+    }
+    if (query_params.find("rule_type") != query_params.end()) {
+        count_query += " AND rule_type = $" + std::to_string(count_param_idx++);
+        count_params.push_back(query_params.at("rule_type"));
+    }
+    if (query_params.find("severity") != query_params.end()) {
+        count_query += " AND severity = $" + std::to_string(count_param_idx++);
+        count_params.push_back(query_params.at("severity"));
+    }
+
+    std::vector<const char*> countParamValues;
+    for (const auto& p : count_params) {
+        countParamValues.push_back(p.c_str());
+    }
+
+    PGresult* count_result = PQexecParams(db_conn, count_query.c_str(), countParamValues.size(), NULL,
+                                         countParamValues.empty() ? NULL : countParamValues.data(), NULL, NULL, 0);
+
+    json response;
+    response["rules"] = rules;
+    response["pagination"] = {
+        {"limit", limit},
+        {"offset", offset},
+        {"total", PQntuples(count_result) > 0 ? std::atoi(PQgetvalue(count_result, 0, 0)) : 0}
+    };
+
+    PQclear(count_result);
+    return response.dump();
+}
+
+/**
+ * GET /fraud/models
+ * Get fraud detection models
+ * Production: Queries fraud_detection_models table
+ */
+std::string get_fraud_models(PGconn* db_conn) {
+    std::string query = "SELECT model_id, model_name, model_type, version, status, "
+                       "accuracy, precision_score, recall, f1_score, "
+                       "training_data_size, last_trained_at, created_at, "
+                       "is_active, description "
+                       "FROM fraud_detection_models "
+                       "ORDER BY created_at DESC";
+
+    PGresult* result = PQexec(db_conn, query.c_str());
+
+    if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+        std::string error = PQerrorMessage(db_conn);
+        PQclear(result);
+        return "{\"error\":\"Database query failed: " + error + "\"}";
+    }
+
+    json models = json::array();
+    int count = PQntuples(result);
+
+    for (int i = 0; i < count; i++) {
+        json model;
+        model["id"] = PQgetvalue(result, i, 0);
+        model["name"] = PQgetvalue(result, i, 1);
+        model["type"] = PQgetvalue(result, i, 2);
+        model["version"] = PQgetvalue(result, i, 3);
+        model["status"] = PQgetvalue(result, i, 4);
+        if (!PQgetisnull(result, i, 5)) {
+            model["accuracy"] = std::atof(PQgetvalue(result, i, 5));
+        }
+        if (!PQgetisnull(result, i, 6)) {
+            model["precision"] = std::atof(PQgetvalue(result, i, 6));
+        }
+        if (!PQgetisnull(result, i, 7)) {
+            model["recall"] = std::atof(PQgetvalue(result, i, 7));
+        }
+        if (!PQgetisnull(result, i, 8)) {
+            model["f1Score"] = std::atof(PQgetvalue(result, i, 8));
+        }
+        if (!PQgetisnull(result, i, 9)) {
+            model["trainingDataSize"] = std::atoi(PQgetvalue(result, i, 9));
+        }
+        if (!PQgetisnull(result, i, 10)) {
+            model["lastTrainedAt"] = PQgetvalue(result, i, 10);
+        }
+        model["createdAt"] = PQgetvalue(result, i, 11);
+        model["isActive"] = std::string(PQgetvalue(result, i, 12)) == "t";
+        model["description"] = PQgetvalue(result, i, 13);
+
+        models.push_back(model);
+    }
+
+    PQclear(result);
+
+    json response;
+    response["models"] = models;
+
+    return response.dump();
+}
+
+/**
+ * POST /fraud/models/train
+ * Train a new fraud detection model
+ * Production: Creates model training job
+ */
+std::string train_fraud_model(PGconn* db_conn, const std::string& request_body, const std::string& user_id) {
+    try {
+        json req = json::parse(request_body);
+
+        if (!req.contains("model_name") || !req.contains("model_type")) {
+            return "{\"error\":\"Missing required fields: model_name, model_type\"}";
+        }
+
+        std::string model_name = req["model_name"];
+        std::string model_type = req["model_type"];
+        std::string description = req.value("description", "");
+        std::string training_params = req.contains("training_parameters") ? req["training_parameters"].dump() : "{}";
+
+        // Create training job
+        std::string query = "INSERT INTO fraud_detection_models "
+                           "(model_name, model_type, version, status, description, "
+                           "training_parameters, created_by, created_at) "
+                           "VALUES ($1, $2, '1.0', 'training', $3, $4, $5, CURRENT_TIMESTAMP) "
+                           "RETURNING model_id, created_at";
+
+        const char* paramValues[5] = {
+            model_name.c_str(),
+            model_type.c_str(),
+            description.c_str(),
+            training_params.c_str(),
+            user_id.c_str()
+        };
+
+        PGresult* result = PQexecParams(db_conn, query.c_str(), 5, NULL, paramValues, NULL, NULL, 0);
+
+        if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+            std::string error = PQerrorMessage(db_conn);
+            PQclear(result);
+            return "{\"error\":\"Failed to create training job: " + error + "\"}";
+        }
+
+        json response;
+        response["modelId"] = PQgetvalue(result, 0, 0);
+        response["modelName"] = model_name;
+        response["modelType"] = model_type;
+        response["status"] = "training";
+        response["createdAt"] = PQgetvalue(result, 0, 1);
+        response["message"] = "Model training job created successfully";
+
+        PQclear(result);
+        return response.dump();
+
+    } catch (const json::exception& e) {
+        return "{\"error\":\"Invalid JSON: " + std::string(e.what()) + "\"}";
+    }
+}
+
+/**
+ * GET /fraud/models/{id}/performance
+ * Get fraud model performance metrics
+ * Production: Queries model performance data
+ */
+std::string get_model_performance(PGconn* db_conn, const std::string& model_id) {
+    std::string query = "SELECT model_id, model_name, accuracy, precision_score, recall, "
+                       "f1_score, confusion_matrix, roc_auc, training_data_size, "
+                       "validation_data_size, last_trained_at, performance_metrics "
+                       "FROM fraud_detection_models "
+                       "WHERE model_id = $1";
+
+    const char* paramValues[1] = {model_id.c_str()};
+    PGresult* result = PQexecParams(db_conn, query.c_str(), 1, NULL, paramValues, NULL, NULL, 0);
+
+    if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+        std::string error = PQerrorMessage(db_conn);
+        PQclear(result);
+        return "{\"error\":\"Database query failed: " + error + "\"}";
+    }
+
+    if (PQntuples(result) == 0) {
+        PQclear(result);
+        return "{\"error\":\"Model not found\",\"model_id\":\"" + model_id + "\"}";
+    }
+
+    json performance;
+    performance["modelId"] = PQgetvalue(result, 0, 0);
+    performance["modelName"] = PQgetvalue(result, 0, 1);
+    if (!PQgetisnull(result, 0, 2)) {
+        performance["accuracy"] = std::atof(PQgetvalue(result, 0, 2));
+    }
+    if (!PQgetisnull(result, 0, 3)) {
+        performance["precision"] = std::atof(PQgetvalue(result, 0, 3));
+    }
+    if (!PQgetisnull(result, 0, 4)) {
+        performance["recall"] = std::atof(PQgetvalue(result, 0, 4));
+    }
+    if (!PQgetisnull(result, 0, 5)) {
+        performance["f1Score"] = std::atof(PQgetvalue(result, 0, 5));
+    }
+    if (!PQgetisnull(result, 0, 6)) {
+        performance["confusionMatrix"] = json::parse(PQgetvalue(result, 0, 6));
+    }
+    if (!PQgetisnull(result, 0, 7)) {
+        performance["rocAuc"] = std::atof(PQgetvalue(result, 0, 7));
+    }
+    if (!PQgetisnull(result, 0, 8)) {
+        performance["trainingDataSize"] = std::atoi(PQgetvalue(result, 0, 8));
+    }
+    if (!PQgetisnull(result, 0, 9)) {
+        performance["validationDataSize"] = std::atoi(PQgetvalue(result, 0, 9));
+    }
+    if (!PQgetisnull(result, 0, 10)) {
+        performance["lastTrainedAt"] = PQgetvalue(result, 0, 10);
+    }
+    if (!PQgetisnull(result, 0, 11)) {
+        performance["detailedMetrics"] = json::parse(PQgetvalue(result, 0, 11));
+    }
+
+    PQclear(result);
+    return performance.dump();
+}
+
+/**
+ * POST /fraud/scan/batch
+ * Run batch fraud scan
+ * Production: Creates and executes batch scan job
+ */
+std::string run_batch_fraud_scan(PGconn* db_conn, const std::string& request_body, const std::string& user_id) {
+    try {
+        json req = json::parse(request_body);
+
+        std::string time_range = req.value("time_range", "7d");
+        std::string scan_type = req.value("scan_type", "all_transactions");
+        json filters = req.value("filters", json::object());
+
+        // Parse time range
+        int days = 7;
+        if (time_range.back() == 'd') {
+            days = std::atoi(time_range.substr(0, time_range.length()-1).c_str());
+        }
+
+        // Create batch scan job
+        std::string query = "INSERT INTO fraud_batch_scan_jobs "
+                           "(job_id, scan_type, time_range_days, filters, status, "
+                           "created_by, created_at) "
+                           "VALUES (gen_random_uuid(), $1, $2, $3, 'queued', $4, CURRENT_TIMESTAMP) "
+                           "RETURNING job_id, created_at";
+
+        std::string days_str = std::to_string(days);
+        std::string filters_json = filters.dump();
+
+        const char* paramValues[4] = {
+            scan_type.c_str(),
+            days_str.c_str(),
+            filters_json.c_str(),
+            user_id.c_str()
+        };
+
+        PGresult* result = PQexecParams(db_conn, query.c_str(), 4, NULL, paramValues, NULL, NULL, 0);
+
+        if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+            std::string error = PQerrorMessage(db_conn);
+            PQclear(result);
+            return "{\"error\":\"Failed to create batch scan job: " + error + "\"}";
+        }
+
+        json response;
+        response["jobId"] = PQgetvalue(result, 0, 0);
+        response["scanType"] = scan_type;
+        response["timeRange"] = time_range;
+        response["status"] = "queued";
+        response["createdAt"] = PQgetvalue(result, 0, 1);
+        response["message"] = "Batch scan job created successfully";
+
+        PQclear(result);
+        return response.dump();
+
+    } catch (const json::exception& e) {
+        return "{\"error\":\"Invalid JSON: " + std::string(e.what()) + "\"}";
+    }
+}
+
+/**
+ * POST /fraud/export
+ * Export fraud report
+ * Production: Creates fraud report export job
+ */
+std::string export_fraud_report(PGconn* db_conn, const std::string& request_body, const std::string& user_id) {
+    try {
+        json req = json::parse(request_body);
+
+        std::string report_type = req.value("report_type", "summary");
+        std::string time_range = req.value("time_range", "30d");
+        std::string format = req.value("format", "csv");
+        json filters = req.value("filters", json::object());
+
+        // Create export job
+        std::string query = "INSERT INTO fraud_report_exports "
+                           "(export_id, report_type, time_range, format, filters, "
+                           "status, created_by, created_at) "
+                           "VALUES (gen_random_uuid(), $1, $2, $3, $4, 'processing', $5, CURRENT_TIMESTAMP) "
+                           "RETURNING export_id, created_at";
+
+        std::string filters_json = filters.dump();
+
+        const char* paramValues[5] = {
+            report_type.c_str(),
+            time_range.c_str(),
+            format.c_str(),
+            filters_json.c_str(),
+            user_id.c_str()
+        };
+
+        PGresult* result = PQexecParams(db_conn, query.c_str(), 5, NULL, paramValues, NULL, NULL, 0);
+
+        if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+            std::string error = PQerrorMessage(db_conn);
+            PQclear(result);
+            return "{\"error\":\"Failed to create export job: " + error + "\"}";
+        }
+
+        json response;
+        response["exportId"] = PQgetvalue(result, 0, 0);
+        response["reportType"] = report_type;
+        response["timeRange"] = time_range;
+        response["format"] = format;
+        response["status"] = "processing";
+        response["createdAt"] = PQgetvalue(result, 0, 1);
+        response["message"] = "Export job created successfully";
+
+        PQclear(result);
+        return response.dump();
+
+    } catch (const json::exception& e) {
+        return "{\"error\":\"Invalid JSON: " + std::string(e.what()) + "\"}";
+    }
+}
+
 } // namespace fraud
 } // namespace regulens

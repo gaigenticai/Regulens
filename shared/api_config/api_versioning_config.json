@@ -1,0 +1,227 @@
+{
+  "versioning_strategy": {
+    "current_version": "v1",
+    "supported_versions": ["v1"],
+    "default_version": "v1",
+    "versioning_method": "url_path",
+    "sunset_policy": {
+      "deprecation_notice_period_days": 90,
+      "shutdown_grace_period_days": 30,
+      "maintenance_period_days": 180
+    },
+    "compatibility_matrix": {
+      "v1": {
+        "release_date": "2024-01-15",
+        "status": "current",
+        "supported_until": null,
+        "breaking_changes": [],
+        "new_features": [
+          "Initial API release with core functionality",
+          "JWT authentication",
+          "Transaction processing",
+          "Fraud detection",
+          "Advanced rule engine",
+          "Policy generation",
+          "Regulatory simulator"
+        ],
+        "deprecated_features": [],
+        "migration_guide": null
+      }
+    }
+  },
+  "versioning_methods": {
+    "url_path": {
+      "description": "Version in URL path (e.g., /api/v1/transactions)",
+      "pattern": "/api/{version}/{resource}",
+      "pros": ["Explicit versioning", "Caching friendly", "SEO friendly"],
+      "cons": ["URL pollution", "Client must update URLs"],
+      "enabled": true
+    },
+    "header": {
+      "description": "Version in Accept header (e.g., Accept: application/vnd.regulens.v1+json)",
+      "header_name": "Accept",
+      "content_type_pattern": "application/vnd.regulens.{version}+json",
+      "pros": ["Clean URLs", "Content negotiation", "RESTful"],
+      "cons": ["Less explicit", "Caching challenges"],
+      "enabled": false
+    },
+    "query_parameter": {
+      "description": "Version as query parameter (e.g., /api/transactions?v=1)",
+      "parameter_name": "v",
+      "pros": ["Clean URLs", "Easy to test", "Gradual migration"],
+      "cons": ["Cache busting", "SEO unfriendly", "Less discoverable"],
+      "enabled": false
+    }
+  },
+  "endpoint_versioning": {
+    "v1_endpoints": {
+      "authentication": {
+        "login": {"version": "v1", "status": "current", "changes": []},
+        "logout": {"version": "v1", "status": "current", "changes": []},
+        "refresh": {"version": "v1", "status": "current", "changes": []},
+        "me": {"version": "v1", "status": "current", "changes": []}
+      },
+      "transactions": {
+        "list": {"version": "v1", "status": "current", "changes": []},
+        "get": {"version": "v1", "status": "current", "changes": []},
+        "approve": {"version": "v1", "status": "current", "changes": []},
+        "reject": {"version": "v1", "status": "current", "changes": []},
+        "analyze": {"version": "v1", "status": "current", "changes": []},
+        "stats": {"version": "v1", "status": "current", "changes": []},
+        "patterns": {"version": "v1", "status": "current", "changes": []},
+        "anomalies": {"version": "v1", "status": "current", "changes": []}
+      },
+      "fraud_detection": {
+        "rules": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "get": {"version": "v1", "status": "current", "changes": []},
+          "create": {"version": "v1", "status": "current", "changes": []},
+          "update": {"version": "v1", "status": "current", "changes": []},
+          "delete": {"version": "v1", "status": "current", "changes": []},
+          "test": {"version": "v1", "status": "current", "changes": []}
+        },
+        "models": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "train": {"version": "v1", "status": "current", "changes": []},
+          "performance": {"version": "v1", "status": "current", "changes": []}
+        },
+        "scan": {
+          "batch": {"version": "v1", "status": "current", "changes": []}
+        }
+      },
+      "advanced_rule_engine": {
+        "evaluate": {"version": "v1", "status": "current", "changes": []},
+        "batch_evaluate": {"version": "v1", "status": "current", "changes": []},
+        "rules": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "get": {"version": "v1", "status": "current", "changes": []},
+          "create": {"version": "v1", "status": "current", "changes": []},
+          "update": {"version": "v1", "status": "current", "changes": []},
+          "delete": {"version": "v1", "status": "current", "changes": []},
+          "deactivate": {"version": "v1", "status": "current", "changes": []}
+        },
+        "testing": {
+          "execute": {"version": "v1", "status": "current", "changes": []},
+          "test": {"version": "v1", "status": "current", "changes": []},
+          "validate": {"version": "v1", "status": "current", "changes": []}
+        },
+        "analytics": {
+          "metrics": {"version": "v1", "status": "current", "changes": []},
+          "stats": {"version": "v1", "status": "current", "changes": []},
+          "reset": {"version": "v1", "status": "current", "changes": []}
+        }
+      },
+      "policy_generation": {
+        "generate": {"version": "v1", "status": "current", "changes": []},
+        "validate": {"version": "v1", "status": "current", "changes": []},
+        "rules": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "get": {"version": "v1", "status": "current", "changes": []},
+          "search": {"version": "v1", "status": "current", "changes": []},
+          "update": {"version": "v1", "status": "current", "changes": []},
+          "delete": {"version": "v1", "status": "current", "changes": []}
+        },
+        "deployment": {
+          "deploy": {"version": "v1", "status": "current", "changes": []},
+          "history": {"version": "v1", "status": "current", "changes": []},
+          "versions": {"version": "v1", "status": "current", "changes": []}
+        },
+        "templates": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "examples": {"version": "v1", "status": "current", "changes": []}
+        }
+      },
+      "simulator": {
+        "scenarios": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "get": {"version": "v1", "status": "current", "changes": []},
+          "create": {"version": "v1", "status": "current", "changes": []},
+          "update": {"version": "v1", "status": "current", "changes": []},
+          "delete": {"version": "v1", "status": "current", "changes": []},
+          "metrics": {"version": "v1", "status": "current", "changes": []}
+        },
+        "templates": {
+          "list": {"version": "v1", "status": "current", "changes": []},
+          "get": {"version": "v1", "status": "current", "changes": []},
+          "create_scenario": {"version": "v1", "status": "current", "changes": []}
+        },
+        "execution": {
+          "run": {"version": "v1", "status": "current", "changes": []},
+          "status": {"version": "v1", "status": "current", "changes": []},
+          "cancel": {"version": "v1", "status": "current", "changes": []},
+          "results": {"version": "v1", "status": "current", "changes": []}
+        },
+        "analytics": {
+          "history": {"version": "v1", "status": "current", "changes": []},
+          "analytics": {"version": "v1", "status": "current", "changes": []},
+          "popular": {"version": "v1", "status": "current", "changes": []}
+        }
+      }
+    }
+  },
+  "migration_strategies": {
+    "breaking_changes_policy": {
+      "major_version_bump": "Breaking changes require major version increment",
+      "deprecation_warnings": "90 days advance notice for breaking changes",
+      "backward_compatibility": "Maintain backward compatibility within major version",
+      "migration_support": "Provide migration guides and tools"
+    },
+    "feature_additions": {
+      "minor_version_bump": "New features use minor version increments",
+      "backward_compatible": "All additions maintain backward compatibility",
+      "opt_in_features": "New features are opt-in by default"
+    },
+    "bug_fixes": {
+      "patch_version_bump": "Bug fixes use patch version increments",
+      "backward_compatible": "All fixes maintain backward compatibility",
+      "hotfix_support": "Critical fixes can be deployed as hotfixes"
+    }
+  },
+  "monitoring_and_analytics": {
+    "version_usage_tracking": {
+      "enabled": true,
+      "metrics": [
+        "requests_per_version",
+        "error_rate_by_version",
+        "response_time_by_version",
+        "deprecated_endpoint_usage"
+      ]
+    },
+    "deprecation_warnings": {
+      "enabled": true,
+      "warning_header": "X-API-Deprecation-Warning",
+      "sunset_header": "X-API-Sunset-Date"
+    },
+    "version_health_checks": {
+      "enabled": true,
+      "endpoints_to_monitor": [
+        "/api/v1/health",
+        "/api/v1/status",
+        "/api/v1/version"
+      ]
+    }
+  },
+  "future_version_planning": {
+    "v2_planned_features": [
+      "GraphQL API support",
+      "Real-time WebSocket endpoints",
+      "Advanced analytics and reporting",
+      "Machine learning model management",
+      "Multi-tenant architecture",
+      "Plugin system for extensibility"
+    ],
+    "v2_breaking_changes": [
+      "Unified response format",
+      "Enhanced error handling",
+      "Pagination standardization",
+      "Rate limiting improvements"
+    ],
+    "migration_timeline": {
+      "v2_design_phase": "Q2 2024",
+      "v2_development": "Q3-Q4 2024",
+      "v2_beta_release": "Q1 2025",
+      "v2_stable_release": "Q2 2025",
+      "v1_sunset": "Q4 2025"
+    }
+  }
+}

@@ -1,45 +1,14 @@
 {
-  "name": "regulens",
+  "name": "regulens-mock-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs",
-    "test": "tests"
-  },
+  "description": "Mock backend server for development",
+  "main": "mock-backend.js",
   "scripts": {
-    "test": "playwright test",
-    "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui",
-    "test:debug": "playwright test --debug",
-    "test:chromium": "playwright test --project=chromium",
-    "test:firefox": "playwright test --project=firefox",
-    "test:webkit": "playwright test --project=webkit",
-    "test:report": "playwright show-report tests/e2e/reports/html",
-    "test:codegen": "playwright codegen http://localhost:8080"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/gaigenticai/Regulens.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/gaigenticai/Regulens/issues"
-  },
-  "homepage": "https://github.com/gaigenticai/Regulens#readme",
-  "devDependencies": {
-    "@playwright/test": "^1.56.0",
-    "@types/node": "^24.7.0",
-    "typescript": "^5.9.3"
+    "start": "node mock-backend.js"
   },
   "dependencies": {
+    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.1.0",
-    "pg": "^8.16.3",
-    "redis": "^5.8.3"
+    "jsonwebtoken": "^9.0.2"
   }
 }

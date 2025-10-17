@@ -33,6 +33,7 @@ const AdvancedRuleEngine = lazy(() => import('@/pages/AdvancedRuleEngine'));
 
 // Data & Analytics
 const KnowledgeBase = lazy(() => import('@/pages/KnowledgeBase'));
+const Documentation = lazy(() => import('@/pages/Documentation'));
 
 // Phase 5 - Advanced Features
 const PatternAnalysis = lazy(() => import('@/pages/PatternAnalysis'));
@@ -218,6 +219,13 @@ export const routes: AppRoute[] = [
     element: KnowledgeBase,
     showInNav: true,
     icon: 'BookOpen',
+  },
+  {
+    path: '/documentation',
+    name: 'Documentation',
+    element: Documentation,
+    showInNav: true,
+    icon: 'Book',
   },
   {
     path: '/pattern-analysis',

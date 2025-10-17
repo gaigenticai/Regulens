@@ -20,28 +20,25 @@ namespace simulator {
 
 RegulatorySimulator::RegulatorySimulator(
     std::shared_ptr<PostgreSQLConnection> db_conn,
-    std::shared_ptr<StructuredLogger> logger
+    StructuredLogger& logger
 ) : db_conn_(db_conn), logger_(logger) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for RegulatorySimulator");
     }
-    if (!logger_) {
-        throw std::runtime_error("Logger is required for RegulatorySimulator");
-    }
 
-    logger_->log(LogLevel::INFO, "RegulatorySimulator initialized with impact analysis capabilities");
+    logger_.log(LogLevel::INFO, "RegulatorySimulator initialized with impact analysis capabilities");
 }
 
 RegulatorySimulator::~RegulatorySimulator() {
-    logger_->log(LogLevel::INFO, "RegulatorySimulator shutting down");
+    logger_.log(LogLevel::INFO, "RegulatorySimulator shutting down");
 }
 
 std::optional<SimulationScenario> RegulatorySimulator::create_scenario(const SimulationScenario& scenario, const std::string& user_id) {
     try {
         auto conn = db_conn_->get_connection();
         if (!conn) {
-            logger_->log(LogLevel::ERROR, "Database connection failed in create_scenario");
+            logger_.log(LogLevel::ERROR, "Database connection failed in create_scenario");
             return std::nullopt;
         }
 
@@ -80,17 +77,17 @@ std::optional<SimulationScenario> RegulatorySimulator::create_scenario(const Sim
             created_scenario.created_at = std::chrono::system_clock::now();
             created_scenario.updated_at = std::chrono::system_clock::now();
 
-            logger_->log(LogLevel::INFO, "Created simulation scenario " + scenario_id + " for user " + user_id);
+            logger_.log(LogLevel::INFO, "Created simulation scenario " + scenario_id + " for user " + user_id);
             PQclear(result);
             return created_scenario;
         } else {
-            logger_->log(LogLevel::ERROR, "Failed to create scenario: " + std::string(PQresultErrorMessage(result)));
+            logger_.log(LogLevel::ERROR, "Failed to create scenario: " + std::string(PQresultErrorMessage(result)));
             PQclear(result);
             return std::nullopt;
         }
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in create_scenario: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in create_scenario: " + std::string(e.what()));
         return std::nullopt;
     }
 }
@@ -122,11 +119,11 @@ std::string RegulatorySimulator::run_simulation(const SimulationRequest& request
             update_execution_status(execution_id, "completed", 100.0);
         }
 
-        logger_->log(LogLevel::INFO, "Started simulation execution " + execution_id + " for scenario " + request.scenario_id);
+        logger_.log(LogLevel::INFO, "Started simulation execution " + execution_id + " for scenario " + request.scenario_id);
         return execution_id;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in run_simulation: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in run_simulation: " + std::string(e.what()));
         throw;
     }
 }
@@ -175,7 +172,7 @@ SimulationExecution RegulatorySimulator::create_execution_record(const Simulatio
         return execution;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in create_execution_record: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in create_execution_record: " + std::string(e.what()));
         throw;
     }
 }
@@ -199,7 +196,7 @@ void RegulatorySimulator::execute_simulation_async(const std::string& execution_
         log_simulation_complete(execution_id, ImpactMetrics{}); // Simplified logging
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in execute_simulation_async: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in execute_simulation_async: " + std::string(e.what()));
         update_execution_status(execution_id, "failed", 0.0, std::string(e.what()));
         log_simulation_error(execution_id, e.what());
     }
@@ -330,7 +327,7 @@ SimulationResult RegulatorySimulator::execute_simulation_sync(const std::string&
         return sim_result;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in execute_simulation_sync: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in execute_simulation_sync: " + std::string(e.what()));
         throw;
     }
 }
@@ -384,11 +381,11 @@ ImpactMetrics RegulatorySimulator::analyze_regulatory_impact(const SimulationSce
         metrics.operational_cost_increase = metrics.total_entities_affected * 100.0; // Simplified calculation
         metrics.estimated_implementation_time_days = std::max(30.0, metrics.total_entities_affected / 10.0);
 
-        logger_->log(LogLevel::INFO,
+        logger_.log(LogLevel::INFO,
             "Analyzed regulatory impact: " + std::to_string(metrics.total_entities_affected) + " entities affected");
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in analyze_regulatory_impact: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in analyze_regulatory_impact: " + std::string(e.what()));
         metrics.critical_violations.push_back("Analysis failed: " + std::string(e.what()));
     }
 
@@ -519,7 +516,7 @@ void RegulatorySimulator::store_simulation_result(const std::string& execution_i
     try {
         auto conn = db_conn_->get_connection();
         if (!conn) {
-            logger_->log(LogLevel::ERROR, "Database connection failed in store_simulation_result");
+            logger_.log(LogLevel::ERROR, "Database connection failed in store_simulation_result");
             return;
         }
 
@@ -545,9 +542,9 @@ void RegulatorySimulator::store_simulation_result(const std::string& execution_i
         );
 
         if (PQresultStatus(insert_result) == PGRES_COMMAND_OK) {
-            logger_->log(LogLevel::INFO, "Stored simulation result " + result.result_id + " for execution " + execution_id);
+            logger_.log(LogLevel::INFO, "Stored simulation result " + result.result_id + " for execution " + execution_id);
         } else {
-            logger_->log(LogLevel::ERROR, "Failed to store simulation result: " + std::string(PQresultErrorMessage(insert_result)));
+            logger_.log(LogLevel::ERROR, "Failed to store simulation result: " + std::string(PQresultErrorMessage(insert_result)));
         }
 
         PQclear(insert_result);
@@ -574,7 +571,7 @@ void RegulatorySimulator::store_simulation_result(const std::string& execution_i
         PQclear(update_result);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in store_simulation_result: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in store_simulation_result: " + std::string(e.what()));
     }
 }
 
@@ -612,7 +609,7 @@ bool RegulatorySimulator::update_execution_status(const std::string& execution_i
         return success;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in update_execution_status: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in update_execution_status: " + std::string(e.what()));
         return false;
     }
 }
@@ -670,7 +667,7 @@ std::optional<SimulationScenario> RegulatorySimulator::get_scenario(const std::s
         return std::nullopt;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in get_scenario: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in get_scenario: " + std::string(e.what()));
         return std::nullopt;
     }
 }
@@ -718,7 +715,7 @@ std::vector<SimulationScenario> RegulatorySimulator::get_scenarios(const std::st
         PQclear(result);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in get_scenarios: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in get_scenarios: " + std::string(e.what()));
     }
 
     return scenarios;
@@ -757,7 +754,7 @@ std::optional<SimulationExecution> RegulatorySimulator::get_execution_status(con
         return std::nullopt;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in get_execution_status: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in get_execution_status: " + std::string(e.what()));
         return std::nullopt;
     }
 }
@@ -802,7 +799,7 @@ std::optional<SimulationResult> RegulatorySimulator::get_simulation_result(const
         return std::nullopt;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in get_simulation_result: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in get_simulation_result: " + std::string(e.what()));
         return std::nullopt;
     }
 }
@@ -823,7 +820,7 @@ void RegulatorySimulator::log_simulation_start(const std::string& execution_id, 
         {"execution_id", execution_id},
         {"scenario_id", request.scenario_id}
     };
-    logger_->log(LogLevel::INFO,
+    logger_.log(LogLevel::INFO,
                  "Simulation execution started",
                  "RegulatorySimulator",
                  __func__,
@@ -835,7 +832,7 @@ void RegulatorySimulator::log_simulation_complete(const std::string& execution_i
         {"execution_id", execution_id},
         {"entities_affected", std::to_string(metrics.total_entities_affected)}
     };
-    logger_->log(LogLevel::INFO,
+    logger_.log(LogLevel::INFO,
                  "Simulation execution completed",
                  "RegulatorySimulator",
                  __func__,
@@ -847,7 +844,7 @@ void RegulatorySimulator::log_simulation_error(const std::string& execution_id, 
         {"execution_id", execution_id},
         {"error", error}
     };
-    logger_->log(LogLevel::ERROR,
+    logger_.log(LogLevel::ERROR,
                  "Simulation execution failed",
                  "RegulatorySimulator",
                  __func__,

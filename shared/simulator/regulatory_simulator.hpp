@@ -116,7 +116,7 @@ class RegulatorySimulator {
 public:
     RegulatorySimulator(
         std::shared_ptr<PostgreSQLConnection> db_conn,
-        std::shared_ptr<StructuredLogger> logger
+        StructuredLogger& logger
     );
 
     ~RegulatorySimulator();
@@ -159,7 +159,7 @@ public:
 
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
-    std::shared_ptr<StructuredLogger> logger_;
+    StructuredLogger& logger_;
 
     // Configuration
     int max_concurrent_simulations_ = 5;

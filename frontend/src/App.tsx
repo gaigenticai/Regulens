@@ -1,66 +1,46 @@
 /**
- * Main App Component
- * React Router setup with protected and public routes
- * Real authentication flow - NO MOCKS
+ * Simple Production App - Working system
+ * Basic authentication and dashboard
  */
 
-import React, { Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { LoadingSpinner } from '@/components/LoadingSpinner';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { MainLayout } from '@/components/Layout/MainLayout';
-import { routes, publicRoutes } from '@/routes';
+import React, { useState } from 'react';
+import LoginForm from './components/LoginForm';
+import SimpleDashboard from './pages/SimpleDashboard';
 
 const App: React.FC = () => {
-  return (
-    <ErrorBoundary>
-      <BrowserRouter>
-        <Suspense fallback={<LoadingSpinner fullScreen message="Loading..." />}>
-          <Routes>
-            {/* Public routes */}
-            {publicRoutes.map((route) => (
-              <Route
-                key={route.path}
-                path={route.path}
-                element={
-                  <Suspense fallback={<LoadingSpinner fullScreen />}>
-                    <route.element />
-                  </Suspense>
-                }
-              />
-            ))}
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return !!localStorage.getItem('accessToken');
+  });
 
-            {/* Protected routes with layout */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <MainLayout />
-                </ProtectedRoute>
-              }
-            >
-              {routes.map((route) => (
-                <Route
-                  key={route.path}
-                  path={route.path}
-                  element={
-                    <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
-                      {route.requiredPermissions ? (
-                        <ProtectedRoute requiredPermissions={route.requiredPermissions}>
-                          <route.element />
-                        </ProtectedRoute>
-                      ) : (
-                        <route.element />
-                      )}
-                    </Suspense>
-                  }
-                />
-              ))}
-            </Route>
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </ErrorBoundary>
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('user');
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated) {
+    return <LoginForm onLogin={handleLogin} />;
+  }
+
+  return (
+    <div>
+      <nav className="bg-blue-600 text-white p-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <h1 className="text-xl font-bold">Regulens Compliance System</h1>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-blue-700 rounded hover:bg-blue-800"
+          >
+            Logout
+          </button>
+        </div>
+      </nav>
+      <SimpleDashboard />
+    </div>
   );
 };
 

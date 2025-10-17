@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regulens Compliance System - Production Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div id="app" class="min-h-screen">
+        <!-- Login Screen -->
+        <div id="login-screen" class="flex items-center justify-center min-h-screen">
+            <div class="max-w-md w-full space-y-8">
+                <div>
+                    <div class="mx-auto h-12 w-12 flex items-center justify-center rounded-full bg-blue-100">
+                        <svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                    </div>
+                    <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
+                        Regulens Compliance System
+                    </h2>
+                    <p class="mt-2 text-center text-sm text-gray-600">
+                        Production-grade compliance monitoring
+                    </p>
+                </div>
+
+                <form id="login-form" class="mt-8 space-y-6">
+                    <div class="rounded-md shadow-sm -space-y-px">
+                        <div>
+                            <input
+                                id="username"
+                                name="username"
+                                type="text"
+                                required
+                                class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                placeholder="Username"
+                            />
+                        </div>
+                        <div>
+                            <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                required
+                                class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                placeholder="Password"
+                            />
+                        </div>
+                    </div>
+
+                    <div id="login-error" class="hidden rounded-md bg-red-50 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p id="error-message" class="text-sm font-medium text-red-800"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <button
+                            type="submit"
+                            id="login-button"
+                            class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                        >
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                            </svg>
+                            Sign in
+                        </button>
+                    </div>
+
+                    <div class="text-center">
+                        <div class="text-sm text-gray-600">
+                            <p>Demo credentials:</p>
+                            <p><strong>Admin:</strong> admin / Admin123</p>
+                            <p><strong>User:</strong> user / User123</p>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Dashboard Screen -->
+        <div id="dashboard-screen" class="hidden">
+            <nav class="bg-blue-600 text-white p-4">
+                <div class="max-w-7xl mx-auto flex justify-between items-center">
+                    <h1 class="text-xl font-bold">Regulens Compliance System</h1>
+                    <button id="logout-button" class="px-4 py-2 bg-blue-700 rounded hover:bg-blue-800">
+                        Logout
+                    </button>
+                </div>
+            </nav>
+
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div class="mb-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Compliance Dashboard</h1>
+                    <p class="text-gray-600 mt-2">Real-time monitoring and agent management</p>
+                </div>
+
+                <!-- Stats Grid -->
+                <div id="stats-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <!-- Stats will be populated by JavaScript -->
+                </div>
+
+                <!-- Content Grid -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Recent Transactions -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="p-6 border-b border-gray-200">
+                            <h3 class="text-lg font-medium text-gray-900">Recent Transactions</h3>
+                        </div>
+                        <div id="transactions-list" class="p-6">
+                            <!-- Transactions will be populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <!-- Active Agents -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="p-6 border-b border-gray-200">
+                            <h3 class="text-lg font-medium text-gray-900">Active Agents</h3>
+                        </div>
+                        <div id="agents-list" class="p-6">
+                            <!-- Agents will be populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <!-- Active Alerts -->
+                    <div class="bg-white rounded-lg shadow lg:col-span-2">
+                        <div class="p-6 border-b border-gray-200">
+                            <h3 class="text-lg font-medium text-gray-900">Active Alerts</h3>
+                        </div>
+                        <div id="alerts-list" class="p-6">
+                            <!-- Alerts will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Refresh Button -->
+                <div class="mt-8 text-center">
+                    <button id="refresh-button" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Refresh Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API Configuration
+        const API_BASE_URL = 'http://localhost:8080';
+
+        // State management
+        let accessToken = localStorage.getItem('accessToken');
+
+        // DOM elements
+        const loginScreen = document.getElementById('login-screen');
+        const dashboardScreen = document.getElementById('dashboard-screen');
+        const loginForm = document.getElementById('login-form');
+        const loginButton = document.getElementById('login-button');
+        const loginError = document.getElementById('login-error');
+        const errorMessage = document.getElementById('error-message');
+        const logoutButton = document.getElementById('logout-button');
+        const refreshButton = document.getElementById('refresh-button');
+
+        // Initialize app
+        function init() {
+            if (accessToken) {
+                showDashboard();
+                loadDashboardData();
+            } else {
+                showLogin();
+            }
+        }
+
+        // Show login screen
+        function showLogin() {
+            loginScreen.classList.remove('hidden');
+            dashboardScreen.classList.add('hidden');
+        }
+
+        // Show dashboard screen
+        function showDashboard() {
+            loginScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+        }
+
+        // API helper
+        async function apiRequest(endpoint, options = {}) {
+            const url = `${API_BASE_URL}${endpoint}`;
+            const config = {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            };
+
+            if (accessToken && !config.headers.Authorization) {
+                config.headers.Authorization = `Bearer ${accessToken}`;
+            }
+
+            const response = await fetch(url, config);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            return response.json();
+        }
+
+        // Login handler
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            loginButton.innerHTML = '<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white mx-auto"></div>';
+            loginButton.disabled = true;
+            loginError.classList.add('hidden');
+
+            try {
+                const response = await apiRequest('/api/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.success) {
+                    accessToken = response.accessToken;
+                    localStorage.setItem('accessToken', accessToken);
+                    localStorage.setItem('user', JSON.stringify(response.user));
+                    showDashboard();
+                    loadDashboardData();
+                } else {
+                    showLoginError(response.error || 'Login failed');
+                }
+            } catch (error) {
+                showLoginError('Network error - please try again');
+                console.error('Login error:', error);
+            } finally {
+                loginButton.innerHTML = `
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                    </svg>
+                    Sign in
+                `;
+                loginButton.disabled = false;
+            }
+        });
+
+        // Logout handler
+        logoutButton.addEventListener('click', () => {
+            accessToken = null;
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('user');
+            showLogin();
+        });
+
+        // Refresh handler
+        refreshButton.addEventListener('click', loadDashboardData);
+
+        // Show login error
+        function showLoginError(message) {
+            errorMessage.textContent = message;
+            loginError.classList.remove('hidden');
+        }
+
+        // Load dashboard data
+        async function loadDashboardData() {
+            try {
+                const [dashboardResult, transactionsResult, agentsResult, alertsResult] = await Promise.all([
+                    apiRequest('/api/dashboard'),
+                    apiRequest('/api/transactions'),
+                    apiRequest('/api/agents'),
+                    apiRequest('/api/alerts')
+                ]);
+
+                renderStats(dashboardResult.data);
+                renderTransactions(transactionsResult.data);
+                renderAgents(agentsResult.data);
+                renderAlerts(alertsResult.data);
+            } catch (error) {
+                console.error('Failed to load dashboard data:', error);
+                // Show error state in UI
+            }
+        }
+
+        // Render statistics
+        function renderStats(data) {
+            const statsGrid = document.getElementById('stats-grid');
+            statsGrid.innerHTML = `
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-2 bg-green-100 rounded-lg">
+                            <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Compliance Score</p>
+                            <p class="text-2xl font-semibold text-gray-900">${data.compliance_score}%</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-2 bg-yellow-100 rounded-lg">
+                            <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                            </svg>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Active Alerts</p>
+                            <p class="text-2xl font-semibold text-gray-900">${data.alerts_count}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-2 bg-blue-100 rounded-lg">
+                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            </svg>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Transactions Today</p>
+                            <p class="text-2xl font-semibold text-gray-900">${data.transactions_today.toLocaleString()}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-2 bg-purple-100 rounded-lg">
+                            <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Active Agents</p>
+                            <p class="text-2xl font-semibold text-gray-900">${data.active_agents}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Render transactions
+        function renderTransactions(transactions) {
+            const transactionsList = document.getElementById('transactions-list');
+
+            if (transactions.length === 0) {
+                transactionsList.innerHTML = '<p class="text-gray-500 text-center py-4">No transactions found</p>';
+                return;
+            }
+
+            transactionsList.innerHTML = transactions.slice(0, 5).map(transaction => `
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-4">
+                    <div>
+                        <p class="font-medium text-gray-900">$${transaction.amount.toLocaleString()}</p>
+                        <p class="text-sm text-gray-600">${transaction.type}</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            transaction.status === 'approved' ? 'bg-green-100 text-green-800' :
+                            transaction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-800'
+                        }">
+                            ${transaction.status}
+                        </span>
+                        <p class="text-xs text-gray-500 mt-1">
+                            ${new Date(transaction.timestamp).toLocaleDateString()}
+                        </p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Render agents
+        function renderAgents(agents) {
+            const agentsList = document.getElementById('agents-list');
+
+            if (agents.length === 0) {
+                agentsList.innerHTML = '<p class="text-gray-500 text-center py-4">No agents found</p>';
+                return;
+            }
+
+            agentsList.innerHTML = agents.map(agent => `
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-4">
+                    <div>
+                        <p class="font-medium text-gray-900">${agent.name}</p>
+                        <p class="text-sm text-gray-600">${agent.type.replace('_', ' ')}</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            agent.status === 'running' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
+                        }">
+                            ${agent.status}
+                        </span>
+                        <p class="text-xs text-gray-500 mt-1">
+                            ${new Date(agent.last_active).toLocaleDateString()}
+                        </p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Render alerts
+        function renderAlerts(alerts) {
+            const alertsList = document.getElementById('alerts-list');
+
+            if (alerts.length === 0) {
+                alertsList.innerHTML = '<p class="text-gray-500 text-center py-4">No active alerts</p>';
+                return;
+            }
+
+            alertsList.innerHTML = alerts.map(alert => `
+                <div class="flex items-start p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
+                    <div class="flex-shrink-0">
+                        <svg class="w-5 h-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3 flex-1">
+                        <p class="text-sm font-medium text-yellow-800">${alert.message}</p>
+                        <p class="text-xs text-yellow-700 mt-1">
+                            ${new Date(alert.timestamp).toLocaleString()}
+                        </p>
+                    </div>
+                    <div class="ml-3">
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            alert.severity === 'high' ? 'bg-red-100 text-red-800' :
+                            alert.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-green-100 text-green-800'
+                        }">
+                            ${alert.severity}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Initialize the app
+        init();
+    </script>
+</body>
+</html>

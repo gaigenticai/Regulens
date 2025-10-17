@@ -213,7 +213,7 @@ add_executable(regulens
 target_link_libraries(regulens
     PRIVATE
         regulens_shared
-        regulens_regulatory_monitor
+        # regulens_regulatory_monitor  # Temporarily disabled
         regulens_web_ui
         regulens_audit
         regulens_agents

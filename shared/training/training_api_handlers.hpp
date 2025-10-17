@@ -16,7 +16,7 @@ class TrainingAPIHandlers {
 public:
     TrainingAPIHandlers(
         std::shared_ptr<PostgreSQLConnection> db_conn,
-        std::shared_ptr<StructuredLogger> logger
+        StructuredLogger& logger
     );
 
     // Course management
@@ -46,7 +46,7 @@ public:
 
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
-    std::shared_ptr<StructuredLogger> logger_;
+    StructuredLogger& logger_;
 
     // Helper methods
     double calculate_quiz_score(const nlohmann::json& user_answers, const nlohmann::json& correct_answers);

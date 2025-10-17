@@ -21,7 +21,7 @@ class SimulatorAPIHandlers {
 public:
     SimulatorAPIHandlers(
         std::shared_ptr<PostgreSQLConnection> db_conn,
-        std::shared_ptr<StructuredLogger> logger,
+        StructuredLogger& logger,
         std::shared_ptr<RegulatorySimulator> simulator
     );
 
@@ -56,7 +56,7 @@ public:
 
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
-    std::shared_ptr<StructuredLogger> logger_;
+    StructuredLogger& logger_;
     std::shared_ptr<RegulatorySimulator> simulator_;
 
     // Helper methods

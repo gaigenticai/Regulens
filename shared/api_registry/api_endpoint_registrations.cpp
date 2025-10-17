@@ -1693,7 +1693,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
                                // Call training handler
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_courses(query_params);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1719,7 +1719,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_course_by_id(course_id);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1739,7 +1739,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_create_course(req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
@@ -1765,7 +1765,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_update_course(course_id, req.body);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1796,7 +1796,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_enroll_user(course_id, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
@@ -1825,7 +1825,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_user_progress(user_id, query_params);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1852,7 +1852,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_update_progress(enrollment_id, req.body);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1882,7 +1882,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_mark_complete(course_id, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1913,7 +1913,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_submit_quiz(quiz_id, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1940,7 +1940,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_quiz_results(enrollment_id);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1961,7 +1961,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_certifications(user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -1988,7 +1988,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_issue_certificate(enrollment_id);
                                return HTTPResponse(201, "Created", response, "application/json");
@@ -2015,7 +2015,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_verify_certificate(verification_code);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -2042,7 +2042,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_leaderboard(query_params);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -2062,7 +2062,7 @@ std::vector<APIEndpoint> create_training_endpoints(PGconn* db_conn) {
 
                                regulens::training::TrainingAPIHandlers training_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>()
+                                   regulens::StructuredLogger::get_instance()
                                );
                                std::string response = training_handlers.handle_get_training_stats(user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
@@ -2505,10 +2505,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_create_scenario(req.body, user_id);
@@ -2530,10 +2530,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_scenarios(user_id, query_params);
@@ -2563,10 +2563,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_scenario(scenario_id, user_id);
@@ -2596,10 +2596,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_update_scenario(scenario_id, req.body, user_id);
@@ -2629,10 +2629,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_delete_scenario(scenario_id, user_id);
@@ -2654,10 +2654,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_templates(query_params);
@@ -2684,10 +2684,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_template(template_id);
@@ -2718,10 +2718,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_create_scenario_from_template(template_id, user_id);
@@ -2743,10 +2743,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_run_simulation(req.body, user_id);
@@ -2776,10 +2776,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_execution_status(execution_id, user_id);
@@ -2809,10 +2809,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_cancel_simulation(execution_id, user_id);
@@ -2843,10 +2843,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_simulation_result(execution_id, user_id);
@@ -2868,10 +2868,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_simulation_history(user_id, query_params);
@@ -2893,10 +2893,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_simulation_analytics(user_id, query_params);
@@ -2927,10 +2927,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_scenario_metrics(scenario_id, user_id);
@@ -2951,10 +2951,10 @@ std::vector<APIEndpoint> create_simulator_endpoints(PGconn* db_conn) {
 
                                regulens::simulator::SimulatorAPIHandlers simulator_handlers(
                                    std::make_shared<regulens::PostgreSQLConnection>(),
-                                   std::make_shared<regulens::StructuredLogger>(),
+                                   regulens::StructuredLogger::get_instance(),
                                    std::make_shared<regulens::simulator::RegulatorySimulator>(
                                        std::make_shared<regulens::PostgreSQLConnection>(),
-                                       std::make_shared<regulens::StructuredLogger>()
+                                       regulens::StructuredLogger::get_instance()
                                    )
                                );
                                std::string response = simulator_handlers.handle_get_popular_scenarios(query_params);

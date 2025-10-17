@@ -15,7 +15,7 @@ namespace training {
 
 TrainingAPIHandlers::TrainingAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
-    std::shared_ptr<StructuredLogger> logger
+    StructuredLogger& logger
 ) : db_conn_(db_conn), logger_(logger) {}
 
 std::string TrainingAPIHandlers::handle_get_courses(const std::map<std::string, std::string>& query_params) {
@@ -71,7 +71,7 @@ std::string TrainingAPIHandlers::handle_get_courses(const std::map<std::string, 
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch training courses: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch training courses: " + error);
             return R"({"error": "Failed to fetch courses"})";
         }
 
@@ -136,7 +136,7 @@ std::string TrainingAPIHandlers::handle_get_courses(const std::map<std::string, 
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_courses: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_courses: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -161,7 +161,7 @@ std::string TrainingAPIHandlers::handle_get_course_by_id(const std::string& cour
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch course: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch course: " + error);
             return R"({"error": "Failed to fetch course"})";
         }
 
@@ -184,7 +184,7 @@ std::string TrainingAPIHandlers::handle_get_course_by_id(const std::string& cour
         return course.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_course_by_id: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_course_by_id: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -245,7 +245,7 @@ std::string TrainingAPIHandlers::handle_create_course(const std::string& request
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to create course: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to create course: " + error);
             return R"({"error": "Failed to create course"})";
         }
 
@@ -268,10 +268,10 @@ std::string TrainingAPIHandlers::handle_create_course(const std::string& request
         return response.dump();
 
     } catch (const json::exception& e) {
-        logger_->log(LogLevel::ERROR, "JSON parsing error in handle_create_course: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "JSON parsing error in handle_create_course: " + std::string(e.what()));
         return R"({"error": "Invalid JSON format"})";
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_create_course: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_create_course: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -334,7 +334,7 @@ std::string TrainingAPIHandlers::handle_enroll_user(const std::string& course_id
             std::string error = PQerrorMessage(conn);
             PQclear(enrollment_result);
             PQclear(course_result);
-            logger_->log(LogLevel::ERROR, "Failed to enroll user: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to enroll user: " + error);
             return R"({"error": "Failed to enroll in course"})";
         }
 
@@ -354,7 +354,7 @@ std::string TrainingAPIHandlers::handle_enroll_user(const std::string& course_id
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_enroll_user: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_enroll_user: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -394,7 +394,7 @@ std::string TrainingAPIHandlers::handle_get_user_progress(const std::string& use
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch user progress: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch user progress: " + error);
             return R"({"error": "Failed to fetch progress"})";
         }
 
@@ -472,7 +472,7 @@ std::string TrainingAPIHandlers::handle_get_user_progress(const std::string& use
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_user_progress: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_user_progress: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -591,7 +591,7 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
         );
 
         if (PQresultStatus(update_result) != PGRES_COMMAND_OK) {
-            logger_->log(LogLevel::ERROR, "Failed to update enrollment status");
+            logger_.log(LogLevel::ERROR, "Failed to update enrollment status");
         }
         PQclear(update_result);
 
@@ -641,10 +641,10 @@ std::string TrainingAPIHandlers::handle_submit_quiz(const std::string& quiz_id, 
         return response.dump();
 
     } catch (const json::exception& e) {
-        logger_->log(LogLevel::ERROR, "JSON parsing error in handle_submit_quiz: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "JSON parsing error in handle_submit_quiz: " + std::string(e.what()));
         return R"({"error": "Invalid JSON format"})";
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_submit_quiz: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_submit_quiz: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -676,7 +676,7 @@ std::string TrainingAPIHandlers::handle_get_certifications(const std::string& us
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = "Database operation failed";
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch certifications: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch certifications: " + error);
             return R"({"error": "Failed to fetch certifications"})";
         }
 
@@ -697,7 +697,7 @@ std::string TrainingAPIHandlers::handle_get_certifications(const std::string& us
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_certifications: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_certifications: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -751,7 +751,7 @@ std::string TrainingAPIHandlers::handle_get_leaderboard(const std::map<std::stri
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch leaderboard: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch leaderboard: " + error);
             return R"({"error": "Failed to fetch leaderboard"})";
         }
 
@@ -783,7 +783,7 @@ std::string TrainingAPIHandlers::handle_get_leaderboard(const std::map<std::stri
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_leaderboard: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_leaderboard: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -986,7 +986,7 @@ std::string TrainingAPIHandlers::handle_get_training_stats(const std::string& us
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch training stats: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch training stats: " + error);
             return R"({"error": "Failed to fetch training stats"})";
         }
 
@@ -1047,7 +1047,7 @@ std::string TrainingAPIHandlers::handle_get_training_stats(const std::string& us
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_training_stats: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_training_stats: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -1088,7 +1088,7 @@ std::string TrainingAPIHandlers::handle_update_progress(const std::string& enrol
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to update progress: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to update progress: " + error);
             return R"({"error": "Failed to update progress"})";
         }
 
@@ -1109,10 +1109,10 @@ std::string TrainingAPIHandlers::handle_update_progress(const std::string& enrol
         return response.dump();
 
     } catch (const json::exception& e) {
-        logger_->log(LogLevel::ERROR, "JSON parsing error in handle_update_progress: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "JSON parsing error in handle_update_progress: " + std::string(e.what()));
         return R"({"error": "Invalid JSON format"})";
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_update_progress: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_update_progress: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -1136,7 +1136,7 @@ std::string TrainingAPIHandlers::handle_mark_complete(const std::string& course_
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to mark course complete: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to mark course complete: " + error);
             return R"({"error": "Failed to mark course complete"})";
         }
 
@@ -1182,7 +1182,7 @@ std::string TrainingAPIHandlers::handle_mark_complete(const std::string& course_
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_mark_complete: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_mark_complete: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -1206,7 +1206,7 @@ std::string TrainingAPIHandlers::handle_get_quiz_results(const std::string& enro
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to fetch quiz results: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to fetch quiz results: " + error);
             return R"({"error": "Failed to fetch quiz results"})";
         }
 
@@ -1228,7 +1228,7 @@ std::string TrainingAPIHandlers::handle_get_quiz_results(const std::string& enro
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_quiz_results: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_quiz_results: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -1296,7 +1296,7 @@ std::string TrainingAPIHandlers::handle_issue_certificate(const std::string& enr
         if (PQresultStatus(cert_result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(cert_result);
-            logger_->log(LogLevel::ERROR, "Failed to issue certificate: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to issue certificate: " + error);
             return R"({"error": "Failed to issue certificate"})";
         }
 
@@ -1311,7 +1311,7 @@ std::string TrainingAPIHandlers::handle_issue_certificate(const std::string& enr
         return response.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_issue_certificate: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_issue_certificate: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -1340,7 +1340,7 @@ std::string TrainingAPIHandlers::handle_verify_certificate(const std::string& ve
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to verify certificate: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to verify certificate: " + error);
             return R"({"error": "Failed to verify certificate"})";
         }
 
@@ -1361,7 +1361,7 @@ std::string TrainingAPIHandlers::handle_verify_certificate(const std::string& ve
         return certificate.dump();
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_verify_certificate: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_verify_certificate: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }
@@ -1450,7 +1450,7 @@ std::string TrainingAPIHandlers::handle_update_course(const std::string& course_
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
             std::string error = PQerrorMessage(conn);
             PQclear(result);
-            logger_->log(LogLevel::ERROR, "Failed to update course: " + error);
+            logger_.log(LogLevel::ERROR, "Failed to update course: " + error);
             return R"({"error": "Failed to update course"})";
         }
 
@@ -1470,10 +1470,10 @@ std::string TrainingAPIHandlers::handle_update_course(const std::string& course_
         return response.dump();
 
     } catch (const json::exception& e) {
-        logger_->log(LogLevel::ERROR, "JSON parsing error in handle_update_course: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "JSON parsing error in handle_update_course: " + std::string(e.what()));
         return R"({"error": "Invalid JSON format"})";
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_update_course: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_update_course: " + std::string(e.what()));
         return R"({"error": "Internal server error"})";
     }
 }

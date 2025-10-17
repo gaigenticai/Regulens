@@ -123,15 +123,12 @@ std::vector<std::string> parse_text_array(const std::string& value) {
 
 SimulatorAPIHandlers::SimulatorAPIHandlers(
     std::shared_ptr<PostgreSQLConnection> db_conn,
-    std::shared_ptr<StructuredLogger> logger,
+    StructuredLogger& logger,
     std::shared_ptr<RegulatorySimulator> simulator
 ) : db_conn_(db_conn), logger_(logger), simulator_(simulator) {
 
     if (!db_conn_) {
         throw std::runtime_error("Database connection is required for SimulatorAPIHandlers");
-    }
-    if (!logger_) {
-        throw std::runtime_error("Logger is required for SimulatorAPIHandlers");
     }
     if (!simulator_) {
         throw std::runtime_error("Simulator is required for SimulatorAPIHandlers");
@@ -164,10 +161,10 @@ std::string SimulatorAPIHandlers::handle_create_scenario(const std::string& requ
         return create_success_response(response_data, "Scenario created successfully");
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log(LogLevel::ERROR, "Invalid JSON in handle_create_scenario: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Invalid JSON in handle_create_scenario: " + std::string(e.what()));
         return create_error_response("Invalid request format", 400);
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_create_scenario: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_create_scenario: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -211,10 +208,10 @@ std::string SimulatorAPIHandlers::handle_run_simulation(const std::string& reque
         return create_success_response(response_data, "Simulation started successfully");
 
     } catch (const nlohmann::json::exception& e) {
-        logger_->log(LogLevel::ERROR, "Invalid JSON in handle_run_simulation: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Invalid JSON in handle_run_simulation: " + std::string(e.what()));
         return create_error_response("Invalid request format", 400);
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_run_simulation: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_run_simulation: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -237,7 +234,7 @@ std::string SimulatorAPIHandlers::handle_get_execution_status(const std::string&
         return create_success_response(response_data);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_execution_status: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_execution_status: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -266,7 +263,7 @@ std::string SimulatorAPIHandlers::handle_get_simulation_result(const std::string
         return create_success_response(response_data);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_simulation_result: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_simulation_result: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -304,7 +301,7 @@ std::string SimulatorAPIHandlers::handle_get_scenarios(const std::string& user_i
         return create_success_response(response);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_scenarios: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_scenarios: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -327,7 +324,7 @@ std::string SimulatorAPIHandlers::handle_get_scenario(const std::string& scenari
         return create_success_response(response_data);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_scenario: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_scenario: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -363,7 +360,7 @@ std::string SimulatorAPIHandlers::handle_get_simulation_history(const std::strin
         return create_success_response(response);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_simulation_history: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_simulation_history: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -397,7 +394,7 @@ std::string SimulatorAPIHandlers::handle_get_templates(const std::map<std::strin
         return create_success_response(response);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_templates: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_templates: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -429,7 +426,7 @@ std::string SimulatorAPIHandlers::handle_get_simulation_analytics(const std::str
         return create_success_response(analytics);
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in handle_get_simulation_analytics: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in handle_get_simulation_analytics: " + std::string(e.what()));
         return create_error_response("Internal server error", 500);
     }
 }
@@ -625,7 +622,7 @@ bool SimulatorAPIHandlers::validate_scenario_access(const std::string& scenario_
         return valid;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in validate_scenario_access: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in validate_scenario_access: " + std::string(e.what()));
         return false;
     }
 }
@@ -647,7 +644,7 @@ bool SimulatorAPIHandlers::validate_execution_access(const std::string& executio
         return valid;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in validate_execution_access: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in validate_execution_access: " + std::string(e.what()));
         return false;
     }
 }
@@ -800,7 +797,7 @@ std::vector<SimulationScenario> SimulatorAPIHandlers::query_scenarios_paginated(
         }
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in query_scenarios_paginated: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in query_scenarios_paginated: " + std::string(e.what()));
     }
 
     return scenarios;
@@ -868,7 +865,7 @@ std::vector<SimulationExecution> SimulatorAPIHandlers::query_user_executions(con
         }
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in query_user_executions: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in query_user_executions: " + std::string(e.what()));
     }
 
     return executions;
@@ -924,7 +921,7 @@ std::vector<SimulationResult> SimulatorAPIHandlers::query_simulation_results(con
         }
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Exception in query_simulation_results: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Exception in query_simulation_results: " + std::string(e.what()));
     }
 
     return results;
@@ -932,17 +929,17 @@ std::vector<SimulationResult> SimulatorAPIHandlers::query_simulation_results(con
 
 bool SimulatorAPIHandlers::validate_scenario_data(const nlohmann::json& scenario_data) {
     if (!scenario_data.is_object()) {
-        logger_->log(LogLevel::WARN, "Scenario validation failed: payload is not an object");
+        logger_.log(LogLevel::WARN, "Scenario validation failed: payload is not an object");
         return false;
     }
 
     if (!scenario_data.contains("scenario_name") || !scenario_data["scenario_name"].is_string() || scenario_data["scenario_name"].get<std::string>().empty()) {
-        logger_->log(LogLevel::WARN, "Scenario validation failed: scenario_name missing or invalid");
+        logger_.log(LogLevel::WARN, "Scenario validation failed: scenario_name missing or invalid");
         return false;
     }
 
     if (!scenario_data.contains("regulatory_changes")) {
-        logger_->log(LogLevel::WARN, "Scenario validation failed: regulatory_changes missing");
+        logger_.log(LogLevel::WARN, "Scenario validation failed: regulatory_changes missing");
         return false;
     }
 
@@ -953,7 +950,7 @@ bool SimulatorAPIHandlers::validate_scenario_data(const nlohmann::json& scenario
     if (scenario_data.contains("scenario_type")) {
         static const std::unordered_set<std::string> allowed_types = {"regulatory_change", "market_change", "operational_change"};
         if (!scenario_data["scenario_type"].is_string() || !allowed_types.count(scenario_data["scenario_type"].get<std::string>())) {
-            logger_->log(LogLevel::WARN, "Scenario validation failed: scenario_type is invalid");
+            logger_.log(LogLevel::WARN, "Scenario validation failed: scenario_type is invalid");
             return false;
         }
     }
@@ -964,11 +961,11 @@ bool SimulatorAPIHandlers::validate_scenario_data(const nlohmann::json& scenario
 
     if (scenario_data.contains("tags")) {
         if (!scenario_data["tags"].is_array()) {
-            logger_->log(LogLevel::WARN, "Scenario validation failed: tags must be an array");
+            logger_.log(LogLevel::WARN, "Scenario validation failed: tags must be an array");
             return false;
         }
         if (scenario_data["tags"].size() > 50) {
-            logger_->log(LogLevel::WARN, "Scenario validation failed: too many tags provided");
+            logger_.log(LogLevel::WARN, "Scenario validation failed: too many tags provided");
             return false;
         }
     }
@@ -979,48 +976,48 @@ bool SimulatorAPIHandlers::validate_scenario_data(const nlohmann::json& scenario
 bool SimulatorAPIHandlers::validate_regulatory_changes(const nlohmann::json& changes) {
     auto validate_change_object = [this](const nlohmann::json& change) {
         if (!change.is_object()) {
-            logger_->log(LogLevel::WARN, "Regulatory change validation failed: change is not an object");
+            logger_.log(LogLevel::WARN, "Regulatory change validation failed: change is not an object");
             return false;
         }
 
         static const std::unordered_set<std::string> required_fields = {"change_type", "jurisdiction", "description"};
         for (const auto& field : required_fields) {
             if (!change.contains(field) || change[field].is_null()) {
-                logger_->log(LogLevel::WARN, "Regulatory change validation failed: missing field " + field);
+                logger_.log(LogLevel::WARN, "Regulatory change validation failed: missing field " + field);
                 return false;
             }
         }
 
         if (!change["change_type"].is_string()) {
-            logger_->log(LogLevel::WARN, "Regulatory change validation failed: change_type must be a string");
+            logger_.log(LogLevel::WARN, "Regulatory change validation failed: change_type must be a string");
             return false;
         }
 
         static const std::unordered_set<std::string> allowed_change_types = {"addition", "modification", "repeal"};
         if (!allowed_change_types.count(change["change_type"].get<std::string>())) {
-            logger_->log(LogLevel::WARN, "Regulatory change validation failed: change_type not allowed");
+            logger_.log(LogLevel::WARN, "Regulatory change validation failed: change_type not allowed");
             return false;
         }
 
         if (!change["jurisdiction"].is_string()) {
-            logger_->log(LogLevel::WARN, "Regulatory change validation failed: jurisdiction must be a string");
+            logger_.log(LogLevel::WARN, "Regulatory change validation failed: jurisdiction must be a string");
             return false;
         }
 
         if (!change["description"].is_string()) {
-            logger_->log(LogLevel::WARN, "Regulatory change validation failed: description must be a string");
+            logger_.log(LogLevel::WARN, "Regulatory change validation failed: description must be a string");
             return false;
         }
 
         if (change.contains("effective_date") && !change["effective_date"].is_string()) {
-            logger_->log(LogLevel::WARN, "Regulatory change validation failed: effective_date must be a string");
+            logger_.log(LogLevel::WARN, "Regulatory change validation failed: effective_date must be a string");
             return false;
         }
 
         if (change.contains("severity") && change["severity"].is_string()) {
             static const std::unordered_set<std::string> allowed_severity = {"low", "medium", "high", "critical"};
             if (!allowed_severity.count(change["severity"].get<std::string>())) {
-                logger_->log(LogLevel::WARN, "Regulatory change validation failed: severity not allowed");
+                logger_.log(LogLevel::WARN, "Regulatory change validation failed: severity not allowed");
                 return false;
             }
         }
@@ -1033,7 +1030,7 @@ bool SimulatorAPIHandlers::validate_regulatory_changes(const nlohmann::json& cha
     }
 
     if (!changes.is_array() || changes.empty()) {
-        logger_->log(LogLevel::WARN, "Regulatory change validation failed: changes should be a non-empty array");
+        logger_.log(LogLevel::WARN, "Regulatory change validation failed: changes should be a non-empty array");
         return false;
     }
 
@@ -1048,54 +1045,54 @@ bool SimulatorAPIHandlers::validate_regulatory_changes(const nlohmann::json& cha
 
 bool SimulatorAPIHandlers::validate_simulation_parameters(const nlohmann::json& params) {
     if (!params.is_object()) {
-        logger_->log(LogLevel::WARN, "Simulation parameters validation failed: parameters must be an object");
+        logger_.log(LogLevel::WARN, "Simulation parameters validation failed: parameters must be an object");
         return false;
     }
 
     if (params.contains("sensitivity")) {
         if (!params["sensitivity"].is_number()) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: sensitivity must be numeric");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: sensitivity must be numeric");
             return false;
         }
         double sensitivity = params["sensitivity"].get<double>();
         if (sensitivity < 0.0 || sensitivity > 1.0) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: sensitivity out of range");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: sensitivity out of range");
             return false;
         }
     }
 
     if (params.contains("impact_threshold")) {
         if (!params["impact_threshold"].is_number()) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: impact_threshold must be numeric");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: impact_threshold must be numeric");
             return false;
         }
         double threshold = params["impact_threshold"].get<double>();
         if (threshold < 0.0) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: impact_threshold cannot be negative");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: impact_threshold cannot be negative");
             return false;
         }
     }
 
     if (params.contains("max_iterations")) {
         if (!params["max_iterations"].is_number_integer()) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: max_iterations must be integer");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: max_iterations must be integer");
             return false;
         }
         int max_iterations = params["max_iterations"].get<int>();
         if (max_iterations <= 0 || max_iterations > 10000) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: max_iterations out of range");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: max_iterations out of range");
             return false;
         }
     }
 
     if (params.contains("confidence_threshold")) {
         if (!params["confidence_threshold"].is_number()) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: confidence_threshold must be numeric");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: confidence_threshold must be numeric");
             return false;
         }
         double confidence = params["confidence_threshold"].get<double>();
         if (confidence < 0.0 || confidence > 1.0) {
-            logger_->log(LogLevel::WARN, "Simulation parameters validation failed: confidence_threshold out of range");
+            logger_.log(LogLevel::WARN, "Simulation parameters validation failed: confidence_threshold out of range");
             return false;
         }
     }
@@ -1143,7 +1140,7 @@ std::string SimulatorAPIHandlers::extract_user_id_from_scenario(const std::strin
         }
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Failed to extract user from scenario: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Failed to extract user from scenario: " + std::string(e.what()));
     }
 
     return "";
@@ -1161,7 +1158,7 @@ std::string SimulatorAPIHandlers::extract_user_id_from_execution(const std::stri
         }
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::ERROR, "Failed to extract user from execution: " + std::string(e.what()));
+        logger_.log(LogLevel::ERROR, "Failed to extract user from execution: " + std::string(e.what()));
     }
 
     return "";
@@ -1189,7 +1186,7 @@ bool SimulatorAPIHandlers::check_simulation_rate_limit(const std::string& user_i
         return true;
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::WARN, "Simulation rate limit check failed: " + std::string(e.what()));
+        logger_.log(LogLevel::WARN, "Simulation rate limit check failed: " + std::string(e.what()));
         return true;
     }
 }
@@ -1206,7 +1203,7 @@ void SimulatorAPIHandlers::record_simulation_attempt(const std::string& user_id)
         );
 
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::WARN, "Failed to record simulation attempt: " + std::string(e.what()));
+        logger_.log(LogLevel::WARN, "Failed to record simulation attempt: " + std::string(e.what()));
     }
 }
 
@@ -1240,7 +1237,7 @@ void SimulatorAPIHandlers::record_api_metrics(const std::string& endpoint, const
             {endpoint, user_id, std::to_string(response_time_ms), success ? "true" : "false"}
         );
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::WARN, "Failed to record API metrics: " + std::string(e.what()));
+        logger_.log(LogLevel::WARN, "Failed to record API metrics: " + std::string(e.what()));
     }
 }
 
@@ -1251,7 +1248,7 @@ void SimulatorAPIHandlers::update_scenario_usage_stats(const std::string& scenar
             {scenario_id}
         );
     } catch (const std::exception& e) {
-        logger_->log(LogLevel::WARN, "Failed to update scenario usage stats: " + std::string(e.what()));
+        logger_.log(LogLevel::WARN, "Failed to update scenario usage stats: " + std::string(e.what()));
     }
 }
 

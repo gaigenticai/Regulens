@@ -2,17 +2,20 @@
 
 <cite>
 **Referenced Files in This Document**   
+- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp)
+- [openapi_generator.hpp](file://shared/api_docs/openapi_generator.hpp)
+- [web_ui_handlers.hpp](file://shared/web_ui/web_ui_handlers.hpp)
+- [web_ui_handlers.cpp](file://shared/web_ui/web_ui_handlers.cpp)
+- [wiki-server.js](file://wiki-server.js)
 - [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
 - [useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts)
-- [wiki-server.js](file://wiki-server.js)
-- [api.ts](file://frontend/src/services/api.ts)
-- [MainLayout.tsx](file://frontend/src/components/Layout/MainLayout.tsx)
-- [Sidebar.tsx](file://frontend/src/components/Layout/Sidebar.tsx)
-- [Header.tsx](file://frontend/src/components/Layout/Header.tsx)
-- [App.tsx](file://frontend/src/App.tsx)
-- [ProtectedRoute.tsx](file://frontend/src/components/ProtectedRoute.tsx)
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx)
-- [package.json](file://frontend/package.json)
+- [start-documentation.sh](file://start-documentation.sh)
+- [DOCUMENTATION_README.md](file://DOCUMENTATION_README.md)
+- [DOCUMENTATION_GUIDE.md](file://DOCUMENTATION_GUIDE.md)
+- [regulatory_monitor_ui.cpp](file://shared/web_ui/regulatory_monitor_ui.cpp)
+- [api_registry.cpp](file://shared/api_registry/api_registry.cpp)
+- [api_registry.hpp](file://shared/api_registry/api_registry.hpp)
+- [Settings.tsx](file://frontend/src/pages/Settings.tsx)
 </cite>
 
 ## Table of Contents
@@ -27,48 +30,49 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-The Documentation System is a comprehensive web-based platform designed to manage and present technical documentation for the Regulens application. It features a wiki server, API endpoints, and a rich frontend interface with interactive capabilities including tree navigation, search functionality, Mermaid diagram rendering, and code syntax highlighting. The system is built with React for the frontend and Express.js for the backend, providing a seamless experience for users to access, search, and navigate through documentation.
+The Documentation System for Regulens is a comprehensive web-based solution designed to transform the project's wiki into an interactive, navigable documentation experience. This system provides developers and users with a modern interface for accessing technical documentation, API references, and system architecture details. The implementation combines a React frontend with a Node.js backend to deliver a seamless documentation experience featuring interactive tree navigation, Mermaid diagram rendering, syntax highlighting, and full-text search capabilities. The system supports multiple documentation formats including Swagger UI, ReDoc, and OpenAPI JSON specifications, making it accessible to both technical and non-technical users.
 
 ## Project Structure
-The project structure is organized into several key directories:
-- **agents**: Contains C++ agent implementations for audit intelligence, regulatory assessment, and transaction monitoring.
-- **data/postgres**: PostgreSQL configuration files.
-- **data_ingestion**: Data ingestion components.
-- **frontend**: React-based frontend application with components, hooks, pages, and services.
-- **infrastructure**: Kubernetes and monitoring configurations.
-- **regulatory_monitor**: Regulatory monitoring components.
-- **scripts**: Utility scripts.
-- **shared**: Shared components and utilities.
-- **tests**: Test suites and configurations.
-
-The frontend application is structured with components, hooks, pages, and services, following a modular approach for maintainability and scalability.
+The Documentation System consists of two main components: a frontend React application and a backend Node.js server. The frontend provides the user interface for browsing documentation, while the backend serves the documentation content from the wiki repository. The system is designed to be modular and extensible, allowing for easy integration with the existing Regulens codebase.
 
 ```mermaid
-graph TD
-A[Frontend] --> B[Components]
-A --> C[Hooks]
-A --> D[Pages]
-A --> E[Services]
-A --> F[Styles]
-A --> G[Types]
-A --> H[Utils]
-I[Backend] --> J[Wiki Server]
-I --> K[API Endpoints]
-J --> L[Documentation Structure]
-J --> M[Document Content]
-J --> N[Search Functionality]
+graph TB
+subgraph "Frontend"
+A[Documentation.tsx]
+B[useDocumentation.ts]
+C[Documentation.css]
+end
+subgraph "Backend"
+D[wiki-server.js]
+E[.qoder/repowiki/]
+end
+subgraph "Integration"
+F[start-documentation.sh]
+G[DOCUMENTATION_README.md]
+H[DOCUMENTATION_GUIDE.md]
+end
+A --> B
+B --> D
+D --> E
+F --> D
+F --> A
+G --> A
+H --> A
 ```
 
 **Diagram sources**
 - [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
+- [useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts)
 - [wiki-server.js](file://wiki-server.js)
+- [start-documentation.sh](file://start-documentation.sh)
 
 **Section sources**
 - [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
 - [wiki-server.js](file://wiki-server.js)
+- [start-documentation.sh](file://start-documentation.sh)
 
 ## Core Components
-The core components of the Documentation System include the frontend pages, hooks, and services that enable the interactive features of the documentation. The `Documentation.tsx` component provides the main interface with tree navigation, search, and content display. The `useDocumentation.ts` hook manages the state and API calls for loading documentation structure and content. The `wiki-server.js` file implements the backend API endpoints for serving documentation data.
+The Documentation System comprises several core components that work together to deliver a comprehensive documentation experience. The system features an interactive tree navigation component that displays the documentation structure in a hierarchical format, allowing users to easily browse through different sections. The content viewer component renders Markdown files with full support for GitHub Flavored Markdown, including code blocks, tables, and embedded diagrams. The search functionality enables full-text search across all documentation files, with results displayed in a user-friendly format. The system also includes zoom controls for adjusting the content size and a responsive design that works well on different screen sizes.
 
 **Section sources**
 - [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
@@ -76,52 +80,50 @@ The core components of the Documentation System include the frontend pages, hook
 - [wiki-server.js](file://wiki-server.js)
 
 ## Architecture Overview
-The Documentation System follows a client-server architecture with a React frontend and an Express.js backend. The frontend communicates with the backend through RESTful API endpoints to retrieve documentation structure, content, and search results. The backend serves static Markdown files from a designated directory, building a tree structure for navigation and providing full-text search capabilities.
+The Documentation System follows a client-server architecture with a clear separation of concerns between the frontend and backend components. The frontend is built using React and TypeScript, providing a responsive user interface for browsing documentation. The backend is implemented as an Express server that serves the documentation content from the wiki repository. The two components communicate through a REST API, with the frontend making HTTP requests to retrieve documentation structure, content, and search results.
 
 ```mermaid
-graph TD
-A[Client Browser] --> B[React Frontend]
-B --> C[API Endpoints]
-C --> D[Express.js Server]
-D --> E[File System]
-E --> F[Markdown Files]
-D --> G[Metadata]
-B --> H[Mermaid.js]
-B --> I[React Syntax Highlighter]
-B --> J[React Markdown]
+graph LR
+User[User] --> Frontend[Frontend React App]
+Frontend --> Hook[useDocumentation Hook]
+Hook --> Backend[Wiki Server]
+Backend --> Wiki[.qoder/repowiki/]
+Wiki --> Backend
+Backend --> Hook
+Hook --> Frontend
+Frontend --> User
 ```
 
 **Diagram sources**
 - [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
+- [useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts)
 - [wiki-server.js](file://wiki-server.js)
-- [api.ts](file://frontend/src/services/api.ts)
 
 ## Detailed Component Analysis
 
-### Documentation Page Analysis
-The `Documentation.tsx` component implements the main documentation interface with tree navigation, search, zoom controls, and content rendering. It uses React hooks for state management and integrates with the `useDocumentation` hook for data fetching.
+### Documentation Viewer Component
+The Documentation Viewer component is the main interface for browsing documentation. It provides a split-pane layout with a tree navigation sidebar on the left and a content viewer on the right. The component handles user interactions such as selecting documents, searching, and adjusting zoom levels.
 
+#### Component Implementation
 ```mermaid
 classDiagram
 class Documentation {
-+state : selectedDoc
-+state : expandedNodes
-+state : searchQuery
-+state : zoomLevel
-+useEffect : mermaid.contentLoaded
-+toggleNode(nodeId)
++useState selectedDoc
++useState expandedNodes
++useState searchQuery
++useState zoomLevel
++useEffect renderMermaid
 +handleNodeClick(node)
-+renderTreeNode(node, level)
++toggleNode(nodeId)
 +filterNodes(nodes, query)
 +handleZoomIn()
 +handleZoomOut()
-+exportToPDF()
 }
 class useDocumentation {
-+state : structure
-+state : loading
-+state : error
-+loadStructure()
++useState structure
++useState loading
++useState error
++useEffect loadStructure
 +loadContent(path)
 +search(query)
 }
@@ -132,165 +134,86 @@ Documentation --> useDocumentation : "uses"
 - [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
 - [useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts)
 
-### Wiki Server Analysis
-The `wiki-server.js` file implements the backend API endpoints for the documentation system. It provides routes for retrieving documentation structure, content, metadata, and search results. The server reads Markdown files from the file system and serves them through RESTful endpoints.
+### Wiki Server Component
+The Wiki Server component is responsible for serving documentation content to the frontend. It provides REST endpoints for retrieving documentation structure, content, metadata, and search results. The server reads files from the wiki repository and returns them in JSON format.
 
+#### API Endpoints
+```mermaid
+flowchart TD
+A[GET /api/documentation/structure] --> B[Returns tree structure]
+C[GET /api/documentation/content] --> D[Returns markdown content]
+E[GET /api/documentation/metadata] --> F[Returns wiki metadata]
+G[GET /api/documentation/search] --> H[Returns search results]
+I[GET /health] --> J[Returns health status]
+```
+
+**Diagram sources**
+- [wiki-server.js](file://wiki-server.js)
+
+### API Documentation System
+The API Documentation System provides comprehensive documentation for the Regulens API. It includes interactive documentation viewers, OpenAPI specification generation, and multiple documentation formats.
+
+#### API Documentation Endpoints
 ```mermaid
 sequenceDiagram
-participant Client
+participant User
 participant Frontend
 participant Backend
-participant FileSystem
-Client->>Frontend : Navigate to Documentation
-Frontend->>Backend : GET /api/documentation/structure
-Backend->>FileSystem : Read directory structure
-FileSystem-->>Backend : Directory entries
-Backend-->>Frontend : JSON structure
-Frontend->>Client : Render tree navigation
-Client->>Frontend : Click document node
-Frontend->>Backend : GET /api/documentation/content?path=doc.md
-Backend->>FileSystem : Read file content
-FileSystem-->>Backend : Markdown content
-Backend-->>Frontend : Markdown text
-Frontend->>Client : Render content with React Markdown
-Client->>Frontend : Enter search query
-Frontend->>Backend : GET /api/documentation/search?q=query
-Backend->>FileSystem : Search files for query
-FileSystem-->>Backend : Search results
-Backend-->>Frontend : JSON search results
-Frontend->>Client : Display search results
+User->>Frontend : Access /docs
+Frontend->>Backend : GET /api/docs
+Backend-->>Frontend : OpenAPI JSON
+Frontend-->>User : Swagger UI
+User->>Frontend : Access /redoc
+Frontend->>Backend : GET /api/docs
+Backend-->>Frontend : OpenAPI JSON
+Frontend-->>User : ReDoc Interface
+User->>Frontend : Access /api/docs
+Frontend->>Backend : GET /api/docs
+Backend-->>Frontend : OpenAPI JSON
+Frontend-->>User : JSON Specification
 ```
 
 **Diagram sources**
-- [wiki-server.js](file://wiki-server.js)
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
-
-### Interactive Features Analysis
-The documentation system includes several interactive features that enhance the user experience:
-
-#### Tree Navigation
-The tree navigation component allows users to browse the documentation hierarchy with expandable/collapsible nodes. Each node represents either a directory (folder) or a document (file).
-
-```mermaid
-flowchart TD
-A[Start] --> B[Render root nodes]
-B --> C{Node has children?}
-C --> |Yes| D[Show expand icon]
-C --> |No| E[Show file icon]
-D --> F[User clicks node]
-E --> F
-F --> G{Node is directory?}
-G --> |Yes| H[Toggle expanded state]
-G --> |No| I[Load document content]
-H --> J[Render children if expanded]
-I --> K[Display content in main panel]
-```
-
-**Diagram sources**
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
-
-#### Search Functionality
-The search feature allows users to find documentation by title or content. The backend performs full-text search across all Markdown files and returns matching documents with highlighted snippets.
-
-```mermaid
-flowchart TD
-A[User enters search query] --> B[Send query to /api/documentation/search]
-B --> C[Server searches all .md files]
-C --> D{Match in title or content?}
-D --> |Yes| E[Add to results with line matches]
-D --> |No| F[Continue to next file]
-E --> G[Limit results to top matches]
-G --> H[Return JSON results]
-H --> I[Frontend displays results list]
-I --> J[User clicks result]
-J --> K[Load and display document]
-```
-
-**Diagram sources**
-- [wiki-server.js](file://wiki-server.js)
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
-
-#### Mermaid Diagram Rendering
-The system supports Mermaid diagram rendering within Markdown content. When a code block with language "mermaid" is encountered, it is rendered as an interactive diagram.
-
-```mermaid
-flowchart TD
-A[Parse Markdown] --> B{Code block with language mermaid?}
-B --> |Yes| C[Create mermaid container]
-C --> D[Pass diagram code to Mermaid.js]
-D --> E[Render SVG diagram]
-E --> F[Display in documentation]
-B --> |No| G[Process normally]
-```
-
-**Diagram sources**
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
-
-#### Code Syntax Highlighting
-Code blocks in documentation are syntax-highlighted using React Syntax Highlighter. The system supports multiple programming languages and provides a consistent visual style.
-
-```mermaid
-flowchart TD
-A[Parse Markdown] --> B{Code block?}
-B --> |Yes| C[Determine language from class]
-C --> D[Create SyntaxHighlighter component]
-D --> E[Apply syntax highlighting]
-E --> F[Display highlighted code]
-B --> |No| G[Process normally]
-```
-
-**Diagram sources**
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
+- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp)
+- [regulatory_monitor_ui.cpp](file://shared/web_ui/regulatory_monitor_ui.cpp)
+- [Settings.tsx](file://frontend/src/pages/Settings.tsx)
 
 **Section sources**
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
-- [wiki-server.js](file://wiki-server.js)
+- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp)
+- [regulatory_monitor_ui.cpp](file://shared/web_ui/regulatory_monitor_ui.cpp)
+- [Settings.tsx](file://frontend/src/pages/Settings.tsx)
 
 ## Dependency Analysis
-The Documentation System has several key dependencies that enable its functionality:
+The Documentation System has dependencies on several external libraries and internal components. The frontend depends on React, TypeScript, and several npm packages for rendering Markdown, syntax highlighting, and diagram visualization. The backend depends on Express for serving HTTP requests and handling file operations. The system also depends on the wiki content stored in the .qoder/repowiki/ directory.
 
 ```mermaid
 graph TD
 A[Documentation System] --> B[React]
-A --> C[React Router]
-A --> D[Axios]
-A --> E[Mermaid.js]
-A --> F[React Markdown]
-A --> G[React Syntax Highlighter]
-A --> H[Lucide Icons]
-A --> I[Tailwind CSS]
-B --> J[React DOM]
-F --> K[Remark GFM]
-G --> L[Prism.js]
-A --> M[Express.js]
-M --> N[Node.js FS]
-M --> O[Path]
+A --> C[TypeScript]
+A --> D[react-markdown]
+A --> E[remark-gfm]
+A --> F[react-syntax-highlighter]
+A --> G[mermaid]
+A --> H[Express]
+A --> I[.qoder/repowiki/]
+A --> J[Node.js]
 ```
 
 **Diagram sources**
 - [package.json](file://frontend/package.json)
-- [wiki-server.js](file://wiki-server.js)
-
-**Section sources**
-- [package.json](file://frontend/package.json)
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
+- [package.json](file://package.json)
 - [wiki-server.js](file://wiki-server.js)
 
 ## Performance Considerations
-The Documentation System is designed with performance in mind. The frontend uses React's virtual DOM for efficient rendering, and the backend serves static files directly from the file system. The search functionality is optimized to minimize disk I/O by reading files only when necessary. The system also implements client-side caching of documentation structure to reduce server requests.
+The Documentation System is designed with performance in mind. The frontend uses lazy loading to minimize initial load time, and the backend implements efficient file reading and caching mechanisms. The system supports code splitting to reduce bundle size, and the documentation content is loaded on demand when users navigate to different sections. The search functionality is optimized to provide quick results, and the Mermaid diagrams are rendered asynchronously to prevent blocking the main thread.
 
 ## Troubleshooting Guide
-Common issues and their solutions:
-
-- **Documentation not loading**: Check that the wiki server is running and the `.qoder/repowiki` directory exists with content.
-- **Search not working**: Verify that the `repowiki-metadata.json` file is present and valid.
-- **Mermaid diagrams not rendering**: Ensure Mermaid.js is properly initialized and the browser supports SVG rendering.
-- **Authentication issues**: Check that JWT tokens are being properly stored and sent with requests.
+Common issues with the Documentation System include problems with Mermaid diagram rendering, code syntax highlighting, and tree navigation. If Mermaid diagrams are not showing, check the browser console for errors and verify that the mermaid library is properly loaded. If code is not highlighted, ensure that the syntax highlighter theme is imported and that the react-syntax-highlighter package is installed. If the tree is not loading, verify that the wiki server is running on port 3001 and that the wiki content exists at .qoder/repowiki/. For search issues, check that the wiki server is running and that the search API endpoint is accessible.
 
 **Section sources**
-- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
+- [DOCUMENTATION_GUIDE.md](file://DOCUMENTATION_GUIDE.md)
 - [wiki-server.js](file://wiki-server.js)
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx)
+- [Documentation.tsx](file://frontend/src/pages/Documentation.tsx)
 
 ## Conclusion
-The Documentation System provides a comprehensive solution for managing and presenting technical documentation. With its interactive features, intuitive navigation, and robust architecture, it offers an excellent user experience for accessing and searching documentation. The system is extensible and can be enhanced with additional features such as PDF export, keyboard shortcuts, and collaborative editing.
+The Documentation System for Regulens provides a comprehensive solution for accessing and navigating technical documentation. By combining a modern React frontend with a lightweight Node.js backend, the system delivers an interactive and user-friendly documentation experience. The implementation supports multiple documentation formats, including interactive tree navigation, Mermaid diagram rendering, and syntax highlighting, making it suitable for both technical and non-technical users. The system is designed to be extensible and can be easily integrated with the existing Regulens codebase. With its comprehensive feature set and robust architecture, the Documentation System enhances developer productivity and improves access to critical project information.

@@ -2,20 +2,22 @@
 
 <cite>
 **Referenced Files in This Document**   
-- [docker-compose.yml](file://docker-compose.yml)
+- [docker-compose.yml](file://docker-compose.yml) - *Updated in recent commit*
 - [start.sh](file://start.sh)
 - [schema.sql](file://schema.sql)
 - [seed_data.sql](file://seed_data.sql)
 - [package.json](file://package.json)
-- [frontend/package.json](file://frontend/package.json)
+- [frontend/package.json](file://frontend/package.json) - *Updated in recent commit*
 - [CMakeLists.txt](file://CMakeLists.txt)
 - [Dockerfile](file://Dockerfile)
 - [main.cpp](file://main.cpp)
 - [server_with_auth.cpp](file://server_with_auth.cpp)
 - [AUTOMATED_SETUP.md](file://AUTOMATED_SETUP.md) - *Updated in recent commit*
+- [wiki-server.js](file://wiki-server.js) - *Updated in recent commit*
+- [frontend/vite.config.ts](file://frontend/vite.config.ts) - *Updated in recent commit*
+- [frontend/src/hooks/useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts) - *Updated in recent commit*
 - [install-documentation.sh](file://install-documentation.sh) - *Deprecated in recent commit*
 - [start-documentation.sh](file://start-documentation.sh) - *Deprecated in recent commit*
-- [wiki-server.js](file://wiki-server.js) - *Updated in recent commit*
 </cite>
 
 ## Update Summary

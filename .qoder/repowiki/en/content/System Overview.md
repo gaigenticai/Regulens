@@ -12,7 +12,20 @@
 - [llm_interface.hpp](file://shared/agentic_brain/llm_interface.hpp)
 - [configuration_manager.hpp](file://shared/config/configuration_manager.hpp)
 - [App.tsx](file://frontend/src/App.tsx)
+- [wiki-server.js](file://wiki-server.js) - *Added in recent commit*
+- [frontend/src/pages/Documentation.tsx](file://frontend/src/pages/Documentation.tsx) - *New documentation component*
+- [frontend/src/hooks/useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts) - *New documentation hook*
+- [frontend/package.json](file://frontend/package.json) - *Updated with documentation dependencies*
+- [frontend/vite.config.ts](file://frontend/vite.config.ts) - *Updated with documentation proxy*
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Added new section on Interactive Documentation System to reflect the newly implemented web-based documentation viewer
+- Updated Table of Contents to include the new section
+- Added references to new documentation-related files in the referenced files list
+- Enhanced source tracking with annotations for newly added files
+- Updated deployment scenarios section to reflect automated documentation startup
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -24,6 +37,7 @@
 7. [Build and Execution Flow](#build-and-execution-flow)
 8. [Deployment Scenarios](#deployment-scenarios)
 9. [Performance Characteristics](#performance-characteristics)
+10. [Interactive Documentation System](#interactive-documentation-system)
 
 ## Introduction
 
@@ -472,3 +486,52 @@ The modular architecture enables horizontal scaling of specific components based
 - [schema.sql](file://schema.sql#L1-L8473)
 - [configuration_manager.hpp](file://shared/config/configuration_manager.hpp#L1-L343)
 - [regulatory_monitor.hpp](file://regulatory_monitor/regulatory_monitor.hpp#L1-L226)
+
+## Interactive Documentation System
+
+Regulens now includes a comprehensive web-based interactive documentation system that provides an enhanced user experience for accessing and navigating system documentation. This new component transforms the wiki content into a navigable, single-page application with advanced features for improved usability.
+
+The documentation system is built as a React-based frontend component that integrates with a dedicated Node.js wiki server. The system serves markdown content from the `.qoder/repowiki/en/content/` directory and provides a rich interface for exploring documentation. Key features include:
+
+- **Interactive Tree Navigation**: Hierarchical folder structure with expand/collapse functionality that mirrors the wiki's organization
+- **Mermaid Diagram Support**: All mermaid diagrams render as zoomable, interactive SVGs with pan and scroll capabilities
+- **Syntax Highlighting**: Code blocks with language-specific highlighting for over 100 programming languages
+- **Full-Text Search**: Search across all documentation with real-time filtering and result previews
+- **Zoom Controls**: Adjustable content size from 50% to 200% for better readability
+- **Dark Theme**: Professional, eye-friendly interface optimized for long reading sessions
+
+The system architecture consists of a wiki server (wiki-server.js) that exposes REST APIs for documentation structure, content, search, and metadata. The frontend documentation component (Documentation.tsx) consumes these APIs and renders the content with enhanced styling and interactivity. The useDocumentation hook manages data fetching and state for the documentation viewer.
+
+Deployment has been simplified with automated startup. In development mode, running `npm run dev` from the frontend directory automatically starts both the wiki server and Vite development server using concurrently. The Vite proxy configuration routes `/api/documentation/*` requests to the wiki server on port 3001. In production, Docker Compose manages all services including the wiki server container.
+
+```mermaid
+graph TD
+A[Browser] --> B[Frontend React App]
+B --> C[/api/documentation/*]
+C --> D[Vite Proxy]
+D --> E[Wiki Server]
+E --> F[.qoder/repowiki/]
+F --> E
+E --> D
+D --> B
+B --> A
+style A fill:#F9F9F9,stroke:#333
+style B fill:#4B9CD3,stroke:#347AA6
+style C fill:#4B9CD3,stroke:#347AA6
+style D fill:#4B9CD3,stroke:#347AA6
+style E fill:#4B9CD3,stroke:#347AA6
+style F fill:#4B9CD3,stroke:#347AA6
+```
+
+**Diagram sources**
+- [wiki-server.js](file://wiki-server.js#L1-L180)
+- [frontend/src/pages/Documentation.tsx](file://frontend/src/pages/Documentation.tsx#L1-L337)
+- [frontend/vite.config.ts](file://frontend/vite.config.ts#L1-L54)
+
+**Section sources**
+- [wiki-server.js](file://wiki-server.js#L1-L180)
+- [frontend/src/pages/Documentation.tsx](file://frontend/src/pages/Documentation.tsx#L1-L337)
+- [frontend/src/hooks/useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts#L1-L74)
+- [frontend/package.json](file://frontend/package.json#L1-L52)
+- [frontend/vite.config.ts](file://frontend/vite.config.ts#L1-L54)
+- [frontend/src/routes/index.tsx](file://frontend/src/routes/index.tsx#L35-L35)

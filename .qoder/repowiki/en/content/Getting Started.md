@@ -12,7 +12,21 @@
 - [Dockerfile](file://Dockerfile)
 - [main.cpp](file://main.cpp)
 - [server_with_auth.cpp](file://server_with_auth.cpp)
+- [AUTOMATED_SETUP.md](file://AUTOMATED_SETUP.md) - *Updated in recent commit*
+- [install-documentation.sh](file://install-documentation.sh) - *Deprecated in recent commit*
+- [start-documentation.sh](file://start-documentation.sh) - *Deprecated in recent commit*
+- [wiki-server.js](file://wiki-server.js) - *Updated in recent commit*
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Updated installation methods to reflect automated documentation system
+- Removed outdated manual documentation setup instructions
+- Added new section on automated documentation system
+- Updated configuration setup to include wiki server settings
+- Revised running instructions to reflect new startup process
+- Updated troubleshooting section with new common issues
+- Marked deprecated scripts as obsolete
 
 ## Table of Contents
 1. [Prerequisites](#prerequisites)
@@ -23,6 +37,7 @@
 6. [Verification and Testing](#verification-and-testing)
 7. [Troubleshooting](#troubleshooting)
 8. [Platform-Specific Considerations](#platform-specific-considerations)
+9. [Automated Documentation System](#automated-documentation-system)
 
 ## Prerequisites
 
@@ -465,3 +480,128 @@ cmake .. | grep -i "not found"
 - [docker-compose.yml](file://docker-compose.yml#L1-L141)
 - [start.sh](file://start.sh#L0-L194)
 - [CMakeLists.txt](file://CMakeLists.txt#L1-L233)
+
+## Automated Documentation System
+
+The Regulens documentation system has been completely automated, eliminating the need for separate manual setup scripts. The wiki server now starts automatically with the frontend.
+
+### Key Changes
+- **Old Process**: Required running `install-documentation.sh` and `start-documentation.sh` separately
+- **New Process**: Documentation server starts automatically with `npm run dev`
+- **Benefits**: Single command startup, automatic process management, unified logging
+
+### Development Mode Setup
+```bash
+# 1. Install root dependencies (for wiki server)
+npm install
+
+# 2. Install frontend dependencies
+cd frontend
+npm install
+
+# 3. Start development (automatic!)
+npm run dev  # Starts both wiki server and Vite dev server
+```
+
+### Architecture Overview
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Development Mode                      │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  npm run dev (frontend/)                                │
+│       │                                                  │
+│       ├─→ Wiki Server (port 3001)                       │
+│       │   └─→ Serves wiki content from .qoder/repowiki/ │
+│       │                                                  │
+│       └─→ Vite Dev Server (port 3000)                   │
+│           ├─→ Frontend React app                        │
+│           └─→ Proxy /api/documentation/* → port 3001    │
+│                                                          │
+│  Browser → http://localhost:3000/documentation          │
+│       │                                                  │
+│       └─→ Frontend loads Documentation component        │
+│           └─→ Fetches from /api/documentation/*         │
+│               └─→ Vite proxy forwards to wiki server    │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Configuration Files
+The automated system uses the following configuration files:
+
+**`frontend/package.json`**:
+```json
+{
+  "scripts": {
+    "dev": "concurrently \"npm run wiki-server\" \"vite\"",
+    "wiki-server": "cd .. && node wiki-server.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+```
+
+**`frontend/vite.config.ts`**:
+```ts
+proxy: {
+  '/api/documentation': {
+    target: 'http://localhost:3001',
+    changeOrigin: true,
+  },
+  '/api': {
+    target: 'http://localhost:8080',
+    changeOrigin: true,
+  }
+}
+```
+
+### Accessing Documentation
+Once the system is running:
+- **Frontend**: `http://localhost:3000`
+- **Documentation**: `http://localhost:3000/documentation`
+- **Wiki API**: `http://localhost:3001` (proxied via frontend)
+
+### Migration from Old Setup
+The old manual setup scripts are now deprecated:
+- `install-documentation.sh` - No longer needed
+- `start-documentation.sh` - No longer needed
+
+**New Workflow**:
+1. Install dependencies once: `cd frontend && npm install`
+2. Run: `npm run dev`
+3. Everything starts automatically!
+
+### Troubleshooting Automated Setup
+
+#### Issue: Port 3001 already in use
+```bash
+# Kill process on port 3001
+lsof -ti:3001 | xargs kill -9
+
+# Restart
+cd frontend && npm run dev
+```
+
+#### Issue: Wiki content not found
+Ensure wiki content exists:
+```bash
+ls -la .qoder/repowiki/en/content/
+```
+
+#### Issue: Concurrently not found
+```bash
+cd frontend
+npm install concurrently --save-dev
+```
+
+**Section sources**
+- [AUTOMATED_SETUP.md](file://AUTOMATED_SETUP.md) - *Updated in recent commit*
+- [frontend/package.json](file://frontend/package.json#L5-L10) - *Updated in recent commit*
+- [frontend/vite.config.ts](file://frontend/vite.config.ts#L20-L30) - *Updated in recent commit*
+- [frontend/src/hooks/useDocumentation.ts](file://frontend/src/hooks/useDocumentation.ts#L5) - *Updated in recent commit*
+- [docker-compose.yml](file://docker-compose.yml#L100-L120) - *Updated in recent commit*
+- [install-documentation.sh](file://install-documentation.sh) - *Deprecated in recent commit*
+- [start-documentation.sh](file://start-documentation.sh) - *Deprecated in recent commit*
+- [wiki-server.js](file://wiki-server.js) - *Updated in recent commit*

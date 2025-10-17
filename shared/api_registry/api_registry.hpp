@@ -59,6 +59,9 @@ struct APIEndpoint {
     std::map<int, APIResponse> responses; // Response definitions
     std::vector<std::string> security_schemes; // Security schemes
 
+    // Default constructor
+    APIEndpoint() : requires_auth(false) {}
+
     APIEndpoint(const std::string& m, const std::string& p, const std::string& desc,
                 const std::string& cat, bool auth = false, const std::vector<std::string>& r = {})
         : method(m), path(p), description(desc), category(cat), requires_auth(auth), roles(r) {}

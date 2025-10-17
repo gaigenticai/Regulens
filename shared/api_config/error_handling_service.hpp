@@ -14,20 +14,12 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include "../../shared/error_handler.hpp"
-#include "../../shared/structured_logger.hpp"
+#include "../logging/structured_logger.hpp"
+#include "../models/error_handling.hpp"
 
 namespace regulens {
 
-enum class ErrorCategory {
-    CLIENT_ERROR,
-    AUTHENTICATION_ERROR,
-    AUTHORIZATION_ERROR,
-    SERVER_ERROR,
-    NETWORK_ERROR,
-    RATE_LIMIT_ERROR,
-    VALIDATION_ERROR,
-    EXTERNAL_SERVICE_ERROR
-};
+// ErrorCategory is defined in shared/models/error_handling.hpp
 
 struct ErrorCode {
     std::string code;

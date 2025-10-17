@@ -12,7 +12,7 @@
 #include <optional>
 #include <nlohmann/json.hpp>
 #include "../../shared/error_handler.hpp"
-#include "../../shared/structured_logger.hpp"
+#include "../logging/structured_logger.hpp"
 
 namespace regulens {
 
@@ -27,7 +27,7 @@ struct HTTPMethodRules {
     bool cacheable;      // Response can be cached
 };
 
-struct ValidationResult {
+struct HTTPValidationResult {
     bool valid;
     std::string message;
     std::string severity; // "error", "warning", "info"
@@ -43,7 +43,7 @@ public:
                    std::shared_ptr<StructuredLogger> logger);
 
     // Validate HTTP method usage
-    ValidationResult validate_method_usage(const std::string& method,
+    HTTPValidationResult validate_method_usage(const std::string& method,
                                          const std::string& path,
                                          bool has_request_body = false,
                                          const std::vector<std::string>& headers = {},

@@ -17,8 +17,8 @@ namespace auth {
 
 // Authentication endpoints
 std::string login_user(PGconn* db_conn, const std::string& request_body);
-std::string logout_user(PGconn* db_conn, const std::map<std::string, std::string>& headers);
-std::string get_current_user(PGconn* db_conn, const std::map<std::string, std::string>& headers);
+std::string logout_user(PGconn* db_conn, const std::unordered_map<std::string, std::string>& headers);
+std::string get_current_user(PGconn* db_conn, const std::unordered_map<std::string, std::string>& headers);
 std::string refresh_token(PGconn* db_conn, const std::string& request_body);
 
 // Helper functions

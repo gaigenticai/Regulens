@@ -45,6 +45,19 @@ enum class DecisionConfidence {
     VERY_HIGH
 };
 
+struct DecisionModel {
+    std::string model_id;
+    std::string name;
+    DecisionType type;
+    nlohmann::json parameters;
+    nlohmann::json metadata;
+    double accuracy_score;
+    int usage_count;
+    std::chrono::system_clock::time_point created_at;
+    std::chrono::system_clock::time_point last_updated;
+    bool is_active;
+};
+
 struct RiskAssessment {
     RiskLevel level;
     double score; // 0.0 to 1.0
@@ -74,6 +87,7 @@ struct DecisionResult {
     bool requires_human_review;
     std::string human_review_reason;
     std::chrono::system_clock::time_point decision_timestamp;
+    long long processing_time_ms;
 };
 
 struct ProactiveAction {
@@ -201,6 +215,49 @@ private:
 
     bool initialized_;
     std::atomic<bool> processing_active_;
+
+    // Active decision models
+    std::unordered_map<std::string, DecisionModel> active_models_;
+
+    // Random number generation
+    std::mt19937 random_engine_;
+
+    // Initialization and state management
+    void initialize_default_thresholds();
+    void initialize_database_schema(PostgreSQLConnection& conn);
+    void load_persisted_state();
+    void save_current_state();
+
+    // Utility functions
+    std::string generate_decision_id();
+    std::string risk_level_to_string(RiskLevel level);
+    DecisionType string_to_decision_type(const std::string& str);
+    std::string decision_type_to_string(DecisionType type);
+    DecisionConfidence string_to_confidence(const std::string& str);
+    bool matches_learned_pattern(const nlohmann::json& data, const LearningPattern& pattern);
+    bool matches_learned_pattern(const nlohmann::json& data, const std::vector<LearningPattern>& patterns);
+    std::string timestamp_to_string(std::chrono::system_clock::time_point tp);
+    std::chrono::system_clock::time_point string_to_timestamp(const std::string& str);
+    nlohmann::json generate_detailed_explanation(const DecisionResult& decision);
+
+    // Specialized decision evaluators
+    DecisionResult evaluate_compliance_alert(const DecisionContext& context);
+    DecisionResult evaluate_proactive_monitoring(const DecisionContext& context);
+
+    // Human review logic
+    bool should_require_human_review(const DecisionResult& decision, const RiskAssessment& risk);
+
+    // Action generation
+    std::vector<std::string> generate_recommended_actions(const DecisionResult& result, const DecisionContext& context);
+    std::vector<std::string> generate_risk_factors(const nlohmann::json& data, double risk_score);
+    std::vector<std::string> generate_mitigating_factors(const nlohmann::json& data, double risk_score);
+    double calculate_assessment_confidence(const nlohmann::json& data);
+    nlohmann::json generate_risk_recommendations(const RiskAssessment& assessment);
+    std::string confidence_to_string(DecisionConfidence confidence);
+    RiskLevel score_to_risk_level(double score);
+    std::string get_impact_level(double impact_score);
+    double calculate_compliance_risk_score(const nlohmann::json& compliance_data);
+    std::string get_severity_level(double score);
 };
 
 } // namespace regulens

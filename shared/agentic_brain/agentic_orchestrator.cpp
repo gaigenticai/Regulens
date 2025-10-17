@@ -1292,7 +1292,7 @@ void AgenticOrchestrator::validate_required_dependencies() const {
     
     // Verify database pool is operational
     try {
-        auto conn = db_pool_->acquire();
+        auto conn = db_pool_->get_connection();
         if (!conn) {
             throw std::invalid_argument("AgenticOrchestrator: Database connection pool is not operational");
         }
@@ -1382,7 +1382,7 @@ std::shared_ptr<LLMInterface> AgenticOrchestrator::create_llm_interface_from_env
             try {
                 llm->configure_provider(LLMProvider::ANTHROPIC, llm_config);
                 llm->set_provider(LLMProvider::ANTHROPIC);
-                llm->set_model(LLMModel::CLAUDE_SONNET_4);
+                llm->set_model(LLMModel::CLAUDE_3_SONNET);
                 logger_->log(LogLevel::INFO, "LLMInterface configured with Anthropic provider");
             } catch (const std::exception& e) {
                 logger_->log(LogLevel::WARN, "Anthropic configuration failed: " + std::string(e.what()));

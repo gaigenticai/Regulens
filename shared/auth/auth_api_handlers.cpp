@@ -222,7 +222,7 @@ std::string get_current_user(PGconn* db_conn, const std::map<std::string, std::s
         }
 
         JWTParser jwt_parser(jwt_secret_env);
-        auto user_id_opt = extract_user_id_from_request(headers, jwt_parser);
+        auto user_id_opt = extract_user_id_from_headers(headers, jwt_parser);
 
         if (!user_id_opt.has_value()) {
             return "{\"error\":\"Invalid or missing authentication token\"}";
@@ -585,12 +585,8 @@ std::string hmac_sha256(const std::string& data, const std::string& key) {
     EVP_MAC_CTX_free(ctx);
     EVP_MAC_free(mac);
 
-    std::stringstream ss;
-    for (size_t i = 0; i < hash_len; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
-    }
-
-    return ss.str();
+    // Return raw bytes for JWT signature (not hex string)
+    return std::string((char*)hash, hash_len);
 }
 
 std::string sha256(const std::string& input) {
@@ -606,6 +602,42 @@ std::string sha256(const std::string& input) {
     }
 
     return ss.str();
+}
+
+// Helper function to extract user ID from request headers
+static std::optional<std::string> extract_user_id_from_headers(const std::map<std::string, std::string>& headers, JWTParser& jwt_parser) {
+    // Extract Authorization header
+    auto auth_it = headers.find("authorization");
+    if (auth_it == headers.end()) {
+        auth_it = headers.find("Authorization");
+        if (auth_it == headers.end()) {
+            return std::nullopt;
+        }
+    }
+
+    const std::string& auth_header = auth_it->second;
+
+    // Check for Bearer token
+    if (auth_header.substr(0, 7) != "Bearer ") {
+        return std::nullopt;
+    }
+
+    std::string token = auth_header.substr(7);
+
+    // Parse and validate token
+    auto claims_opt = jwt_parser.parse_token(token);
+    if (!claims_opt.has_value()) {
+        return std::nullopt;
+    }
+
+    const JWTClaims& claims = claims_opt.value();
+
+    // Check if token is expired
+    if (jwt_parser.is_expired(claims)) {
+        return std::nullopt;
+    }
+
+    return claims.user_id;
 }
 
 } // namespace auth

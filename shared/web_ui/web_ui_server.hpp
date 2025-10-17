@@ -40,10 +40,10 @@ struct HTTPRequest {
     std::string method;
     std::string path;
     std::string query_string;
-    std::unordered_map<std::string, std::string> headers;
+    std::map<std::string, std::string> headers;
     std::string body;
-    std::unordered_map<std::string, std::string> params;
-    std::unordered_map<std::string, std::string> query_params;
+    std::map<std::string, std::string> params;
+    std::map<std::string, std::string> query_params;
 
     HTTPRequest() = default;
     HTTPRequest(const std::string& m, const std::string& p,

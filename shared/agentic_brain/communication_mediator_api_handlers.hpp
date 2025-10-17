@@ -11,8 +11,8 @@
 #include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "communication_mediator.hpp"
-#include "../../database/postgresql_connection.hpp"
-#include "../../security/access_control_service.hpp"
+#include "../database/postgresql_connection.hpp"
+#include "../security/access_control_service.hpp"
 
 namespace regulens {
 

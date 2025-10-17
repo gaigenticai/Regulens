@@ -118,7 +118,47 @@ struct CollaborationSession {
     // Runtime state (not persisted)
     std::atomic<int> active_streams{0};
     std::atomic<int> total_steps{0};
-    
+
+    // Default constructor
+    CollaborationSession() = default;
+
+    // Copy constructor (atomic members are not copied, initialized to defaults)
+    CollaborationSession(const CollaborationSession& other)
+        : session_id(other.session_id), title(other.title), description(other.description),
+          objective(other.objective), status(other.status), created_by(other.created_by),
+          created_at(other.created_at), updated_at(other.updated_at),
+          started_at(other.started_at), completed_at(other.completed_at),
+          agent_ids(other.agent_ids), context(other.context),
+          settings(other.settings), metadata(other.metadata),
+          active_streams(0), total_steps(0) {}
+
+    // Copy assignment
+    CollaborationSession& operator=(const CollaborationSession& other) {
+        if (this != &other) {
+            session_id = other.session_id;
+            title = other.title;
+            description = other.description;
+            objective = other.objective;
+            status = other.status;
+            created_by = other.created_by;
+            created_at = other.created_at;
+            updated_at = other.updated_at;
+            started_at = other.started_at;
+            completed_at = other.completed_at;
+            agent_ids = other.agent_ids;
+            context = other.context;
+            settings = other.settings;
+            metadata = other.metadata;
+            active_streams = 0; // Reset runtime state
+            total_steps = 0;    // Reset runtime state
+        }
+        return *this;
+    }
+
+    // Move constructors and assignment (required due to atomic members)
+    CollaborationSession(CollaborationSession&& other) noexcept = default;
+    CollaborationSession& operator=(CollaborationSession&& other) noexcept = default;
+
     nlohmann::json to_json() const;
     static CollaborationSession from_json(const nlohmann::json& j);
 };
@@ -315,7 +355,7 @@ public:
     
     // Statistics and monitoring
     nlohmann::json get_session_summary(const std::string& session_id);
-    nlohmann::json get_dashboard_stats();
+    nlohmann::json get_dashboard_stats() const;
     void refresh_session_summaries();
     
     // Health and metrics
@@ -332,7 +372,7 @@ private:
     mutable std::mutex subscribers_mutex_;
     
     // Session cache for performance
-    std::unordered_map<std::string, CollaborationSession> session_cache_;
+    std::unordered_map<std::string, std::shared_ptr<CollaborationSession>> session_cache_;
     mutable std::mutex cache_mutex_;
     
     // Metrics

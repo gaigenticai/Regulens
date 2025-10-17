@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "tool_categories.hpp"
-#include "../../database/postgresql_connection.hpp"
+#include "database/postgresql_connection.hpp"
 
 namespace regulens {
 

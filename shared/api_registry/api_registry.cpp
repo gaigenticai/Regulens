@@ -192,7 +192,7 @@ nlohmann::json APIRegistry::generate_openapi_spec() const {
         std::string method_lower = endpoint.method;
         std::transform(method_lower.begin(), method_lower.end(), method_lower.begin(), ::tolower);
 
-        if (!paths.contains(endpoint.path)) {
+        if (paths.find(endpoint.path) == paths.end()) {
             paths[endpoint.path] = nlohmann::json::object();
         }
 

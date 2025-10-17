@@ -14,7 +14,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include "../../shared/error_handler.hpp"
-#include "../../shared/structured_logger.hpp"
+#include "../logging/structured_logger.hpp"
 
 namespace regulens {
 

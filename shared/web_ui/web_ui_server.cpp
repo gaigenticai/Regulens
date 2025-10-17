@@ -27,7 +27,7 @@
 #include "../config/configuration_manager.hpp"
 #include "../metrics/metrics_collector.hpp"
 #include "../api_config/api_endpoint_config.hpp"
-#include "../structured_logger.hpp"
+#include "../logging/structured_logger.hpp"
 #include "../api_config/api_versioning_service.hpp"
 #include "../api_config/api_version_router.hpp"
 #include "../api_config/error_handling_service.hpp"

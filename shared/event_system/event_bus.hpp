@@ -29,6 +29,7 @@
 #include "event.hpp"
 #include "../logging/structured_logger.hpp"
 #include "../database/postgresql_connection.hpp"
+#include "../metrics/metrics_collector.hpp"
 
 namespace regulens {
 

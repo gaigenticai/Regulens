@@ -46,27 +46,7 @@ enum class ParameterType {
     OBJECT
 };
 
-// API endpoint parameter
-struct APIParameter {
-    std::string name;
-    ParameterLocation location;
-    ParameterType type;
-    std::string description;
-    bool required;
-    std::string default_value;
-    std::string example;
-    std::string format;  // e.g., "uuid", "email", "date-time"
-    std::vector<std::string> enum_values;
-};
-
-// API response
-struct APIResponse {
-    int status_code;
-    std::string description;
-    std::string content_type;
-    std::string schema_ref;  // Reference to schema definition
-    std::string example;
-};
+// APIParameter and APIResponse are defined in api_registry.hpp
 
 // API endpoint - Forward declaration, defined in api_registry.hpp
 struct APIEndpoint;

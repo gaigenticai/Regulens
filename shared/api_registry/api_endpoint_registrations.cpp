@@ -4,6 +4,7 @@
  */
 
 #include "api_registry.hpp"
+#include "../web_ui/web_ui_server.hpp"
 #include "../auth/auth_api_handlers.hpp"
 #include "../transactions/transaction_api_handlers.hpp"
 #include "../fraud_detection/fraud_api_handlers.hpp"

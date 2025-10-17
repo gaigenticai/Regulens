@@ -12,28 +12,13 @@
 #include <memory>
 #include <mutex>
 #include "api_versioning_service.hpp"
+#include "../api_registry/api_registry.hpp"
 #include "../../shared/error_handler.hpp"
-#include "../../shared/structured_logger.hpp"
+#include "../logging/structured_logger.hpp"
 
 namespace regulens {
 
-struct HTTPRequest {
-    std::string method;
-    std::string path;
-    std::unordered_map<std::string, std::string> headers;
-    std::unordered_map<std::string, std::string> query_params;
-    std::string body;
-    std::string client_ip;
-    std::string user_agent;
-};
-
-struct HTTPResponse {
-    int status_code;
-    std::string status_message;
-    std::string body;
-    std::string content_type;
-    std::unordered_map<std::string, std::string> headers;
-};
+// HTTPRequest and HTTPResponse are defined in api_registry.hpp
 
 using RouteHandler = std::function<HTTPResponse(const HTTPRequest&)>;
 

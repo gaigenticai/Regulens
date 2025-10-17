@@ -21,8 +21,12 @@ namespace regulens {
 
 // LLMInterface Implementation
 LLMInterface::LLMInterface(std::shared_ptr<HttpClient> http_client, StructuredLogger* logger)
-    : http_client_(http_client), logger_(logger), rate_limiter_(100, std::chrono::minutes(1)) {
+    : http_client_(http_client), logger_(logger) {
     // Initialize rate limiter: 100 requests per minute default
+    rate_limiters_.emplace(LLMProvider::OPENAI, std::make_unique<RateLimiter>(100, std::chrono::minutes(1)));
+    rate_limiters_.emplace(LLMProvider::ANTHROPIC, std::make_unique<RateLimiter>(50, std::chrono::minutes(1)));
+    rate_limiters_.emplace(LLMProvider::LOCAL_LLM, std::make_unique<RateLimiter>(10, std::chrono::minutes(1)));
+
     initialize_default_configs();
 }
 
@@ -60,7 +64,7 @@ void LLMInterface::initialize_default_configs() {
         throw std::runtime_error("LOCAL_LLM_BASE_URL environment variable must be configured");
     }
 
-    provider_configs_[LLMProvider::LOCAL_LLM_LLM] = {
+    provider_configs_[LLMProvider::LOCAL_LLM] = {
         {"base_url", local_llm_url},
         {"timeout_seconds", 120},
         {"max_retries", 2},
@@ -86,7 +90,7 @@ bool LLMInterface::configure_provider(LLMProvider provider, const nlohmann::json
         if (config.contains("rate_limit_requests") && config.contains("rate_limit_window_seconds")) {
             int requests = config["rate_limit_requests"];
             int window_seconds = config["rate_limit_window_seconds"];
-            rate_limiters_[provider] = RateLimiter(requests, std::chrono::seconds(window_seconds));
+            rate_limiters_.emplace(provider, std::make_unique<RateLimiter>(requests, std::chrono::seconds(window_seconds)));
         }
 
         // Test connection if API key provided
@@ -157,7 +161,7 @@ bool LLMInterface::set_model(LLMModel model) {
 
         bool model_supported = false;
         for (const auto& available_model : available_models) {
-            if (available_model == model_str) {
+            if (model_to_string(available_model) == model_str) {
                 model_supported = true;
                 break;
             }
@@ -177,7 +181,7 @@ bool LLMInterface::set_model(LLMModel model) {
 LLMResponse LLMInterface::analyze_with_context(const std::string& prompt, const nlohmann::json& context) {
     // Create a request with context-enhanced prompt
     LLMRequest request;
-    request.model = current_model_;
+    request.model = model_to_string(current_model_);
     request.model_preference = current_model_;
     request.messages = {{{"role", "user"}, {"content", prompt + "\n\nContext: " + context.dump(2)}}};
     request.temperature = 0.7;
@@ -243,7 +247,7 @@ bool LLMInterface::check_rate_limit(LLMProvider provider) {
     if (rate_limiters_.find(provider) == rate_limiters_.end()) {
         return true; // No rate limiter configured
     }
-    return rate_limiters_[provider].allow_request();
+    return rate_limiters_[provider]->allow_request();
 }
 
 void LLMInterface::update_usage_stats(const LLMResponse& response) {
@@ -522,15 +526,15 @@ LLMModel LLMInterface::string_to_model(const std::string& model_str) {
     return LLMModel::GPT_3_5_TURBO; // Default
 }
 
-std::vector<std::string> LLMInterface::get_available_models_for_provider(LLMProvider provider) {
+std::vector<LLMModel> LLMInterface::get_available_models_for_provider(LLMProvider provider) {
     switch (provider) {
         case LLMProvider::OPENAI:
-            return {"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"};
+            return {LLMModel::GPT_4, LLMModel::GPT_4_TURBO, LLMModel::GPT_3_5_TURBO};
         case LLMProvider::ANTHROPIC:
-            return {"claude-3-opus-20240229", "claude-3-sonnet-20240229",
-                   "claude-3-haiku-20240307", "claude-2"};
+            return {LLMModel::CLAUDE_3_OPUS, LLMModel::CLAUDE_3_SONNET,
+                   LLMModel::CLAUDE_3_HAIKU};
         case LLMProvider::LOCAL_LLM:
-            return {"llama-3-70b", "mistral-7b", "codellama", "phi-2"};
+            return {LLMModel::LOCAL_MODEL};
         default:
             return {};
     }
@@ -556,7 +560,7 @@ nlohmann::json LLMInterface::get_available_models() {
     return result;
 }
 
-nlohmann::json LLMInterface::get_usage_statistics() {
+nlohmann::json LLMInterface::get_usage_stats() {
     return {
         {"total_requests", usage_stats_.total_requests},
         {"total_tokens", usage_stats_.total_tokens},

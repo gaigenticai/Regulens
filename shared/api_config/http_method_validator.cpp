@@ -132,14 +132,14 @@ void HTTPMethodValidator::build_operation_mapping() {
     }
 }
 
-ValidationResult HTTPMethodValidator::validate_method_usage(
+HTTPValidationResult HTTPMethodValidator::validate_method_usage(
     const std::string& method,
     const std::string& path,
     bool has_request_body,
     const std::vector<std::string>& headers,
     const std::string& content_type) const {
 
-    ValidationResult result = {true, "", "info", {}};
+    HTTPValidationResult result = {true, "", "info", {}};
 
     // Check if method is valid
     if (!is_valid_http_method(method)) {
@@ -239,10 +239,10 @@ std::string HTTPMethodValidator::get_recommended_method(const std::string& opera
     return "POST"; // Default fallback
 }
 
-std::vector<ValidationResult> HTTPMethodValidator::validate_api_endpoints(
+std::vector<HTTPValidationResult> HTTPMethodValidator::validate_api_endpoints(
     const nlohmann::json& endpoints_config) const {
 
-    std::vector<ValidationResult> results;
+    std::vector<HTTPValidationResult> results;
 
     for (const auto& [category_name, category_data] : endpoints_config.items()) {
         if (!category_data.is_object()) continue;
@@ -254,7 +254,7 @@ std::vector<ValidationResult> HTTPMethodValidator::validate_api_endpoints(
             std::string path = endpoint_data.value("path", "");
 
             if (method.empty() || path.empty()) {
-                ValidationResult error_result = {
+                HTTPValidationResult error_result = {
                     false,
                     "Missing method or path for endpoint: " + category_name + "." + endpoint_name,
                     "error",
@@ -268,7 +268,7 @@ std::vector<ValidationResult> HTTPMethodValidator::validate_api_endpoints(
             // In production, this would also check has_request_body, headers, etc.
             auto validation = validate_method_usage(method, path);
             if (!validation.valid || validation.severity == "warning") {
-                ValidationResult result = validation;
+                HTTPValidationResult result = validation;
                 result.message = category_name + "." + endpoint_name + ": " + result.message;
                 results.push_back(result);
             }
@@ -279,7 +279,7 @@ std::vector<ValidationResult> HTTPMethodValidator::validate_api_endpoints(
 }
 
 // Private validation methods
-ValidationResult HTTPMethodValidator::validate_request_body(
+HTTPValidationResult HTTPMethodValidator::validate_request_body(
     const std::string& method, bool has_request_body) const {
 
     auto rules = get_method_rules(method);
@@ -312,7 +312,7 @@ ValidationResult HTTPMethodValidator::validate_request_body(
     return {true, "", "info", {}};
 }
 
-ValidationResult HTTPMethodValidator::validate_headers(
+HTTPValidationResult HTTPMethodValidator::validate_headers(
     const std::string& method, const std::vector<std::string>& headers) const {
 
     auto required_headers = get_required_headers(method);
@@ -332,7 +332,7 @@ ValidationResult HTTPMethodValidator::validate_headers(
     return {true, "", "info", {}};
 }
 
-ValidationResult HTTPMethodValidator::validate_content_type(
+HTTPValidationResult HTTPMethodValidator::validate_content_type(
     const std::string& method, const std::string& content_type) const {
 
     auto rules = get_method_rules(method);
@@ -365,7 +365,7 @@ ValidationResult HTTPMethodValidator::validate_content_type(
     return {true, "", "info", {}};
 }
 
-ValidationResult HTTPMethodValidator::validate_parameters(
+HTTPValidationResult HTTPMethodValidator::validate_parameters(
     const std::string& method, const std::string& path) const {
 
     auto rules = get_method_rules(method);
@@ -397,7 +397,7 @@ ValidationResult HTTPMethodValidator::validate_parameters(
     return {true, "", "info", {}};
 }
 
-ValidationResult HTTPMethodValidator::validate_operation_semantics(
+HTTPValidationResult HTTPMethodValidator::validate_operation_semantics(
     const std::string& method, const std::string& path) const {
 
     std::string operation_type = extract_operation_type(path);

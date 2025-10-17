@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <ctime>
 #include <openssl/sha.h>
+#include <openssl/evp.h>
 #include <algorithm>
 
 using json = nlohmann::json;
@@ -826,18 +827,20 @@ std::string TrainingAPIHandlers::generate_verification_code() {
 
 std::string TrainingAPIHandlers::generate_certificate_hash(const std::string& user_id, const std::string& course_id, const std::string& issued_date) {
     std::string input = user_id + course_id + issued_date;
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, input.c_str(), input.length());
-    SHA256_Final(hash, &sha256);
-    
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len;
+
+    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL);
+    EVP_DigestUpdate(mdctx, input.c_str(), input.length());
+    EVP_DigestFinal_ex(mdctx, hash, &hash_len);
+    EVP_MD_CTX_free(mdctx);
+
     std::stringstream ss;
-    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+    for(unsigned int i = 0; i < hash_len; i++) {
         ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
     }
-    
+
     return ss.str();
 }
 

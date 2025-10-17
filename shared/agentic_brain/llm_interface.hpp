@@ -56,6 +56,7 @@ struct LLMRequest {
     std::string model;
     LLMModel model_preference = LLMModel::GPT_4;
     std::vector<LLMMessage> messages;
+    std::string system_prompt;
     double temperature = 0.7;
     int max_tokens = 2000;
     bool stream = false;
@@ -66,6 +67,7 @@ struct LLMResponse {
     bool success;
     std::string content;
     std::string reasoning;
+    std::string analysis;  // Analysis of the response content
     double confidence_score;
     int tokens_used = 0;
     LLMModel model_used = LLMModel::NONE;
@@ -174,7 +176,9 @@ private:
     bool validate_provider_config(LLMProvider provider, const nlohmann::json& config);
     bool test_provider_connection(LLMProvider provider);
     std::vector<LLMModel> get_available_models_for_provider(LLMProvider provider);
+    nlohmann::json get_available_models();
     std::string model_to_string(LLMModel model);
+    LLMModel string_to_model(const std::string& str);
     bool test_openai_connection();
     bool test_anthropic_connection();
     bool test_local_connection();
@@ -186,9 +190,10 @@ private:
     LLMProvider current_provider_;
     LLMModel current_model_;
     std::unordered_map<LLMProvider, nlohmann::json> provider_configs_;
+    std::unordered_map<LLMProvider, bool> providers_; // Available providers
 
     // Rate limiting
-    std::unordered_map<LLMProvider, RateLimiter> rate_limiters_;
+    std::unordered_map<LLMProvider, std::unique_ptr<RateLimiter>> rate_limiters_;
 
     // Usage tracking
     struct UsageStats {

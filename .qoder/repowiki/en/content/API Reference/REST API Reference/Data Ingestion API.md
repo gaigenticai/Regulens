@@ -4,6 +4,8 @@
 **Referenced Files in This Document**   
 - [ingestion_api_handlers.cpp](file://shared/data_ingestion/ingestion_api_handlers.cpp)
 - [ingestion_api_handlers.hpp](file://shared/data_ingestion/ingestion_api_handlers.hpp)
+- [data_quality_handlers.cpp](file://shared/data_quality/data_quality_handlers.cpp)
+- [data_quality_handlers.hpp](file://shared/data_quality/data_quality_handlers.hpp)
 - [data_ingestion_framework.cpp](file://shared/data_ingestion/data_ingestion_framework.cpp)
 - [data_ingestion_framework.hpp](file://shared/data_ingestion/data_ingestion_framework.hpp)
 - [standard_ingestion_pipeline.hpp](file://shared/data_ingestion/pipelines/standard_ingestion_pipeline.hpp)
@@ -13,14 +15,23 @@
 - [DataQualityMonitor.tsx](file://frontend/src/pages/DataQualityMonitor.tsx)
 </cite>
 
+## Update Summary
+**Changes Made**   
+- Added comprehensive documentation for data quality monitoring endpoints
+- Updated data validation endpoint to reflect actual implementation
+- Added new section for data quality rules management
+- Updated implementation details to reflect actual code structure
+- Added new diagram showing data quality architecture
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Pipeline Management Endpoints](#pipeline-management-endpoints)
 3. [Data Source Configuration Endpoints](#data-source-configuration-endpoints)
 4. [Data Validation and Metrics Endpoints](#data-validation-and-metrics-endpoints)
-5. [Request and Response Schemas](#request-and-response-schemas)
-6. [Error Handling](#error-handling)
-7. [Implementation Details](#implementation-details)
+5. [Data Quality Rules Management](#data-quality-rules-management)
+6. [Request and Response Schemas](#request-and-response-schemas)
+7. [Error Handling](#error-handling)
+8. [Implementation Details](#implementation-details)
 
 ## Introduction
 The Data Ingestion API provides a comprehensive interface for managing data ingestion pipelines, configuring data sources, and monitoring ingestion metrics. The API enables the creation, retrieval, updating, and deletion of ingestion pipelines, as well as configuration of various data sources including databases, REST APIs, and web scraping. It also provides endpoints for data validation and monitoring ingestion metrics.
@@ -482,9 +493,284 @@ Authorization: Bearer <token>
 }
 ```
 
+### Data Quality Checks (GET /ingestion/quality-checks)
+Retrieves data quality check results for monitoring data integrity.
+
+**Request**
+```
+GET /ingestion/quality-checks?source=transactions&table=transactions&failed_only=true&limit=100 HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response**
+```json
+{
+  "checks": [
+    {
+      "id": "check-1",
+      "sourceName": "transactions",
+      "tableName": "transactions",
+      "columnName": "amount",
+      "checkType": "range",
+      "checkName": "Transaction Amount Range Check",
+      "description": "Ensures transaction amounts are within acceptable range",
+      "executedAt": "2023-06-15T10:30:00Z",
+      "passed": false,
+      "qualityScore": 95.5,
+      "recordsChecked": 1000,
+      "recordsPassed": 955,
+      "recordsFailed": 45,
+      "nullCount": 0,
+      "failureRate": 0.045,
+      "failureExamples": [
+        {
+          "record_id": "txn-123",
+          "amount": 1500000,
+          "currency": "USD",
+          "error": "Amount exceeds maximum allowed value of 1000000"
+        }
+      ],
+      "severity": "critical",
+      "thresholdMin": 0,
+      "thresholdMax": 1000000,
+      "measuredValue": 1500000,
+      "expectedValue": 1000000,
+      "deviation": 50,
+      "recommendation": "Review transaction validation rules",
+      "remediationAction": "Implement automated alerting for high-value transactions",
+      "remediationStatus": "pending"
+    }
+  ],
+  "summary": {
+    "totalChecks": 25,
+    "passedChecks": 20,
+    "failedChecks": 5,
+    "criticalIssues": 3,
+    "highIssues": 2,
+    "avgQualityScore": 92.3,
+    "passRate": 0.8
+  },
+  "tables": [
+    {
+      "tableName": "transactions",
+      "sourceName": "transactions",
+      "overallScore": 95.5,
+      "completeness": 98.0,
+      "accuracy": 96.0,
+      "validity": 94.0,
+      "totalRecords": 10000,
+      "issuesCount": 5,
+      "criticalIssues": 3,
+      "lastChecked": "2023-06-15T10:30:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
 **Section sources**
 - [ingestion_api_handlers.cpp](file://shared/data_ingestion/ingestion_api_handlers.cpp)
+- [data_quality_handlers.cpp](file://shared/data_quality/data_quality_handlers.cpp)
 - [DataQualityMonitor.tsx](file://frontend/src/pages/DataQualityMonitor.tsx)
+
+## Data Quality Rules Management
+The API provides comprehensive endpoints for managing data quality rules that define validation criteria for ingested data.
+
+### List Quality Rules (GET /ingestion/quality-rules)
+Retrieves a list of all data quality rules.
+
+**Request**
+```
+GET /ingestion/quality-rules HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "rule_id": "rule-1",
+      "rule_name": "Transaction Amount Range Check",
+      "data_source": "transactions",
+      "rule_type": "range",
+      "validation_logic": {
+        "field": "amount",
+        "min": 0,
+        "max": 1000000
+      },
+      "severity": "critical",
+      "is_enabled": true,
+      "created_at": "2023-06-01T08:00:00Z"
+    },
+    {
+      "rule_id": "rule-2",
+      "rule_name": "Customer Email Format Validation",
+      "data_source": "customers",
+      "rule_type": "pattern",
+      "validation_logic": {
+        "field": "email",
+        "pattern": "^[^@]+@[^@]+\\.[^@]+$"
+      },
+      "severity": "high",
+      "is_enabled": true,
+      "created_at": "2023-06-01T08:00:00Z"
+    }
+  ]
+}
+```
+
+### Create Quality Rule (POST /ingestion/quality-rules)
+Creates a new data quality rule.
+
+**Request**
+```
+POST /ingestion/quality-rules HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "rule_name": "Transaction Currency Validation",
+  "data_source": "transactions",
+  "rule_type": "enum",
+  "validation_logic": {
+    "field": "currency",
+    "valid_values": ["USD", "EUR", "GBP", "JPY"]
+  },
+  "severity": "high",
+  "is_enabled": true
+}
+```
+
+**Response**
+```json
+{
+  "success": true,
+  "data": {
+    "rule_id": "rule-3",
+    "message": "Data quality rule created successfully"
+  }
+}
+```
+
+### Get Quality Rule (GET /ingestion/quality-rules/{rule_id})
+Retrieves a specific data quality rule by ID.
+
+**Request**
+```
+GET /ingestion/quality-rules/rule-1 HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response**
+```json
+{
+  "success": true,
+  "data": {
+    "rule_id": "rule-1",
+    "rule_name": "Transaction Amount Range Check",
+    "data_source": "transactions",
+    "rule_type": "range",
+    "validation_logic": {
+      "field": "amount",
+      "min": 0,
+      "max": 1000000
+    },
+    "severity": "critical",
+    "is_enabled": true,
+    "created_at": "2023-06-01T08:00:00Z"
+  }
+}
+```
+
+### Update Quality Rule (PUT /ingestion/quality-rules/{rule_id})
+Updates an existing data quality rule.
+
+**Request**
+```
+PUT /ingestion/quality-rules/rule-1 HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "rule_name": "Updated Transaction Amount Range Check",
+  "validation_logic": {
+    "field": "amount",
+    "min": 0,
+    "max": 1500000
+  },
+  "severity": "critical",
+  "is_enabled": true
+}
+```
+
+**Response**
+```json
+{
+  "success": true,
+  "data": {
+    "rule_id": "rule-1",
+    "message": "Data quality rule updated successfully"
+  }
+}
+```
+
+### Delete Quality Rule (DELETE /ingestion/quality-rules/{rule_id})
+Deletes a data quality rule.
+
+**Request**
+```
+DELETE /ingestion/quality-rules/rule-1 HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response**
+```json
+{
+  "success": true,
+  "data": {
+    "rule_id": "rule-1",
+    "message": "Data quality rule deleted successfully"
+  }
+}
+```
+
+### Run Quality Check (POST /ingestion/quality-rules/{rule_id}/run)
+Executes a quality check for a specific rule.
+
+**Request**
+```
+POST /ingestion/quality-rules/rule-1/run HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response**
+```json
+{
+  "success": true,
+  "data": {
+    "check_id": "check-1",
+    "rule_id": "rule-1",
+    "rule_name": "Transaction Amount Range Check",
+    "records_checked": 1000,
+    "records_passed": 955,
+    "records_failed": 45,
+    "quality_score": 95.5,
+    "status": "failed",
+    "execution_time_ms": 250,
+    "message": "Data quality check completed successfully"
+  }
+}
+```
+
+**Section sources**
+- [data_quality_handlers.cpp](file://shared/data_quality/data_quality_handlers.cpp)
+- [data_quality_handlers.hpp](file://shared/data_quality/data_quality_handlers.hpp)
 
 ## Request and Response Schemas
 This section defines the schemas for request and response payloads used in the Data Ingestion API.
@@ -573,6 +859,68 @@ Different source types have specific configuration requirements:
     "perSeconds": "integer"
   },
   "userAgent": "string"
+}
+```
+
+### Data Quality Rule Schema
+The data quality rule schema defines validation criteria for data integrity.
+
+```json
+{
+  "rule_id": "string",
+  "rule_name": "string",
+  "data_source": "string",
+  "rule_type": "string",
+  "validation_logic": {
+    "field": "string",
+    "min": "number",
+    "max": "number",
+    "pattern": "string",
+    "valid_values": ["string"]
+  },
+  "severity": "string",
+  "is_enabled": "boolean",
+  "created_at": "string"
+}
+```
+
+### Data Quality Check Schema
+The data quality check schema defines the results of quality validation.
+
+```json
+{
+  "id": "string",
+  "sourceName": "string",
+  "tableName": "string",
+  "columnName": "string",
+  "checkType": "string",
+  "checkName": "string",
+  "description": "string",
+  "executedAt": "string",
+  "passed": "boolean",
+  "qualityScore": "number",
+  "recordsChecked": "integer",
+  "recordsPassed": "integer",
+  "recordsFailed": "integer",
+  "nullCount": "integer",
+  "failureRate": "number",
+  "failureExamples": [
+    {
+      "record_id": "string",
+      "field": "string",
+      "value": "any",
+      "error": "string"
+    }
+  ],
+  "severity": "string",
+  "thresholdMin": "number",
+  "thresholdMax": "number",
+  "measuredValue": "number",
+  "expectedValue": "number",
+  "deviation": "number",
+  "recommendation": "string",
+  "remediationAction": "string",
+  "remediationStatus": "string"
 }
 ```
 
@@ -694,11 +1042,68 @@ DataSource <|-- DatabaseSource
 StorageAdapter <|-- PostgreSQLStorageAdapter
 ```
 
-**Diagram sources **
+The data quality monitoring system is implemented in the `DataQualityHandlers` class, which provides comprehensive endpoints for managing data quality rules and monitoring data integrity. The system supports various types of quality checks including completeness, accuracy, consistency, timeliness, and validity.
+
+```mermaid
+classDiagram
+class DataQualityHandlers {
++list_quality_rules(headers) string
++create_quality_rule(body, headers) string
++get_quality_rule(rule_id, headers) string
++update_quality_rule(rule_id, body, headers) string
++delete_quality_rule(rule_id, headers) string
++get_quality_checks(headers) string
++run_quality_check(rule_id, headers) string
++get_quality_dashboard(headers) string
++get_check_history(headers) string
++get_quality_metrics(headers) string
++get_quality_trends(headers) string
+}
+class DataQualityRules {
++rule_id string
++rule_name string
++data_source string
++rule_type string
++validation_logic json
++severity string
++is_enabled bool
++created_at timestamp
+}
+class DataQualityChecks {
++check_id string
++rule_id string
++check_timestamp timestamp
++records_checked int
++records_passed int
++records_failed int
++quality_score double
++execution_time_ms int
++status string
++failed_records json
+}
+class DataQualityMetrics {
++total_rules int
++enabled_rules int
++total_checks int
++avg_quality_score double
++checks_by_type json
++quality_trends json
+}
+DataQualityHandlers --> DataQualityRules : "manages"
+DataQualityHandlers --> DataQualityChecks : "executes"
+DataQualityHandlers --> DataQualityMetrics : "aggregates"
+DataQualityRules <|-- DataQualityChecks : "defines"
+DataQualityChecks <|-- DataQualityMetrics : "contributes to"
+```
+
+**Diagram sources**
 - [data_ingestion_framework.cpp](file://shared/data_ingestion/data_ingestion_framework.cpp)
 - [data_ingestion_framework.hpp](file://shared/data_ingestion/data_ingestion_framework.hpp)
 - [standard_ingestion_pipeline.hpp](file://shared/data_ingestion/pipelines/standard_ingestion_pipeline.hpp)
+- [data_quality_handlers.cpp](file://shared/data_quality/data_quality_handlers.cpp)
+- [data_quality_handlers.hpp](file://shared/data_quality/data_quality_handlers.hpp)
 
 **Section sources**
 - [data_ingestion_framework.cpp](file://shared/data_ingestion/data_ingestion_framework.cpp)
 - [ingestion_api_handlers.cpp](file://shared/data_ingestion/ingestion_api_handlers.cpp)
+- [data_quality_handlers.cpp](file://shared/data_quality/data_quality_handlers.cpp)

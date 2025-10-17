@@ -2,18 +2,27 @@
 
 <cite>
 **Referenced Files in This Document**
-- [api_versioning_config.json](file://shared/api_config/api_versioning_config.json)
-- [api_migration_strategy.json](file://shared/api_config/api_migration_strategy.json)
-- [api_versioning_service.cpp](file://shared/api_config/api_versioning_service.cpp)
-- [api_versioning_service.hpp](file://shared/api_config/api_versioning_service.hpp)
-- [api_version_router.cpp](file://shared/api_config/api_version_router.cpp)
-- [api_version_router.hpp](file://shared/api_config/api_version_router.hpp)
-- [api_migration_helper.cpp](file://shared/api_config/api_migration_helper.cpp)
-- [api_migration_helper.hpp](file://shared/api_config/api_migration_helper.hpp)
-- [VersionSelector.tsx](file://frontend/src/components/VersionSelector.tsx)
-- [api.ts](file://frontend/src/services/api.ts)
-- [api_registry.cpp](file://shared/api_registry/api_registry.cpp)
+- [api_versioning_config.json](file://shared/api_config/api_versioning_config.json) - *Updated with comprehensive versioning strategy*
+- [api_migration_strategy.json](file://shared/api_config/api_migration_strategy.json) - *Added detailed migration planning*
+- [api_versioning_service.cpp](file://shared/api_config/api_versioning_service.cpp) - *Updated version negotiation and compatibility checks*
+- [api_versioning_service.hpp](file://shared/api_config/api_versioning_service.hpp) - *Enhanced versioning service interface*
+- [api_version_router.cpp](file://shared/api_config/api_version_router.cpp) - *Updated routing logic with version negotiation*
+- [api_version_router.hpp](file://shared/api_config/api_version_router.hpp) - *Enhanced router interface*
+- [VersionSelector.tsx](file://frontend/src/components/VersionSelector.tsx) - *Updated version selector component*
+- [api.ts](file://frontend/src/services/api.ts) - *Updated API client version management*
+- [api_registry.cpp](file://shared/api_registry/api_registry.cpp) - *Updated API registry with version awareness*
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated semantic versioning scheme with detailed lifecycle states
+- Enhanced version negotiation methods with priority order and implementation details
+- Expanded version router architecture with comprehensive component interactions
+- Added detailed migration strategy with breaking changes management and tools
+- Updated configuration management with future version planning
+- Enhanced client integration examples with real implementation details
+- Added comprehensive monitoring and analytics capabilities
+- Updated troubleshooting guide with new debugging tools
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,6 +41,10 @@
 Regulens implements a comprehensive API versioning system designed for production environments requiring robust backward compatibility, graceful migration paths, and extensive monitoring capabilities. The system follows semantic versioning principles (major.minor.patch) while providing multiple negotiation methods to accommodate diverse client requirements.
 
 The API versioning strategy ensures that clients can safely upgrade between versions without breaking existing integrations, while providing clear deprecation timelines and migration assistance. The system is built around a modular architecture that separates version negotiation, routing, and migration concerns.
+
+**Section sources**
+- [api_versioning_config.json](file://shared/api_config/api_versioning_config.json#L1-L50)
+- [api_versioning_service.cpp](file://shared/api_config/api_versioning_service.cpp#L13-L556)
 
 ## Semantic Versioning Scheme
 
@@ -60,6 +73,7 @@ Sunset : Final phase<br/>Will be removed
 
 **Section sources**
 - [api_versioning_config.json](file://shared/api_config/api_versioning_config.json#L1-L50)
+- [api_versioning_service.cpp](file://shared/api_config/api_versioning_service.cpp#L285-L334)
 
 ## Version Negotiation Methods
 

@@ -44,6 +44,9 @@
 #include "shared/api_registry/api_registry.hpp"
 #include "shared/api_registry/api_endpoint_registrations.hpp"
 
+// Utility functions
+#include "shared/utils.hpp"
+
 // JWT Authentication - Production-grade security implementation (Rule 1 compliance)
 
 // Forward declaration for global JWT parser

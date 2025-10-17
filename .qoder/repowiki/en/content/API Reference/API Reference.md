@@ -2,17 +2,26 @@
 
 <cite>
 **Referenced Files in This Document**   
-- [api_endpoints_config.json](file://shared/api_config/api_endpoints_config.json)
-- [api_versioning_config.json](file://shared/api_config/api_versioning_config.json)
-- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp)
-- [knowledge_api_handlers.hpp](file://shared/knowledge_base/knowledge_api_handlers.hpp)
-- [advanced_rule_engine_api_handlers.hpp](file://shared/rules/advanced_rule_engine_api_handlers.hpp)
-- [regulatory_monitor/rest_api_server.hpp](file://regulatory_monitor/rest_api_server.hpp)
-- [websocket_server.hpp](file://shared/websocket/websocket_server.hpp)
-- [api_versioning_service.hpp](file://shared/api_config/api_versioning_service.hpp)
-- [openapi_generator.hpp](file://shared/api_docs/openapi_generator.hpp)
-- [api.ts](file://frontend/src/services/api.ts)
+- [api_endpoints_config.json](file://shared/api_config/api_endpoints_config.json) - *Updated in recent commit*
+- [api_versioning_config.json](file://shared/api_config/api_versioning_config.json) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp) - *Updated in recent commit*
+- [knowledge_api_handlers.hpp](file://shared/knowledge_base/knowledge_api_handlers.hpp) - *Updated in recent commit*
+- [regulatory_monitor/rest_api_server.hpp](file://regulatory_monitor/rest_api_server.hpp) - *Updated in recent commit*
+- [websocket_server.hpp](file://shared/websocket/websocket_server.hpp) - *Updated in recent commit*
+- [api_versioning_service.hpp](file://shared/api_config/api_versioning_service.hpp) - *Updated in recent commit*
+- [openapi_generator.hpp](file://shared/api_docs/openapi_generator.hpp) - *Updated in recent commit*
+- [api.ts](file://frontend/src/services/api.ts) - *Updated in recent commit*
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Updated API endpoint configurations and versioning strategy based on recent commits
+- Enhanced authentication and authorization details from updated header files
+- Added comprehensive knowledge base and regulatory monitor API details
+- Updated WebSocket server implementation details
+- Improved API versioning service documentation
+- Added OpenAPI generator specifications
+- Updated client implementation guidelines from frontend API service
 
 ## Table of Contents
 1. [Introduction](#introduction)

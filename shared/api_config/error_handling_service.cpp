@@ -107,22 +107,18 @@ void ErrorHandlingService::build_error_codes_map() {
         } else {
             // Default status based on category
             switch (error_code.category) {
-                case ErrorCategory::CLIENT_ERROR:
-                case ErrorCategory::VALIDATION_ERROR:
+                case ErrorCategory::VALIDATION:
                     error_code.http_status = 400;
                     break;
-                case ErrorCategory::AUTHENTICATION_ERROR:
+                case ErrorCategory::SECURITY:
                     error_code.http_status = 401;
                     break;
-                case ErrorCategory::AUTHORIZATION_ERROR:
-                    error_code.http_status = 403;
-                    break;
-                case ErrorCategory::RATE_LIMIT_ERROR:
+                case ErrorCategory::RESOURCE:
                     error_code.http_status = 429;
                     break;
-                case ErrorCategory::SERVER_ERROR:
-                case ErrorCategory::NETWORK_ERROR:
-                case ErrorCategory::EXTERNAL_SERVICE_ERROR:
+                case ErrorCategory::PROCESSING:
+                case ErrorCategory::NETWORK:
+                case ErrorCategory::EXTERNAL_API:
                 default:
                     error_code.http_status = 500;
                     break;
@@ -187,8 +183,8 @@ StandardizedError ErrorHandlingService::create_error(const std::string& error_co
     return error;
 }
 
-ErrorResponse ErrorHandlingService::format_error_response(const StandardizedError& error) {
-    ErrorResponse response;
+HTTPResponse ErrorHandlingService::format_error_response(const StandardizedError& error) {
+    HTTPResponse response;
 
     response.status_code = error.http_status;
     response.content_type = "application/json";

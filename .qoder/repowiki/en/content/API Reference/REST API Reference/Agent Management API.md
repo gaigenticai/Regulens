@@ -2,12 +2,20 @@
 
 <cite>
 **Referenced Files in This Document**   
-- [inter_agent_api_handlers.cpp](file://shared/agentic_brain/inter_agent_api_handlers.cpp)
-- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp)
-- [agent_orchestrator_controller.hpp](file://infrastructure/k8s/operator/agent_orchestrator_controller.hpp)
-- [agent_orchestrator_controller.cpp](file://infrastructure/k8s/operator/agent_orchestrator_controller.cpp)
-- [web_ui_handlers.cpp](file://shared/web_ui/web_ui_handlers.cpp)
+- [inter_agent_api_handlers.cpp](file://shared/agentic_brain/inter_agent_api_handlers.cpp) - *Updated in recent commit*
+- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp) - *Updated in recent commit*
+- [agent_orchestrator_controller.cpp](file://infrastructure/k8s/operator/agent_orchestrator_controller.cpp) - *Updated in recent commit*
+- [web_ui_handlers.cpp](file://shared/web_ui/web_ui_handlers.cpp) - *Updated in recent commit*
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Updated Agent Lifecycle Management section to include new agent control endpoints (start, stop, restart)
+- Added Agent Statistics endpoint to retrieve performance metrics
+- Added Control Agent endpoint for administrative commands
+- Updated Request Schemas to reflect new agent control capabilities
+- Enhanced Error Handling section with new error scenarios
+- Updated section sources to reflect code changes
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -168,8 +176,125 @@ Authorization: Bearer <token>
 }
 ```
 
+### Start Agent (POST /agents/{id}/start)
+Starts a specific agent by ID.
+
+**Request**
+```
+POST /agents/{id}/start
+Authorization: Bearer <token>
+```
+
+**Path Parameters**
+- `id`: Unique agent identifier
+
+**Response (200)**
+```json
+{
+  "success": true,
+  "message": "Agent started"
+}
+```
+
+### Stop Agent (POST /agents/{id}/stop)
+Stops a specific agent by ID.
+
+**Request**
+```
+POST /agents/{id}/stop
+Authorization: Bearer <token>
+```
+
+**Path Parameters**
+- `id`: Unique agent identifier
+
+**Response (200)**
+```json
+{
+  "success": true,
+  "message": "Agent stopped"
+}
+```
+
+### Restart Agent (POST /agents/{id}/restart)
+Restarts a specific agent by ID.
+
+**Request**
+```
+POST /agents/{id}/restart
+Authorization: Bearer <token>
+```
+
+**Path Parameters**
+- `id`: Unique agent identifier
+
+**Response (200)**
+```json
+{
+  "success": true,
+  "message": "Agent restarted"
+}
+```
+
+### Get Agent Statistics (GET /agents/{id}/stats)
+Retrieves performance metrics and statistics for a specific agent.
+
+**Request**
+```
+GET /agents/{id}/stats
+Authorization: Bearer <token>
+```
+
+**Path Parameters**
+- `id`: Unique agent identifier
+
+**Response (200)**
+```json
+{
+  "tasks_completed": 150,
+  "success_rate": 0.98,
+  "avg_response_time_ms": 250,
+  "uptime_seconds": 86400,
+  "cpu_usage": 0.45,
+  "memory_usage": 0.65
+}
+```
+
+### Control Agent (POST /agents/{id}/control)
+Sends a control command to a specific agent (advanced administrative function).
+
+**Request**
+```
+POST /agents/{id}/control
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Path Parameters**
+- `id`: Unique agent identifier
+
+**Request Body**
+```json
+{
+  "command": "reconfigure",
+  "parameters": {
+    "polling_interval": 300,
+    "log_level": "debug"
+  }
+}
+```
+
+**Response (200)**
+```json
+{
+  "success": true,
+  "result": "Command executed"
+}
+```
+
 **Section sources**
 - [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp#L678-L797)
+- [web_ui_handlers.cpp](file://shared/web_ui/web_ui_handlers.cpp#L95-L118)
 
 ## Agent Communication Endpoints
 The Agent Communication Endpoints facilitate message exchange between agents and provide access to communication history and event streams.
@@ -532,6 +657,11 @@ Certain endpoints return specific error responses based on operational condition
 - `400 Bad Request`: Invalid orchestrator specification
 - `404 Not Found`: Orchestrator group does not exist
 - `500 Internal Server Error`: Failed to create Kubernetes resources
+
+**Control Agent Errors**
+- `400 Bad Request`: Invalid control command
+- `403 Forbidden`: Insufficient permissions for control operation
+- `404 Not Found`: Agent not found for control operation
 
 **Section sources**
 - [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp#L500-L550)

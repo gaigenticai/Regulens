@@ -51,7 +51,9 @@ enum class RuleCategory {
     RISK_ASSESSMENT,
     BUSINESS_LOGIC,
     SECURITY_POLICY,
-    AUDIT_PROCEDURE
+    AUDIT_PROCEDURE,
+    SECURITY_MONITORING,
+    TRANSACTION_MONITORING
 };
 
 struct RuleCondition {
@@ -60,6 +62,23 @@ struct RuleCondition {
     nlohmann::json value;
     double weight = 1.0;  // Importance weight for scoring
 };
+
+// JSON serialization for RuleCondition
+inline void to_json(nlohmann::json& j, const RuleCondition& condition) {
+    j = nlohmann::json{
+        {"field_name", condition.field_name},
+        {"operator_type", condition.operator_type},
+        {"value", condition.value},
+        {"weight", condition.weight}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, RuleCondition& condition) {
+    condition.field_name = j.value("field_name", "");
+    condition.operator_type = j.value("operator_type", "");
+    condition.value = j.value("value", nlohmann::json{});
+    condition.weight = j.value("weight", 1.0);
+}
 
 struct RuleDefinition {
     std::string rule_id;

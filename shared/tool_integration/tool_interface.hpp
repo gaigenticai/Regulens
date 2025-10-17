@@ -169,6 +169,7 @@ public:
     // Tool identification and metadata
     const std::string& get_tool_id() const { return config_.tool_id; }
     const std::string& get_tool_name() const { return config_.tool_name; }
+    const std::string& get_description() const { return config_.description; }
     ToolCategory get_category() const { return config_.category; }
     bool is_enabled() const { return config_.enabled; }
     void set_enabled(bool enabled) { config_.enabled = enabled; }

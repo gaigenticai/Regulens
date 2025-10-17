@@ -11,6 +11,7 @@
 #include <optional>
 #include <nlohmann/json.hpp>
 #include "error_handling_service.hpp"
+#include "../web_ui/web_ui_server.hpp"
 
 namespace regulens {
 

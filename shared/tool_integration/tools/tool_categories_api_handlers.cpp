@@ -30,27 +30,27 @@ std::string ToolCategoriesAPIHandlers::handle_register_tools(const std::string& 
         std::vector<std::string> categories = request.value("categories", std::vector<std::string>{});
 
         // Initialize logger (simplified - in real implementation would get from dependency injection)
-        auto logger = std::make_shared<StructuredLogger>();
+        StructuredLogger* logger = &StructuredLogger::get_instance();
 
         int tools_registered = 0;
 
         if (std::find(categories.begin(), categories.end(), "analytics") != categories.end()) {
-            tool_registry_.register_analytics_tools(db_conn_, logger);
+            tool_registry_.register_analytics_tools(db_conn_->get_connection(), logger);
             tools_registered += 4;
         }
 
         if (std::find(categories.begin(), categories.end(), "workflow") != categories.end()) {
-            tool_registry_.register_workflow_tools(db_conn_, logger);
+            tool_registry_.register_workflow_tools(db_conn_->get_connection(), logger);
             tools_registered += 3;
         }
 
         if (std::find(categories.begin(), categories.end(), "security") != categories.end()) {
-            tool_registry_.register_security_tools(db_conn_, logger);
+            tool_registry_.register_security_tools(db_conn_->get_connection(), logger);
             tools_registered += 4;
         }
 
         if (std::find(categories.begin(), categories.end(), "monitoring") != categories.end()) {
-            tool_registry_.register_monitoring_tools(db_conn_, logger);
+            tool_registry_.register_monitoring_tools(db_conn_->get_connection(), logger);
             tools_registered += 4;
         }
 
@@ -247,19 +247,23 @@ ToolCategory ToolCategoriesAPIHandlers::parse_tool_category(const std::string& c
 nlohmann::json ToolCategoriesAPIHandlers::format_tool_result(const ToolResult& result) {
     nlohmann::json response = {
         {"success", result.success},
-        {"tool_name", result.tool_name},
-        {"message", result.message},
-        {"data", result.data}
+        {"data", result.data},
+        {"execution_time_ms", result.execution_time.count()},
+        {"retry_count", result.retry_count}
     };
 
-    if (!result.error_details.empty()) {
-        response["error_details"] = result.error_details;
+    if (!result.error_message.empty()) {
+        response["error_message"] = result.error_message;
+    }
+
+    if (!result.metadata.empty()) {
+        response["metadata"] = result.metadata;
     }
 
     return create_success_response(response);
 }
 
-nlohmann::json ToolCategoriesAPIHandlers::format_tool_info(const std::string& tool_name, std::shared_ptr<Tool> tool) {
+nlohmann::json ToolCategoriesAPIHandlers::format_tool_info(const std::string& tool_name, Tool* tool) {
     return {
         {"tool_name", tool_name},
         {"description", tool->get_description()},
@@ -340,17 +344,20 @@ ToolResult ToolCategoriesAPIHandlers::execute_analytics_tool(const std::string& 
         return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
+    std::string operation;
     if (tool_name == "data_analyzer") {
-        return dynamic_cast<DataAnalyzerTool*>(tool)->analyze_dataset(parameters);
+        operation = "analyze_dataset";
     } else if (tool_name == "report_generator") {
-        return dynamic_cast<ReportGeneratorTool*>(tool)->generate_report(parameters);
+        operation = "generate_report";
     } else if (tool_name == "dashboard_builder") {
-        return dynamic_cast<DashboardBuilderTool*>(tool)->build_dashboard(parameters);
+        operation = "build_dashboard";
     } else if (tool_name == "predictive_model") {
-        return dynamic_cast<PredictiveModelTool*>(tool)->run_prediction(parameters);
+        operation = "run_prediction";
+    } else {
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown analytics tool"};
     }
 
-    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown analytics tool"};
+    return tool->execute_operation(operation, parameters);
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_workflow_tool(const std::string& tool_name, const nlohmann::json& parameters) {
@@ -359,15 +366,18 @@ ToolResult ToolCategoriesAPIHandlers::execute_workflow_tool(const std::string& t
         return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
+    std::string operation;
     if (tool_name == "task_automator") {
-        return dynamic_cast<TaskAutomatorTool*>(tool)->automate_task(parameters);
+        operation = "automate_task";
     } else if (tool_name == "process_optimizer") {
-        return dynamic_cast<ProcessOptimizerTool*>(tool)->optimize_process(parameters);
+        operation = "optimize_process";
     } else if (tool_name == "approval_workflow") {
-        return dynamic_cast<ApprovalWorkflowTool*>(tool)->manage_approval(parameters);
+        operation = "manage_approval";
+    } else {
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown workflow tool"};
     }
 
-    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown workflow tool"};
+    return tool->execute_operation(operation, parameters);
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_security_tool(const std::string& tool_name, const nlohmann::json& parameters) {
@@ -376,17 +386,20 @@ ToolResult ToolCategoriesAPIHandlers::execute_security_tool(const std::string& t
         return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
+    std::string operation;
     if (tool_name == "vulnerability_scanner") {
-        return dynamic_cast<VulnerabilityScannerTool*>(tool)->scan_vulnerabilities(parameters);
+        operation = "scan_vulnerabilities";
     } else if (tool_name == "compliance_checker") {
-        return dynamic_cast<ComplianceCheckerTool*>(tool)->check_compliance(parameters);
+        operation = "check_compliance";
     } else if (tool_name == "access_analyzer") {
-        return dynamic_cast<AccessAnalyzerTool*>(tool)->analyze_access(parameters);
+        operation = "analyze_access";
     } else if (tool_name == "audit_logger") {
-        return dynamic_cast<AuditLoggerTool*>(tool)->log_audit_event(parameters);
+        operation = "log_audit_event";
+    } else {
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown security tool"};
     }
 
-    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown security tool"};
+    return tool->execute_operation(operation, parameters);
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_monitoring_tool(const std::string& tool_name, const nlohmann::json& parameters) {
@@ -395,15 +408,20 @@ ToolResult ToolCategoriesAPIHandlers::execute_monitoring_tool(const std::string&
         return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
+    std::string operation;
     if (tool_name == "system_monitor") {
-        return dynamic_cast<SystemMonitorTool*>(tool)->monitor_system(parameters);
+        operation = "monitor_system";
     } else if (tool_name == "performance_tracker") {
-        return dynamic_cast<PerformanceTrackerTool*>(tool)->track_performance(parameters);
+        operation = "track_performance";
     } else if (tool_name == "alert_manager") {
-        return dynamic_cast<AlertManagerTool*>(tool)->manage_alerts(parameters);
+        operation = "manage_alerts";
     } else if (tool_name == "health_checker") {
-        return dynamic_cast<HealthCheckerTool*>(tool)->check_health(parameters);
+        operation = "check_health";
+    } else {
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown monitoring tool"};
     }
+
+    return tool->execute_operation(operation, parameters);
 
     return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown monitoring tool"};
 }
@@ -465,9 +483,9 @@ bool ToolCategoriesAPIHandlers::store_tool_execution_result(const std::string& t
             tool_name,
             user_id,
             result.success ? "true" : "false",
-            result.message,
+            result.error_message,
             result.data.dump(),
-            result.error_details
+            result.metadata.empty() ? "{}" : result.metadata.begin()->second // placeholder for error_details
         };
 
         return db_conn_->execute_command(query, params);
@@ -505,7 +523,7 @@ bool ToolCategoriesAPIHandlers::is_admin_user(const std::string& user_id) {
         if (!results.empty()) {
             const auto& row = results[0];
             std::string role_name = row.at("role_name");
-            int role_level = std::stoi(row.at("role_level"));
+            int role_level = row["role_level"];
 
             // Admin role has highest privilege level (level >= 90)
             // Or role name is explicitly "administrator" or "super_admin"

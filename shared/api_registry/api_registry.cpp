@@ -11,10 +11,16 @@
 
 namespace regulens {
 
-// Singleton implementation
+// Singleton implementation with lazy initialization
 APIRegistry& APIRegistry::get_instance() {
-    static APIRegistry instance;
-    return instance;
+    static std::unique_ptr<APIRegistry> instance;
+    static std::mutex mutex;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!instance) {
+        instance = std::make_unique<APIRegistry>();
+    }
+    return *instance;
 }
 
 bool APIRegistry::initialize(const APIRegistryConfig& config, std::shared_ptr<StructuredLogger> logger) {

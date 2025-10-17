@@ -32,6 +32,9 @@ namespace regulens {
 
 class PostgreSQLConnection {
 public:
+    PostgreSQLConnection() {
+        throw std::runtime_error("PostgreSQLConnection must be constructed with DatabaseConfig");
+    }
     PostgreSQLConnection(const DatabaseConfig& config);
     ~PostgreSQLConnection();
 

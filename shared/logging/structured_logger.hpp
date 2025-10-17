@@ -70,6 +70,11 @@ public:
     static StructuredLogger& get_instance();
 
     /**
+     * @brief Default constructor - throws exception (for allocator compatibility)
+     */
+    StructuredLogger();
+
+    /**
      * @brief Initialize the logger with configuration
      * @param config_path Path to configuration file (optional)
      * @param log_level Default log level
@@ -200,7 +205,6 @@ public:
     std::unordered_map<std::string, std::string> get_global_context() const;
 
 private:
-    StructuredLogger();
     ~StructuredLogger();
 
     // Prevent copying

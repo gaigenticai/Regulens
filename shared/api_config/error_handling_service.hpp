@@ -13,10 +13,12 @@
 #include <memory>
 #include <chrono>
 #include <fstream>
+#include <regex>
 #include <nlohmann/json.hpp>
 #include "../../shared/error_handler.hpp"
 #include "../logging/structured_logger.hpp"
 #include "../models/error_handling.hpp"
+#include "../web_ui/web_ui_server.hpp"
 
 namespace regulens {
 
@@ -82,7 +84,7 @@ public:
                                  const std::optional<std::string>& details = std::nullopt,
                                  const std::optional<std::string>& field = std::nullopt);
 
-    ErrorResponse format_error_response(const StandardizedError& error);
+    HTTPResponse format_error_response(const StandardizedError& error);
 
     // Error code management
     std::optional<ErrorCode> get_error_code(const std::string& code);

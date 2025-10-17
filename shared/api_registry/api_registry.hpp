@@ -87,6 +87,10 @@ public:
     // Singleton access
     static APIRegistry& get_instance();
 
+    // Default constructor and destructor for singleton
+    APIRegistry() = default;
+    ~APIRegistry() = default;
+
     // Delete copy/move operations
     APIRegistry(const APIRegistry&) = delete;
     APIRegistry& operator=(const APIRegistry&) = delete;
@@ -152,8 +156,6 @@ public:
     RegistryStats get_stats() const;
 
 private:
-    APIRegistry() = default;
-    ~APIRegistry() = default;
 
     // Parse path parameters (e.g., /users/{id} -> /users/123)
     bool match_path_pattern(const std::string& pattern, const std::string& path,

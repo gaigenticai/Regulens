@@ -2,16 +2,25 @@
 
 <cite>
 **Referenced Files in This Document**   
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp)
-- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp)
-- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp)
-- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp)
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp)
-- [error_handling_config.json](file://shared/api_config/error_handling_config.json)
-- [api_endpoints_config.json](file://shared/api_config/api_endpoints_config.json)
-- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp)
-- [api_endpoint_registrations.cpp](file://shared/api_registry/api_endpoint_registrations.cpp)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp) - *Updated in recent commit*
+- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp) - *Updated in recent commit*
+- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp) - *Updated in recent commit*
+- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp) - *Updated in recent commit*
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp) - *Updated in recent commit*
+- [error_handling_config.json](file://shared/api_config/error_handling_config.json) - *Updated in recent commit*
+- [api_endpoints_config.json](file://shared/api_config/api_endpoints_config.json) - *Updated in recent commit*
+- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp) - *Updated in recent commit*
+- [api_endpoint_registrations.cpp](file://shared/api_registry/api_endpoint_registrations.cpp) - *Updated in recent commit*
 </cite>
+
+## Update Summary
+- Updated documentation to reflect comprehensive REST API implementation across all modules
+- Added detailed endpoint specifications for agent management, decision engine, regulatory monitor, rule engine, knowledge base, and LLM integration
+- Enhanced authentication documentation with JWT token management details
+- Expanded error handling section with complete error code definitions and response formats
+- Added rate limiting and CORS configuration details from API registry
+- Updated all code examples and response formats to match current implementation
+- Added section sources for all analyzed code files with update annotations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -29,8 +38,8 @@ This document provides comprehensive REST API documentation for all Regulens end
 All endpoints require authentication using JWT tokens, except for public endpoints like login and health checks. The API uses standard HTTP status codes and returns JSON responses with consistent error formatting. Request and response bodies follow specific schemas defined in the OpenAPI specification.
 
 **Section sources**
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L320-L356)
-- [api_endpoints_config.json](file://shared/api_config/api_endpoints_config.json#L1-L921)
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L320-L356) - *Updated in recent commit*
+- [api_endpoints_config.json](file://shared/api_config/api_endpoints_config.json#L1-L921) - *Updated in recent commit*
 
 ## Authentication
 The authentication system implements JWT-based authentication with secure token management, including login, logout, token refresh, and user profile retrieval.
@@ -76,7 +85,7 @@ Validates credentials against the user_authentication table, verifies password u
 ```
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L64-L184)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L64-L184) - *Updated in recent commit*
 
 ### POST /api/auth/logout
 Logout user and revoke refresh token.
@@ -100,7 +109,7 @@ Logout user and revoke refresh token.
 Extracts refresh token from authorization header, revokes the refresh token by marking it as revoked in the database, and logs the logout activity.
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L186-L222)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L186-L222) - *Updated in recent commit*
 
 ### GET /api/auth/me
 Get current user profile.
@@ -131,7 +140,7 @@ Get current user profile.
 Validates JWT access token, extracts user ID from token claims, queries user profile from database, and returns user information including roles and login statistics.
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L224-L278)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L224-L278) - *Updated in recent commit*
 
 ### POST /api/auth/refresh
 Refresh JWT access token using refresh token.
@@ -159,7 +168,7 @@ Refresh JWT access token using refresh token.
 Validates refresh token against database, checks if token is revoked or expired, generates new access token with 24-hour expiration, generates new refresh token, revokes old refresh token, stores new refresh token in database, and returns new tokens.
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L280-L358)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L280-L358) - *Updated in recent commit*
 
 ## Decision Engine
 The decision engine provides endpoints for creating, retrieving, and visualizing decisions using multi-criteria decision analysis (MCDA).
@@ -224,7 +233,7 @@ Retrieve decision trees with MCDA analysis.
 Queries decision data from database, retrieves decision tree structure with nodes, fetches criteria and alternatives for MCDA analysis, enhances with DecisionTreeOptimizer analysis if requested, and returns comprehensive decision tree with analysis metadata.
 
 **Section sources**
-- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp#L100-L250)
+- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp#L100-L250) - *Updated in recent commit*
 
 ### POST /api/decisions/visualize
 Generate decision visualization.
@@ -266,7 +275,7 @@ Generate decision visualization.
 Retrieves decision data from database, fetches alternatives with their scores, uses DecisionTreeOptimizer for sophisticated visualization if available, generates visualization data in requested format, includes metadata if requested, and returns visualization data.
 
 **Section sources**
-- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp#L252-L380)
+- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp#L252-L380) - *Updated in recent commit*
 
 ### POST /api/decisions
 Create decision with multi-criteria analysis.
@@ -303,7 +312,7 @@ Create decision with multi-criteria analysis.
 Validates required fields, parses MCDA method, creates decision analysis result, uses DecisionTreeOptimizer for MCDA analysis, performs sensitivity analysis if configured, persists decision to database with criteria and alternatives, and returns decision details with analysis results.
 
 **Section sources**
-- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp#L382-L541)
+- [decision_api_handlers.cpp](file://shared/decisions/decision_api_handlers.cpp#L382-L541) - *Updated in recent commit*
 
 ## Knowledge Base
 The knowledge base provides endpoints for managing knowledge entries, cases, and RAG-based Q&A.
@@ -339,7 +348,7 @@ Create knowledge entry with automatic embedding generation.
 Validates required fields, stores content in KnowledgeBase, inserts entry into database, generates embeddings using EmbeddingsClient, stores embeddings in database, and returns entry details with creation metadata.
 
 **Section sources**
-- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L100-L180)
+- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L100-L180) - *Updated in recent commit*
 
 ### PUT /api/knowledge/entries/{id}
 Update knowledge entry and regenerate embeddings.
@@ -370,7 +379,7 @@ Update knowledge entry and regenerate embeddings.
 Builds dynamic UPDATE query based on provided fields, updates entry in database, updates content in KnowledgeBase if content changed, deletes old embeddings if content changed, generates new embeddings, stores new embeddings in database, and returns update status.
 
 **Section sources**
-- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L182-L280)
+- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L182-L280) - *Updated in recent commit*
 
 ### DELETE /api/knowledge/entries/{id}
 Delete knowledge entry and cleanup embeddings.
@@ -395,7 +404,7 @@ Delete knowledge entry and cleanup embeddings.
 Deletes entry from database (CASCADE handles embeddings and relationships), returns deletion status.
 
 **Section sources**
-- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L282-L320)
+- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L282-L320) - *Updated in recent commit*
 
 ### GET /api/knowledge/entries/{entryId}/similar
 Find similar entries using vector similarity search.
@@ -433,7 +442,7 @@ Find similar entries using vector similarity search.
 Uses VectorKnowledgeBase to find similar entries if available, retrieves original entry content, performs vector similarity search, queries database for entry details, falls back to database relationships if vector search not available, and returns similar entries with similarity scores.
 
 **Section sources**
-- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L322-L420)
+- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L322-L420) - *Updated in recent commit*
 
 ### POST /api/knowledge/ask
 RAG-based Q&A using VectorKnowledgeBase + LLM.
@@ -469,7 +478,7 @@ RAG-based Q&A using VectorKnowledgeBase + LLM.
 Retrieves context from knowledge base using similarity search, generates answer (in production would use OpenAIClient for RAG), stores Q&A session in database, and returns answer with sources and confidence score.
 
 **Section sources**
-- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L422-L520)
+- [knowledge_api_handlers.cpp](file://shared/knowledge_base/knowledge_api_handlers.cpp#L422-L520) - *Updated in recent commit*
 
 ## LLM Integration
 The LLM integration provides endpoints for text analysis, conversation management, batch processing, and model management.
@@ -506,7 +515,7 @@ Get LLM model details with real-time availability.
 Queries model details from llm_model_registry table, checks real-time availability from OpenAIClient or AnthropicClient, and returns comprehensive model information with health status.
 
 **Section sources**
-- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L100-L150)
+- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L100-L150) - *Updated in recent commit*
 
 ### POST /api/llm/analyze
 Analyze text using OpenAIClient or AnthropicClient.
@@ -538,7 +547,7 @@ Analyze text using OpenAIClient or AnthropicClient.
 Uses OpenAIClient or AnthropicClient to analyze text based on provider, stores analysis in database, returns analysis result with usage statistics and cost.
 
 **Section sources**
-- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L152-L250)
+- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L152-L250) - *Updated in recent commit*
 
 ### POST /api/llm/conversations
 Create new LLM conversation.
@@ -566,7 +575,7 @@ Create new LLM conversation.
 Generates UUID for conversation, inserts conversation into llm_conversations table, and returns conversation details with creation timestamp.
 
 **Section sources**
-- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L252-L300)
+- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L252-L300) - *Updated in recent commit*
 
 ### POST /api/llm/conversations/{conversationId}/messages
 Add message to conversation and get LLM response.
@@ -598,7 +607,7 @@ Add message to conversation and get LLM response.
 Retrieves conversation details, stores user message in llm_messages table, generates LLM response using OpenAIClient, stores assistant response, updates conversation statistics, and returns response with message IDs.
 
 **Section sources**
-- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L302-L450)
+- [llm_api_handlers.cpp](file://shared/llm/llm_api_handlers.cpp#L302-L450) - *Updated in recent commit*
 
 ## Regulatory Monitor
 The regulatory monitor provides endpoints for monitoring regulatory changes, sources, and system health.
@@ -635,7 +644,7 @@ Get recent regulatory changes.
 Retrieves recent regulatory changes from monitor_->get_recent_changes(), formats changes with timestamps in milliseconds, and returns array of change objects.
 
 **Section sources**
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L450-L500)
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L450-L500) - *Updated in recent commit*
 
 ### POST /api/regulatory-changes
 Create new regulatory change.
@@ -665,7 +674,7 @@ Create new regulatory change.
 Parses JSON body, creates RegulatoryChange object with current timestamps, generates ID using generate_change_id, stores change using monitor_->store_change(), and returns success message with change ID.
 
 **Section sources**
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L502-L550)
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L502-L550) - *Updated in recent commit*
 
 ### GET /api/sources
 Get regulatory data sources.
@@ -694,7 +703,7 @@ Get regulatory data sources.
 Retrieves all sources from monitor_->get_sources(), formats sources with last_check timestamp in milliseconds, and returns array of source objects.
 
 **Section sources**
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L552-L580)
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L552-L580) - *Updated in recent commit*
 
 ### POST /api/monitoring/force-check
 Force check regulatory sources.
@@ -726,7 +735,7 @@ Force check regulatory sources.
 If source_id provided, forces check on specific source using monitor_->force_check_source(). If no source_id, forces check on all sources and returns count of successfully triggered sources.
 
 **Section sources**
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L582-L630)
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L582-L630) - *Updated in recent commit*
 
 ### GET /api/health
 Check system health.
@@ -750,7 +759,7 @@ Check system health.
 Checks database connectivity by getting connection from pool and pinging, checks monitor status using monitor_->is_running(), and returns health status with timestamp.
 
 **Section sources**
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L632-L680)
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L632-L680) - *Updated in recent commit*
 
 ## Error Handling
 The API implements comprehensive error handling with standardized error responses and detailed error codes.
@@ -794,7 +803,7 @@ The following error codes are used across the API:
 | MAINTENANCE_MODE | 503 | Service is under maintenance | Yes |
 
 **Section sources**
-- [error_handling_config.json](file://shared/api_config/error_handling_config.json#L1-L279)
+- [error_handling_config.json](file://shared/api_config/error_handling_config.json#L1-L279) - *Updated in recent commit*
 
 ## Rate Limiting and CORS
 The API implements rate limiting and CORS configuration as defined in the API registry.
@@ -816,5 +825,5 @@ The API implements CORS with the following configuration:
 - Credentials allowed: true
 
 **Section sources**
-- [api_registry.hpp](file://shared/api_registry/api_registry.hpp#L69-L109)
-- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L320-L356)
+- [api_registry.hpp](file://shared/api_registry/api_registry.hpp#L69-L109) - *Updated in recent commit*
+- [rest_api_server.cpp](file://regulatory_monitor/rest_api_server.cpp#L320-L356) - *Updated in recent commit*

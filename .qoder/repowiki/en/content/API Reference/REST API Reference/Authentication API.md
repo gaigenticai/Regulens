@@ -2,19 +2,29 @@
 
 <cite>
 **Referenced Files in This Document**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp)
-- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp)
-- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp)
-- [jwt_parser.hpp](file://shared/auth/jwt_parser.hpp)
-- [api.ts](file://frontend/src/services/api.ts)
-- [api.ts](file://frontend/src/types/api.ts)
-- [Login.tsx](file://frontend/src/pages/Login.tsx)
-- [LoginForm.tsx](file://frontend/src/components/LoginForm.tsx)
-- [useLogin.ts](file://frontend/src/hooks/useLogin.ts)
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx)
-- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp)
-- [error_handling.hpp](file://shared/models/error_handling.hpp)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp) - *Updated in recent commit*
+- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp) - *Updated in recent commit*
+- [jwt_parser.hpp](file://shared/auth/jwt_parser.hpp) - *Updated in recent commit*
+- [api.ts](file://frontend/src/services/api.ts) - *Updated in recent commit*
+- [api.ts](file://frontend/src/types/api.ts) - *Updated in recent commit*
+- [Login.tsx](file://frontend/src/pages/Login.tsx) - *Updated in recent commit*
+- [LoginForm.tsx](file://frontend/src/components/LoginForm.tsx) - *Updated in recent commit*
+- [useLogin.ts](file://frontend/src/hooks/useLogin.ts) - *Updated in recent commit*
+- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx) - *Updated in recent commit*
+- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp) - *Updated in recent commit*
+- [error_handling.hpp](file://shared/models/error_handling.hpp) - *Updated in recent commit*
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated authentication endpoint documentation to reflect actual implementation
+- Corrected request/response schemas based on code analysis
+- Added detailed implementation notes for each endpoint
+- Updated security features section with accurate password hashing details
+- Enhanced frontend integration details with correct token handling
+- Added curl examples for all endpoints
+- Updated error handling section with accurate error responses
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,6 +48,10 @@ The authentication system is designed to handle high-security requirements typic
 - Account lockout protection after failed login attempts
 - Automatic token expiration and renewal
 - Comprehensive error handling with appropriate HTTP status codes
+
+**Section sources**
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L1-L50) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp#L1-L40) - *Updated in recent commit*
 
 ## Authentication Architecture
 
@@ -69,12 +83,12 @@ Auth --> API
 ```
 
 **Diagram sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L1-L50)
-- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L30)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L1-L50) - *Updated in recent commit*
+- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L30) - *Updated in recent commit*
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L1-L644)
-- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L181)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L1-L644) - *Updated in recent commit*
+- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L181) - *Updated in recent commit*
 
 ## JWT Token Structure
 
@@ -121,12 +135,12 @@ Backend-->>Client : Access Token + Refresh Token
 ```
 
 **Diagram sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L37-L120)
-- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L50)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L37-L120) - *Updated in recent commit*
+- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L50) - *Updated in recent commit*
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L370-L410)
-- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L181)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L370-L410) - *Updated in recent commit*
+- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L181) - *Updated in recent commit*
 
 ## Authentication Endpoints
 
@@ -143,18 +157,18 @@ interface LoginRequest {
 ```
 
 #### Response Schema
-```typescript
-interface LoginResponse {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: "Bearer";
-  expiresIn: number;
-  user: {
-    id: string;
-    username: string;
-    roles: string[];
-    permissions: string[];
-  };
+```json
+{
+  "accessToken": "string",
+  "refreshToken": "string",
+  "tokenType": "Bearer",
+  "expiresIn": 86400,
+  "user": {
+    "id": "string",
+    "username": "string",
+    "roles": ["string"],
+    "permissions": ["string"]
+  }
 }
 ```
 
@@ -165,11 +179,23 @@ interface LoginResponse {
 4. **Role and Permission Loading**: Retrieve user roles and permissions from database
 5. **Token Generation**: Create JWT access token and refresh token
 6. **Session Storage**: Store refresh token in database with expiration
+7. **Failed Attempts Reset**: Reset failed login attempts counter
 
 #### Error Responses
 - **401 Unauthorized**: Invalid credentials or account disabled
 - **429 Too Many Requests**: Account locked due to excessive failed attempts
 - **500 Internal Server Error**: Database query or token generation failure
+
+#### Curl Example
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"password"}'
+```
+
+**Section sources**
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L36-L172) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp#L18-L18) - *Updated in recent commit*
 
 ### POST /api/auth/logout
 
@@ -181,9 +207,9 @@ Authorization: Bearer <refresh_token>
 ```
 
 #### Response Schema
-```typescript
-interface LogoutResponse {
-  message: "Logged out successfully";
+```json
+{
+  "message": "Logged out successfully"
 }
 ```
 
@@ -192,6 +218,16 @@ interface LogoutResponse {
 2. **Token Validation**: Verify refresh token exists and is unrevoked
 3. **Token Revocation**: Mark refresh token as revoked in database
 4. **Session Cleanup**: Remove associated session data
+
+#### Curl Example
+```bash
+curl -X POST http://localhost:8080/api/auth/logout \
+  -H "Authorization: Bearer <refresh_token>"
+```
+
+**Section sources**
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L179-L208) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp#L19-L19) - *Updated in recent commit*
 
 ### GET /api/auth/me
 
@@ -203,16 +239,16 @@ Authorization: Bearer <access_token>
 ```
 
 #### Response Schema
-```typescript
-interface User {
-  id: string;
-  username: string;
-  email: string;
-  isActive: boolean;
-  roles: string[];
-  createdAt: string;
-  lastLoginAt: string;
-  failedLoginAttempts: number;
+```json
+{
+  "id": "string",
+  "username": "string",
+  "email": "string",
+  "isActive": true,
+  "roles": ["string"],
+  "createdAt": "string",
+  "lastLoginAt": "string",
+  "failedLoginAttempts": 0
 }
 ```
 
@@ -222,24 +258,34 @@ interface User {
 3. **Role Parsing**: Convert stored JSON roles to array format
 4. **Permission Loading**: Retrieve active permissions from user_permissions table
 
+#### Curl Example
+```bash
+curl -X GET http://localhost:8080/api/auth/me \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Section sources**
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L215-L274) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp#L20-L20) - *Updated in recent commit*
+
 ### POST /api/auth/refresh
 
 Refreshes expired access tokens using valid refresh tokens.
 
 #### Request Schema
-```typescript
-interface RefreshRequest {
-  refreshToken: string;
+```json
+{
+  "refreshToken": "string"
 }
 ```
 
 #### Response Schema
-```typescript
-interface RefreshResponse {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: "Bearer";
-  expiresIn: number;
+```json
+{
+  "accessToken": "string",
+  "refreshToken": "string",
+  "tokenType": "Bearer",
+  "expiresIn": 86400
 }
 ```
 
@@ -250,9 +296,16 @@ interface RefreshResponse {
 4. **Old Token Revocation**: Mark previous refresh token as revoked
 5. **New Session Creation**: Store new refresh token in database
 
+#### Curl Example
+```bash
+curl -X POST http://localhost:8080/api/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken":"<refresh_token>"}'
+```
+
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L122-L644)
-- [openapi_generator.cpp](file://shared/api_docs/openapi_generator.cpp#L584-L676)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L281-L373) - *Updated in recent commit*
+- [auth_api_handlers.hpp](file://shared/auth/auth_api_handlers.hpp#L21-L21) - *Updated in recent commit*
 
 ## Token Management
 
@@ -299,12 +352,12 @@ SessionStorage --> Redis
 ```
 
 **Diagram sources**
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L1-L50)
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L180-L220)
+- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L1-L50) - *Updated in recent commit*
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L180-L220) - *Updated in recent commit*
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L180-L220)
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L1-L128)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L180-L220) - *Updated in recent commit*
+- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L1-L128) - *Updated in recent commit*
 
 ## Error Handling
 
@@ -366,8 +419,8 @@ System --> RateLimit[Rate Limiting]
 ```
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L45-L120)
-- [error_handling.hpp](file://shared/models/error_handling.hpp#L1-L500)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L45-L120) - *Updated in recent commit*
+- [error_handling.hpp](file://shared/models/error_handling.hpp#L1-L500) - *Updated in recent commit*
 
 ## Security Features
 
@@ -406,8 +459,8 @@ AllowRetry --> ErrorResponse
 5. **HTTPS Only**: All communications encrypted
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L480-L520)
-- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L181)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L480-L520) - *Updated in recent commit*
+- [jwt_parser.cpp](file://shared/auth/jwt_parser.cpp#L1-L181) - *Updated in recent commit*
 
 ## Frontend Integration
 
@@ -461,9 +514,9 @@ const handleLoginError = (error: AxiosError) => {
 ```
 
 **Section sources**
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L1-L128)
-- [api.ts](file://frontend/src/services/api.ts#L1-L199)
-- [useLogin.ts](file://frontend/src/hooks/useLogin.ts#L1-L73)
+- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L1-L128) - *Updated in recent commit*
+- [api.ts](file://frontend/src/services/api.ts#L1-L199) - *Updated in recent commit*
+- [useLogin.ts](file://frontend/src/hooks/useLogin.ts#L1-L73) - *Updated in recent commit*
 
 ## Rate Limiting
 
@@ -487,7 +540,7 @@ std::string update_query = "UPDATE user_authentication "
 ```
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L85-L95)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L85-L95) - *Updated in recent commit*
 
 ## Troubleshooting Guide
 
@@ -584,5 +637,5 @@ fetch('/api/auth/me', {
 ```
 
 **Section sources**
-- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L45-L120)
-- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L50-L128)
+- [auth_api_handlers.cpp](file://shared/auth/auth_api_handlers.cpp#L45-L120) - *Updated in recent commit*
+- [AuthContext.tsx](file://frontend/src/contexts/AuthContext.tsx#L50-L128) - *Updated in recent commit*

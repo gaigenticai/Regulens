@@ -502,6 +502,8 @@ nlohmann::json AdvancedRuleEngineAPIHandlers::format_rule_definition(const RuleD
         case RuleCategory::BUSINESS_LOGIC: json["category"] = "BUSINESS_LOGIC"; break;
         case RuleCategory::SECURITY_POLICY: json["category"] = "SECURITY_POLICY"; break;
         case RuleCategory::AUDIT_PROCEDURE: json["category"] = "AUDIT_PROCEDURE"; break;
+        case RuleCategory::SECURITY_MONITORING: json["category"] = "SECURITY_MONITORING"; break;
+        case RuleCategory::TRANSACTION_MONITORING: json["category"] = "TRANSACTION_MONITORING"; break;
     }
 
     // Format severity

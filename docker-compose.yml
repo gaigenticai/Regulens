@@ -160,7 +160,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      target: production
     container_name: regulens-frontend
     ports:
       - "3000:80"

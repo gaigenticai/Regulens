@@ -50,12 +50,12 @@ private:
     std::shared_ptr<AdvancedRuleEngine> rule_engine_;
 
     // Helper methods
-    nlohmann::json parse_rule_definition(const nlohmann::json& request);
+    RuleDefinition parse_rule_definition(const nlohmann::json& request);
     nlohmann::json format_rule_definition(const RuleDefinition& rule);
     nlohmann::json format_rule_result(const RuleResult& result);
     nlohmann::json format_evaluation_batch(const EvaluationBatch& batch);
 
-    nlohmann::json parse_evaluation_context(const nlohmann::json& request);
+    EvaluationContext parse_evaluation_context(const nlohmann::json& request);
     std::vector<EvaluationContext> parse_evaluation_contexts(const nlohmann::json& request);
 
     bool validate_rule_request(const nlohmann::json& request, std::string& error_message);

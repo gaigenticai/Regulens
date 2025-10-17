@@ -98,6 +98,43 @@ struct RuleResult {
     std::chrono::system_clock::time_point evaluated_at;
 };
 
+// JSON serialization for RuleResult
+inline void to_json(nlohmann::json& j, const RuleResult& result) {
+    j = nlohmann::json{
+        {"evaluation_id", result.evaluation_id},
+        {"rule_id", result.rule_id},
+        {"entity_id", result.entity_id},
+        {"score", result.score},
+        {"triggered", result.triggered},
+        {"action", result.action},
+        {"matched_conditions", result.matched_conditions},
+        {"condition_scores", result.condition_scores},
+        {"processing_time_ms", result.processing_time.count()},
+        {"evaluated_at", std::chrono::duration_cast<std::chrono::seconds>(
+            result.evaluated_at.time_since_epoch()).count()}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, RuleResult& result) {
+    result.evaluation_id = j.value("evaluation_id", "");
+    result.rule_id = j.value("rule_id", "");
+    result.entity_id = j.value("entity_id", "");
+    result.score = j.value("score", 0.0);
+    result.triggered = j.value("triggered", false);
+    result.action = j.value("action", RuleAction::ALLOW);
+    result.matched_conditions = j.value("matched_conditions", std::vector<std::string>{});
+    result.condition_scores = j.value("condition_scores", std::unordered_map<std::string, double>{});
+
+    auto proc_time_ms = j.value("processing_time_ms", 0);
+    result.processing_time = std::chrono::milliseconds(proc_time_ms);
+
+    auto eval_ts = j.value("evaluated_at", static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()));
+    result.evaluated_at = std::chrono::system_clock::time_point(
+        std::chrono::seconds(eval_ts));
+}
+
 struct EvaluationBatch {
     std::string batch_id;
     std::vector<EvaluationContext> contexts;
@@ -210,6 +247,143 @@ private:
     bool validate_rule_definition(const RuleDefinition& rule);
     nlohmann::json serialize_rule_result(const RuleResult& result);
 };
+
+// JSON serialization for RuleDefinition
+inline void to_json(nlohmann::json& j, const RuleDefinition& rule) {
+    j = nlohmann::json{
+        {"rule_id", rule.rule_id},
+        {"rule_name", rule.rule_name},
+        {"description", rule.description},
+        {"category", static_cast<int>(rule.category)},
+        {"severity", static_cast<int>(rule.severity)},
+        {"conditions", rule.conditions},
+        {"action", rule.action},
+        {"threshold_score", rule.threshold_score},
+        {"tags", rule.tags},
+        {"enabled", rule.enabled},
+        {"created_at", std::chrono::duration_cast<std::chrono::seconds>(
+            rule.created_at.time_since_epoch()).count()},
+        {"updated_at", std::chrono::duration_cast<std::chrono::seconds>(
+            rule.updated_at.time_since_epoch()).count()}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, RuleDefinition& rule) {
+    rule.rule_id = j.value("rule_id", "");
+    rule.rule_name = j.value("rule_name", "");
+    rule.description = j.value("description", "");
+    rule.category = static_cast<RuleCategory>(j.value("category", 0));
+    rule.severity = static_cast<RuleSeverity>(j.value("severity", 0));
+    rule.conditions = j.value("conditions", std::vector<RuleCondition>{});
+    rule.action = j.value("action", RuleAction{});
+    rule.threshold_score = j.value("threshold_score", 0.5);
+    rule.tags = j.value("tags", std::vector<std::string>{});
+    rule.enabled = j.value("enabled", true);
+
+    auto created_ts = j.value("created_at", static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()));
+    rule.created_at = std::chrono::system_clock::time_point(
+        std::chrono::seconds(created_ts));
+
+    auto updated_ts = j.value("updated_at", static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()));
+    rule.updated_at = std::chrono::system_clock::time_point(
+        std::chrono::seconds(updated_ts));
+}
+
+// JSON serialization for EvaluationContext
+inline void to_json(nlohmann::json& j, const EvaluationContext& context) {
+    j = nlohmann::json{
+        {"entity_id", context.entity_id},
+        {"entity_type", context.entity_type},
+        {"data", context.data},
+        {"source_system", context.source_system},
+        {"timestamp", std::chrono::duration_cast<std::chrono::seconds>(
+            context.timestamp.time_since_epoch()).count()},
+        {"metadata", context.metadata}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, EvaluationContext& context) {
+    context.entity_id = j.value("entity_id", "");
+    context.entity_type = j.value("entity_type", "");
+    context.data = j.value("data", nlohmann::json{});
+    context.source_system = j.value("source_system", "");
+
+    auto ts = j.value("timestamp", static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()));
+    context.timestamp = std::chrono::system_clock::time_point(
+        std::chrono::seconds(ts));
+
+    context.metadata = j.value("metadata", std::unordered_map<std::string, std::string>{});
+}
+
+// JSON serialization for enums
+inline void to_json(nlohmann::json& j, const RuleAction& action) {
+    switch (action) {
+        case RuleAction::ALLOW: j = "ALLOW"; break;
+        case RuleAction::DENY: j = "DENY"; break;
+        case RuleAction::ESCALATE: j = "ESCALATE"; break;
+        case RuleAction::MONITOR: j = "MONITOR"; break;
+        case RuleAction::ALERT: j = "ALERT"; break;
+        case RuleAction::QUARANTINE: j = "QUARANTINE"; break;
+        default: j = "ALLOW"; break;
+    }
+}
+
+inline void from_json(const nlohmann::json& j, RuleAction& action) {
+    std::string str = j.get<std::string>();
+    if (str == "ALLOW") action = RuleAction::ALLOW;
+    else if (str == "DENY") action = RuleAction::DENY;
+    else if (str == "ESCALATE") action = RuleAction::ESCALATE;
+    else if (str == "MONITOR") action = RuleAction::MONITOR;
+    else if (str == "ALERT") action = RuleAction::ALERT;
+    else if (str == "QUARANTINE") action = RuleAction::QUARANTINE;
+    else action = RuleAction::ALLOW;
+}
+
+inline void to_json(nlohmann::json& j, const RuleSeverity& severity) {
+    switch (severity) {
+        case RuleSeverity::LOW: j = "LOW"; break;
+        case RuleSeverity::MEDIUM: j = "MEDIUM"; break;
+        case RuleSeverity::HIGH: j = "HIGH"; break;
+        case RuleSeverity::CRITICAL: j = "CRITICAL"; break;
+        default: j = "MEDIUM"; break;
+    }
+}
+
+inline void from_json(const nlohmann::json& j, RuleSeverity& severity) {
+    std::string str = j.get<std::string>();
+    if (str == "LOW") severity = RuleSeverity::LOW;
+    else if (str == "MEDIUM") severity = RuleSeverity::MEDIUM;
+    else if (str == "HIGH") severity = RuleSeverity::HIGH;
+    else if (str == "CRITICAL") severity = RuleSeverity::CRITICAL;
+    else severity = RuleSeverity::MEDIUM;
+}
+
+inline void to_json(nlohmann::json& j, const RuleCategory& category) {
+    switch (category) {
+        case RuleCategory::FRAUD_DETECTION: j = "FRAUD_DETECTION"; break;
+        case RuleCategory::COMPLIANCE_CHECK: j = "COMPLIANCE_CHECK"; break;
+        case RuleCategory::RISK_ASSESSMENT: j = "RISK_ASSESSMENT"; break;
+        case RuleCategory::SECURITY_MONITORING: j = "SECURITY_MONITORING"; break;
+        case RuleCategory::TRANSACTION_MONITORING: j = "TRANSACTION_MONITORING"; break;
+        default: j = "COMPLIANCE_CHECK"; break;
+    }
+}
+
+inline void from_json(const nlohmann::json& j, RuleCategory& category) {
+    std::string str = j.get<std::string>();
+    if (str == "FRAUD_DETECTION") category = RuleCategory::FRAUD_DETECTION;
+    else if (str == "COMPLIANCE_CHECK") category = RuleCategory::COMPLIANCE_CHECK;
+    else if (str == "RISK_ASSESSMENT") category = RuleCategory::RISK_ASSESSMENT;
+    else if (str == "SECURITY_MONITORING") category = RuleCategory::SECURITY_MONITORING;
+    else if (str == "TRANSACTION_MONITORING") category = RuleCategory::TRANSACTION_MONITORING;
+    else category = RuleCategory::COMPLIANCE_CHECK;
+}
 
 } // namespace regulens
 

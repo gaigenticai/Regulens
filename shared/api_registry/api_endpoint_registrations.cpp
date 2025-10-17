@@ -4,6 +4,11 @@
  */
 
 #include "api_registry.hpp"
+
+// Forward declarations for functions defined later in this file
+void register_training_endpoints(PGconn* db_conn);
+void register_simulator_endpoints(PGconn* db_conn);
+void register_tool_categories_endpoints(PGconn* db_conn);
 #include "../web_ui/web_ui_server.hpp"
 #include "../auth/auth_api_handlers.hpp"
 #include "../transactions/transaction_api_handlers.hpp"

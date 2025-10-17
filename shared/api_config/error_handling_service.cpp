@@ -84,21 +84,21 @@ void ErrorHandlingService::build_error_codes_map() {
         // Map category
         std::string category_str = config.value("category", "");
         if (category_str == "client_error") {
-            error_code.category = ErrorCategory::CLIENT_ERROR;
+            error_code.category = ErrorCategory::VALIDATION;
         } else if (category_str == "authentication_error") {
-            error_code.category = ErrorCategory::AUTHENTICATION_ERROR;
+            error_code.category = ErrorCategory::SECURITY;
         } else if (category_str == "authorization_error") {
-            error_code.category = ErrorCategory::AUTHORIZATION_ERROR;
+            error_code.category = ErrorCategory::SECURITY;
         } else if (category_str == "server_error") {
-            error_code.category = ErrorCategory::SERVER_ERROR;
+            error_code.category = ErrorCategory::PROCESSING;
         } else if (category_str == "network_error") {
-            error_code.category = ErrorCategory::NETWORK_ERROR;
+            error_code.category = ErrorCategory::NETWORK;
         } else if (category_str == "rate_limit_error") {
-            error_code.category = ErrorCategory::RATE_LIMIT_ERROR;
+            error_code.category = ErrorCategory::RESOURCE;
         } else if (category_str == "validation_error") {
-            error_code.category = ErrorCategory::VALIDATION_ERROR;
+            error_code.category = ErrorCategory::VALIDATION;
         } else if (category_str == "external_service_error") {
-            error_code.category = ErrorCategory::EXTERNAL_SERVICE_ERROR;
+            error_code.category = ErrorCategory::EXTERNAL_API;
         }
 
         // Map HTTP status

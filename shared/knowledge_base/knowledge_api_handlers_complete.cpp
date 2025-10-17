@@ -140,7 +140,11 @@ std::string search_knowledge_base(PGconn* db_conn, const std::map<std::string, s
 
         // Limit results
         if (results.size() > static_cast<size_t>(top_k)) {
-            results = json::array(results.begin(), results.begin() + top_k);
+            json limited_results = json::array();
+            for (size_t i = 0; i < static_cast<size_t>(top_k); ++i) {
+                limited_results.push_back(results[i]);
+            }
+            results = limited_results;
         }
 
         json response;
@@ -565,9 +569,9 @@ std::string update_knowledge_entry(PGconn* db_conn, const std::string& entry_id,
                 std::string current_content = PQgetvalue(current_result, 0, 2);
 
                 // Use updated values or current values
-                std::string final_title = req.contains("title") ? req["title"] : current_title;
-                std::string final_summary = req.contains("summary") ? req["summary"] : current_summary;
-                std::string final_content = req.contains("content") ? req["content"] : current_content;
+                std::string final_title = req.contains("title") ? req["title"].get<std::string>() : current_title;
+                std::string final_summary = req.contains("summary") ? req["summary"].get<std::string>() : current_summary;
+                std::string final_content = req.contains("content") ? req["content"].get<std::string>() : current_content;
 
                 std::vector<double> new_embedding = generate_embedding(final_title + " " + final_summary + " " + final_content);
                 json embedding_json = json::array();
@@ -1366,7 +1370,7 @@ std::string hybrid_search(PGconn* db_conn, const std::string& query_text, const 
         } else {
             merged_results[id] = result;
             merged_results[id]["keywordScore"] = result["relevanceScore"];
-            merged_results[id]["combinedScore"] = result["relevanceScore"] * 0.3;
+            merged_results[id]["combinedScore"] = result["relevanceScore"].get<double>() * 0.3;
         }
     }
     

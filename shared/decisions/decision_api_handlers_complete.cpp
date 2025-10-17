@@ -1655,7 +1655,7 @@ std::string evaluate_mcda_alternatives(PGconn* db_conn, const std::string& analy
 
         std::string results_str = results.dump();
         const char* storeParams[2] = {results_str.c_str(), analysis_id.c_str()};
-        PGexecParams(db_conn, store_query.c_str(), 2, NULL, storeParams, NULL, NULL, 0);
+        PQexecParams(db_conn, store_query.c_str(), 2, NULL, storeParams, NULL, NULL, 0);
 
         json response;
         response["analysisId"] = analysis_id;

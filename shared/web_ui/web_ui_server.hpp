@@ -143,8 +143,8 @@ private:
 
     // Utility methods
     std::string url_decode(const std::string& str);
-    std::unordered_map<std::string, std::string> parse_query_string(const std::string& query);
-    std::unordered_map<std::string, std::string> parse_form_data(const std::string& body);
+    std::map<std::string, std::string> parse_query_string(const std::string& query);
+    std::map<std::string, std::string> parse_form_data(const std::string& body);
     std::string get_content_type(const std::string& path);
     bool is_safe_path(const std::string& path);
 

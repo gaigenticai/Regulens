@@ -232,8 +232,14 @@ VersionNegotiationResult APIVersioningService::negotiate_from_url_path(const std
 
             return result;
         } else {
+            auto supported = get_supported_versions();
+            std::string supported_str;
+            for (size_t i = 0; i < supported.size(); ++i) {
+                if (i > 0) supported_str += ", ";
+                supported_str += supported[i];
+            }
             result.warning_message = "Requested API version " + version + " is not supported. " +
-                                   "Supported versions: " + join_supported_versions();
+                                   "Supported versions: " + supported_str;
         }
     }
 
@@ -545,16 +551,6 @@ bool APIVersioningService::is_supported_version(const std::string& version) {
 APIVersionStatus APIVersioningService::get_version_status(const std::string& version) {
     auto info = get_version_info(version);
     return info ? info->status : APIVersionStatus::UNSUPPORTED;
-}
-
-std::string APIVersioningService::join_supported_versions() {
-    auto versions = get_supported_versions();
-    std::stringstream ss;
-    for (size_t i = 0; i < versions.size(); ++i) {
-        if (i > 0) ss << ", ";
-        ss << versions[i];
-    }
-    return ss.str();
 }
 
 } // namespace regulens

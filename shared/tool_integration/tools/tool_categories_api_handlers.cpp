@@ -337,75 +337,75 @@ bool ToolCategoriesAPIHandlers::validate_user_access(const std::string& user_id,
 ToolResult ToolCategoriesAPIHandlers::execute_analytics_tool(const std::string& tool_name, const nlohmann::json& parameters) {
     auto tool = tool_registry_.get_tool(tool_name);
     if (!tool) {
-        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
     if (tool_name == "data_analyzer") {
-        return std::static_pointer_cast<DataAnalyzerTool>(tool)->analyze_dataset(parameters);
+        return dynamic_cast<DataAnalyzerTool*>(tool)->analyze_dataset(parameters);
     } else if (tool_name == "report_generator") {
-        return std::static_pointer_cast<ReportGeneratorTool>(tool)->generate_report(parameters);
+        return dynamic_cast<ReportGeneratorTool*>(tool)->generate_report(parameters);
     } else if (tool_name == "dashboard_builder") {
-        return std::static_pointer_cast<DashboardBuilderTool>(tool)->build_dashboard(parameters);
+        return dynamic_cast<DashboardBuilderTool*>(tool)->build_dashboard(parameters);
     } else if (tool_name == "predictive_model") {
-        return std::static_pointer_cast<PredictiveModelTool>(tool)->run_prediction(parameters);
+        return dynamic_cast<PredictiveModelTool*>(tool)->run_prediction(parameters);
     }
 
-    return ToolResult{false, tool_name, "Unknown analytics tool", "", nlohmann::json{}};
+    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown analytics tool"};
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_workflow_tool(const std::string& tool_name, const nlohmann::json& parameters) {
     auto tool = tool_registry_.get_tool(tool_name);
     if (!tool) {
-        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
     if (tool_name == "task_automator") {
-        return std::static_pointer_cast<TaskAutomatorTool>(tool)->automate_task(parameters);
+        return dynamic_cast<TaskAutomatorTool*>(tool)->automate_task(parameters);
     } else if (tool_name == "process_optimizer") {
-        return std::static_pointer_cast<ProcessOptimizerTool>(tool)->optimize_process(parameters);
+        return dynamic_cast<ProcessOptimizerTool*>(tool)->optimize_process(parameters);
     } else if (tool_name == "approval_workflow") {
-        return std::static_pointer_cast<ApprovalWorkflowTool>(tool)->manage_approval(parameters);
+        return dynamic_cast<ApprovalWorkflowTool*>(tool)->manage_approval(parameters);
     }
 
-    return ToolResult{false, tool_name, "Unknown workflow tool", "", nlohmann::json{}};
+    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown workflow tool"};
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_security_tool(const std::string& tool_name, const nlohmann::json& parameters) {
     auto tool = tool_registry_.get_tool(tool_name);
     if (!tool) {
-        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
     if (tool_name == "vulnerability_scanner") {
-        return std::static_pointer_cast<VulnerabilityScannerTool>(tool)->scan_vulnerabilities(parameters);
+        return dynamic_cast<VulnerabilityScannerTool*>(tool)->scan_vulnerabilities(parameters);
     } else if (tool_name == "compliance_checker") {
-        return std::static_pointer_cast<ComplianceCheckerTool>(tool)->check_compliance(parameters);
+        return dynamic_cast<ComplianceCheckerTool*>(tool)->check_compliance(parameters);
     } else if (tool_name == "access_analyzer") {
-        return std::static_pointer_cast<AccessAnalyzerTool>(tool)->analyze_access(parameters);
+        return dynamic_cast<AccessAnalyzerTool*>(tool)->analyze_access(parameters);
     } else if (tool_name == "audit_logger") {
-        return std::static_pointer_cast<AuditLoggerTool>(tool)->log_audit_event(parameters);
+        return dynamic_cast<AuditLoggerTool*>(tool)->log_audit_event(parameters);
     }
 
-    return ToolResult{false, tool_name, "Unknown security tool", "", nlohmann::json{}};
+    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown security tool"};
 }
 
 ToolResult ToolCategoriesAPIHandlers::execute_monitoring_tool(const std::string& tool_name, const nlohmann::json& parameters) {
     auto tool = tool_registry_.get_tool(tool_name);
     if (!tool) {
-        return ToolResult{false, tool_name, "Tool not found", "", nlohmann::json{}};
+        return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Tool not found"};
     }
 
     if (tool_name == "system_monitor") {
-        return std::static_pointer_cast<SystemMonitorTool>(tool)->monitor_system(parameters);
+        return dynamic_cast<SystemMonitorTool*>(tool)->monitor_system(parameters);
     } else if (tool_name == "performance_tracker") {
-        return std::static_pointer_cast<PerformanceTrackerTool>(tool)->track_performance(parameters);
+        return dynamic_cast<PerformanceTrackerTool*>(tool)->track_performance(parameters);
     } else if (tool_name == "alert_manager") {
-        return std::static_pointer_cast<AlertManagerTool>(tool)->manage_alerts(parameters);
+        return dynamic_cast<AlertManagerTool*>(tool)->manage_alerts(parameters);
     } else if (tool_name == "health_checker") {
-        return std::static_pointer_cast<HealthCheckerTool>(tool)->check_health(parameters);
+        return dynamic_cast<HealthCheckerTool*>(tool)->check_health(parameters);
     }
 
-    return ToolResult{false, tool_name, "Unknown monitoring tool", "", nlohmann::json{}};
+    return ToolResult{false, nlohmann::json{{"tool_name", tool_name}}, "Unknown monitoring tool"};
 }
 
 nlohmann::json ToolCategoriesAPIHandlers::create_success_response(const nlohmann::json& data, const std::string& message) {

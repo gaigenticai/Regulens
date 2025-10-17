@@ -174,10 +174,13 @@ std::string APIVersionRouter::normalize_request_path(const HTTPRequest& request)
 }
 
 VersionNegotiationResult APIVersionRouter::negotiate_version_for_request(const HTTPRequest& request) {
+    std::unordered_map<std::string, std::string> headers(request.headers.begin(), request.headers.end());
+    std::unordered_map<std::string, std::string> query_params(request.query_params.begin(), request.query_params.end());
+
     return APIVersioningService::get_instance().negotiate_version(
         request.path,
-        request.headers,
-        request.query_params
+        headers,
+        query_params
     );
 }
 

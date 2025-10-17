@@ -483,8 +483,8 @@ std::string WebUIServer::url_decode(const std::string& str) {
     return result;
 }
 
-std::unordered_map<std::string, std::string> WebUIServer::parse_query_string(const std::string& query) {
-    std::unordered_map<std::string, std::string> params;
+std::map<std::string, std::string> WebUIServer::parse_query_string(const std::string& query) {
+    std::map<std::string, std::string> params;
     std::istringstream iss(query);
     std::string pair;
 
@@ -500,7 +500,7 @@ std::unordered_map<std::string, std::string> WebUIServer::parse_query_string(con
     return params;
 }
 
-std::unordered_map<std::string, std::string> WebUIServer::parse_form_data(const std::string& body) {
+std::map<std::string, std::string> WebUIServer::parse_form_data(const std::string& body) {
     return parse_query_string(body);
 }
 

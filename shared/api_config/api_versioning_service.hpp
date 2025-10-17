@@ -12,6 +12,7 @@
 #include <optional>
 #include <chrono>
 #include <memory>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include "../../shared/error_handler.hpp"
 #include "../logging/structured_logger.hpp"
@@ -139,8 +140,12 @@ private:
     // Path manipulation
     std::string remove_version_from_path(const std::string& path);
     std::string add_version_to_path(const std::string& path, const std::string& version);
+
+public:
+    // Public path utilities
     bool is_versioned_path(const std::string& path);
 
+private:
     // Configuration data
     std::shared_ptr<StructuredLogger> logger_;
     nlohmann::json config_;

@@ -426,7 +426,7 @@ std::string AdvancedRuleEngineAPIHandlers::handle_update_configuration(const std
 
 // Helper method implementations
 
-nlohmann::json AdvancedRuleEngineAPIHandlers::parse_rule_definition(const nlohmann::json& request) {
+RuleDefinition AdvancedRuleEngineAPIHandlers::parse_rule_definition(const nlohmann::json& request) {
     RuleDefinition rule;
 
     rule.rule_id = request.value("rule_id", generate_request_id());

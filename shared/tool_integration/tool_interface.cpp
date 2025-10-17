@@ -12,6 +12,25 @@
 
 namespace regulens {
 
+// ToolRegistry Singleton Implementation
+static std::unique_ptr<ToolRegistry> tool_registry_instance;
+static std::mutex tool_registry_mutex;
+
+ToolRegistry& ToolRegistry::get_instance() {
+    std::lock_guard<std::mutex> lock(tool_registry_mutex);
+    if (!tool_registry_instance) {
+        throw std::runtime_error("ToolRegistry not initialized. Call initialize_instance() first.");
+    }
+    return *tool_registry_instance;
+}
+
+void ToolRegistry::initialize_instance(std::shared_ptr<ConnectionPool> db_pool, StructuredLogger* logger) {
+    std::lock_guard<std::mutex> lock(tool_registry_mutex);
+    if (!tool_registry_instance) {
+        tool_registry_instance = std::make_unique<ToolRegistry>(db_pool, logger);
+    }
+}
+
 // Tool Implementation
 
 Tool::Tool(const ToolConfig& config, StructuredLogger* logger)
@@ -76,6 +95,11 @@ nlohmann::json Tool::get_tool_info() const {
         {"enabled", config_.enabled},
         {"metadata", config_.metadata}
     };
+}
+
+std::vector<std::string> Tool::get_required_parameters() const {
+    // Default implementation - tools should override this to provide their required parameters
+    return {};
 }
 
 void Tool::reset_metrics() {
@@ -618,6 +642,27 @@ bool ToolRegistry::load_tool_configs() {
         logger_->log(LogLevel::ERROR, "Exception loading tool configs: " + std::string(e.what()));
         return false;
     }
+}
+
+// Bulk tool registration methods
+bool ToolRegistry::register_analytics_tools(PGconn* db_conn, StructuredLogger* logger) {
+    logger_->log(LogLevel::INFO, "Registering analytics tools");
+    return true; // Placeholder implementation
+}
+
+bool ToolRegistry::register_workflow_tools(PGconn* db_conn, StructuredLogger* logger) {
+    logger_->log(LogLevel::INFO, "Registering workflow tools");
+    return true; // Placeholder implementation
+}
+
+bool ToolRegistry::register_security_tools(PGconn* db_conn, StructuredLogger* logger) {
+    logger_->log(LogLevel::INFO, "Registering security tools");
+    return true; // Placeholder implementation
+}
+
+bool ToolRegistry::register_monitoring_tools(PGconn* db_conn, StructuredLogger* logger) {
+    logger_->log(LogLevel::INFO, "Registering monitoring tools");
+    return true; // Placeholder implementation
 }
 
 // Utility Functions

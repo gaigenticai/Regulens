@@ -12,6 +12,7 @@
 #include <optional>
 #include <memory>
 #include <chrono>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include "../../shared/error_handler.hpp"
 #include "../logging/structured_logger.hpp"

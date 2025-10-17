@@ -65,6 +65,7 @@ private:
     ToolCategory parse_tool_category(const std::string& category_str);
     nlohmann::json format_tool_result(const ToolResult& result);
     nlohmann::json format_tool_info(const std::string& tool_name, std::shared_ptr<Tool> tool);
+    bool is_admin_user(const std::string& user_id);
 
     // Request validation
     bool validate_tool_request(const nlohmann::json& request, const std::string& tool_name, std::string& error_message);

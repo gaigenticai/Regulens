@@ -15,6 +15,7 @@
 #include "../api_registry/api_registry.hpp"
 #include "../../shared/error_handler.hpp"
 #include "../logging/structured_logger.hpp"
+#include "../web_ui/web_ui_server.hpp"
 
 namespace regulens {
 
@@ -80,7 +81,7 @@ private:
 
     // Route storage and indexing
     std::unordered_map<std::string, std::vector<VersionedRoute>> routes_by_version_;
-    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<VersionedRoute>>> routes_by_method_version_;
+    std::unordered_map<std::string, std::vector<VersionedRoute>> routes_by_method_version_;
     std::mutex routes_mutex_;
 
     // Path matching and normalization

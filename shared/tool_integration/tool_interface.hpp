@@ -99,6 +99,28 @@ struct ToolResult {
           execution_time(et), retry_count(rc) {}
 };
 
+// JSON serialization for ToolResult
+inline void to_json(nlohmann::json& j, const ToolResult& result) {
+    j = nlohmann::json{
+        {"success", result.success},
+        {"data", result.data},
+        {"error_message", result.error_message},
+        {"execution_time_ms", result.execution_time.count()},
+        {"retry_count", result.retry_count},
+        {"metadata", result.metadata}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, ToolResult& result) {
+    result.success = j.value("success", false);
+    result.data = j.value("data", nlohmann::json{});
+    result.error_message = j.value("error_message", "");
+    auto exec_time_ms = j.value("execution_time_ms", 0);
+    result.execution_time = std::chrono::milliseconds(exec_time_ms);
+    result.retry_count = j.value("retry_count", 0);
+    result.metadata = j.value("metadata", std::unordered_map<std::string, std::string>{});
+}
+
 // Tool Configuration
 struct ToolConfig {
     std::string tool_id;
@@ -168,6 +190,7 @@ public:
     // Configuration and validation
     virtual bool validate_config() const;
     virtual nlohmann::json get_tool_info() const;
+    virtual std::vector<std::string> get_required_parameters() const;
 
     // Metrics and monitoring
     const ToolMetrics& get_metrics() const { return metrics_; }
@@ -194,6 +217,10 @@ protected:
 // Tool Registry - Manages available tools
 class ToolRegistry {
 public:
+    // Singleton pattern
+    static ToolRegistry& get_instance();
+    static void initialize_instance(std::shared_ptr<ConnectionPool> db_pool, StructuredLogger* logger);
+
     ToolRegistry(std::shared_ptr<ConnectionPool> db_pool, StructuredLogger* logger);
 
     // Lifecycle management
@@ -223,6 +250,12 @@ public:
     // Configuration management
     bool update_tool_config(const std::string& tool_id, const ToolConfig& new_config);
     bool reload_tool_configs();
+
+    // Bulk tool registration by category
+    bool register_analytics_tools(PGconn* db_conn, StructuredLogger* logger);
+    bool register_workflow_tools(PGconn* db_conn, StructuredLogger* logger);
+    bool register_security_tools(PGconn* db_conn, StructuredLogger* logger);
+    bool register_monitoring_tools(PGconn* db_conn, StructuredLogger* logger);
 
 private:
     std::shared_ptr<ConnectionPool> db_pool_;

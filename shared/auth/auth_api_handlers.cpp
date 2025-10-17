@@ -222,7 +222,7 @@ std::string get_current_user(PGconn* db_conn, const std::map<std::string, std::s
         }
 
         JWTParser jwt_parser(jwt_secret_env);
-        auto user_id_opt = extract_user_id_from_headers(headers, jwt_parser);
+        auto user_id_opt = extract_user_id_from_request(headers, jwt_parser);
 
         if (!user_id_opt.has_value()) {
             return "{\"error\":\"Invalid or missing authentication token\"}";
@@ -605,7 +605,7 @@ std::string sha256(const std::string& input) {
 }
 
 // Helper function to extract user ID from request headers
-static std::optional<std::string> extract_user_id_from_headers(const std::map<std::string, std::string>& headers, JWTParser& jwt_parser) {
+static std::optional<std::string> extract_user_id_from_request(const std::map<std::string, std::string>& headers, JWTParser& jwt_parser) {
     // Extract Authorization header
     auto auth_it = headers.find("authorization");
     if (auth_it == headers.end()) {

@@ -494,7 +494,6 @@ CREATE TABLE IF NOT EXISTS customer_behavior_patterns (
     detected_by_agent VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
 -- =============================================================================
 -- POC 2: REGULATORY CHANGE IMPACT ASSESSOR TABLES
 -- =============================================================================
@@ -991,6 +990,185 @@ CREATE TABLE IF NOT EXISTS tool_health_metrics (
     PRIMARY KEY (tool_id, timestamp)
 );
 
+-- =============================================================================
+-- END WEEK 1 SCHEMA
+-- =============================================================================
+
+-- =============================================================================
+-- PHASE 7A: ADVANCED ANALYTICS & INSIGHTS SCHEMA
+-- =============================================================================
+
+-- Decision analytics records
+CREATE TABLE decision_analytics_records (
+    decision_id UUID PRIMARY KEY,
+    algorithm VARCHAR(100) NOT NULL,
+    alternative_names JSONB NOT NULL,
+    selected_alternative VARCHAR(255) NOT NULL,
+    decision_score DECIMAL(10, 4),
+    confidence DECIMAL(5, 4),
+    criteria_weights JSONB,
+    alternative_scores JSONB,
+    actual_outcome VARCHAR(255),
+    was_correct BOOLEAN,
+    feedback_count INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    INDEX idx_decision_algorithm (algorithm),
+    INDEX idx_decision_created (created_at DESC)
+);
+
+-- Algorithm performance metrics
+CREATE TABLE algorithm_metrics (
+    algorithm_name VARCHAR(100) PRIMARY KEY,
+    total_decisions INT DEFAULT 0,
+    accurate_decisions INT DEFAULT 0,
+    inaccurate_decisions INT DEFAULT 0,
+    accuracy_rate DECIMAL(5, 4),
+    avg_execution_time_ms DECIMAL(10, 2),
+    avg_confidence_score DECIMAL(5, 4),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Ensemble comparison records
+CREATE TABLE ensemble_comparisons (
+    comparison_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID NOT NULL,
+    algorithms_used JSONB NOT NULL,
+    algorithm_results JSONB NOT NULL,
+    ensemble_result VARCHAR(255),
+    actual_outcome VARCHAR(255),
+    ensemble_was_correct BOOLEAN,
+    best_individual_correct BOOLEAN,
+    ensemble_confidence DECIMAL(5, 4),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_ensemble_decision (decision_id),
+    INDEX idx_ensemble_created (created_at DESC)
+);
+
+-- Sensitivity analysis results
+CREATE TABLE sensitivity_analysis_results (
+    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID NOT NULL,
+    parameter_name VARCHAR(255) NOT NULL,
+    min_value DECIMAL(15, 6),
+    max_value DECIMAL(15, 6),
+    step_value DECIMAL(15, 6),
+    impacted_alternatives JSONB,
+    sensitivity_curve JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_sensitivity_decision (decision_id)
+);
+
+-- Rule effectiveness records
+CREATE TABLE rule_effectiveness_records (
+    rule_id UUID PRIMARY KEY,
+    rule_name VARCHAR(255) NOT NULL,
+    rule_type VARCHAR(50),
+    true_positives INT DEFAULT 0,
+    false_positives INT DEFAULT 0,
+    true_negatives INT DEFAULT 0,
+    false_negatives INT DEFAULT 0,
+    total_executions INT DEFAULT 0,
+    successful_executions INT DEFAULT 0,
+    failed_executions INT DEFAULT 0,
+    avg_execution_time_ms DECIMAL(10, 2),
+    min_execution_time_ms DECIMAL(10, 2),
+    max_execution_time_ms DECIMAL(10, 2),
+    p95_execution_time_ms DECIMAL(10, 2),
+    total_events_processed INT DEFAULT 0,
+    business_impact_score DECIMAL(5, 2),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_rule_type (rule_type),
+    INDEX idx_rule_created (created_at DESC)
+);
+
+-- Rule interactions (redundancy detection)
+CREATE TABLE rule_interactions (
+    interaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id_1 UUID NOT NULL,
+    rule_id_2 UUID NOT NULL,
+    overlapping_triggers INT DEFAULT 0,
+    conflicting_outcomes INT DEFAULT 0,
+    similarity_score DECIMAL(5, 4),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_rule_interaction_1 (rule_id_1),
+    INDEX idx_rule_interaction_2 (rule_id_2)
+);
+
+-- Feedback effectiveness tracking
+CREATE TABLE feedback_effectiveness_records (
+    feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    feedback_type VARCHAR(100) NOT NULL,
+    entity_id UUID NOT NULL,
+    improvement_score INT,
+    follow_up_count INT DEFAULT 0,
+    led_to_model_update BOOLEAN DEFAULT FALSE,
+    model_accuracy_before DECIMAL(5, 4),
+    model_accuracy_after DECIMAL(5, 4),
+    submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    processed_at TIMESTAMP WITH TIME ZONE,
+    INDEX idx_feedback_type (feedback_type),
+    INDEX idx_feedback_entity (entity_id),
+    INDEX idx_feedback_submitted (submitted_at DESC)
+);
+
+-- Reward events (reinforcement learning)
+CREATE TABLE reward_events (
+    reward_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID,
+    rule_id UUID,
+    reward_value DECIMAL(10, 4),
+    reward_reason VARCHAR(255),
+    cumulative_reward DECIMAL(15, 4),
+    occurred_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_reward_decision (decision_id),
+    INDEX idx_reward_rule (rule_id),
+    INDEX idx_reward_occurred (occurred_at DESC)
+);
+
+-- Feature importance tracking
+CREATE TABLE feature_importance (
+    feature_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    feature_name VARCHAR(255) NOT NULL UNIQUE,
+    importance_score DECIMAL(5, 4),
+    usage_count INT DEFAULT 0,
+    avg_correlation_with_outcomes DECIMAL(5, 4),
+    correlated_features JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_feature_name (feature_name),
+    INDEX idx_feature_importance (importance_score DESC)
+);
+
+-- Convergence metrics
+CREATE TABLE convergence_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    loss_value DECIMAL(15, 8),
+    loss_trend DECIMAL(5, 4),
+    iterations_to_convergence INT,
+    accuracy_improvement_rate DECIMAL(5, 4),
+    has_converged BOOLEAN DEFAULT FALSE,
+    calculated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_convergence_calculated (calculated_at DESC)
+);
+
+-- Learning recommendations
+CREATE TABLE learning_recommendations (
+    recommendation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recommendation_type VARCHAR(100) NOT NULL,
+    target_entity VARCHAR(255),
+    priority INT,
+    description TEXT,
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_recommendation_type (recommendation_type),
+    INDEX idx_recommendation_priority (priority DESC)
+);
+
+-- =============================================================================
+-- END PHASE 7A SCHEMA
+-- =============================================================================
 -- Tool operation logs (for audit and debugging)
 CREATE TABLE IF NOT EXISTS tool_operation_logs (
     operation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1473,7 +1651,6 @@ CREATE TABLE IF NOT EXISTS memory_access_patterns (
     processing_time_ms INTEGER,
     user_satisfaction_score REAL CHECK (user_satisfaction_score >= 0.0 AND user_satisfaction_score <= 1.0)
 );
-
 -- Learning model versions - Track evolution of learned behaviors
 CREATE TABLE IF NOT EXISTS learning_model_versions (
     model_version_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1973,7 +2150,6 @@ CREATE TABLE IF NOT EXISTS cdc_tracking (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE(source_database, source_table)
 );
-
 -- Performance baselines for anomaly detection
 CREATE TABLE IF NOT EXISTS performance_baselines (
     baseline_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2469,7 +2645,6 @@ CREATE TABLE IF NOT EXISTS mcda_models (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-
 CREATE TABLE IF NOT EXISTS mcda_criteria (
     criterion_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     model_id UUID REFERENCES mcda_models(model_id) ON DELETE CASCADE,
@@ -2957,7 +3132,6 @@ CREATE TABLE IF NOT EXISTS export_requests (
     INDEX idx_export_requests_status (status, created_at DESC),
     INDEX idx_export_requests_type (export_type)
 );
-
 -- Export templates for custom reports
 CREATE TABLE IF NOT EXISTS export_templates (
     template_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -3457,7 +3631,6 @@ CREATE TABLE IF NOT EXISTS chatbot_conversations (
     message_count INTEGER DEFAULT 0,
     context JSONB DEFAULT '{}'::jsonb
 );
-
 CREATE TABLE IF NOT EXISTS chatbot_messages (
     message_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID REFERENCES chatbot_conversations(conversation_id) ON DELETE CASCADE,
@@ -3959,7 +4132,6 @@ CREATE TABLE IF NOT EXISTS integration_connectors (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS integration_instances (
     instance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     connector_id UUID REFERENCES integration_connectors(connector_id) ON DELETE CASCADE,
@@ -4427,7 +4599,6 @@ CREATE INDEX IF NOT EXISTS idx_quality_checks_source ON data_quality_checks(sour
 CREATE INDEX IF NOT EXISTS idx_quality_checks_table ON data_quality_checks(table_name, executed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_quality_checks_passed ON data_quality_checks(passed, severity, executed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_quality_checks_type ON data_quality_checks(check_type, executed_at DESC);
-
 CREATE INDEX IF NOT EXISTS idx_quality_summary_source ON data_quality_summary(source_name, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_quality_summary_table ON data_quality_summary(table_name, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_quality_summary_score ON data_quality_summary(overall_quality_score, snapshot_date DESC);
@@ -4923,7 +5094,6 @@ CREATE TABLE IF NOT EXISTS pattern_validation_results (
     validation_notes TEXT,
     validated_by VARCHAR(100)
 );
-
 -- Indexes for pattern analysis tables
 CREATE INDEX IF NOT EXISTS idx_patterns_type ON detected_patterns(pattern_type, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_patterns_detected ON detected_patterns(last_detected DESC);
@@ -5409,7 +5579,6 @@ CREATE TABLE IF NOT EXISTS configuration_access_logs (
     user_agent TEXT,
     accessed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
 -- Indexes for configuration system
 CREATE INDEX IF NOT EXISTS idx_config_values_scope ON configuration_values(scope);
 CREATE INDEX IF NOT EXISTS idx_config_values_module ON configuration_values(module_name);
@@ -5886,7 +6055,6 @@ CREATE TABLE IF NOT EXISTS conversation_performance_metrics (
     INDEX idx_conversation_metrics_agent (agent_id, recorded_at DESC),
     INDEX idx_conversation_metrics_type (metric_type, recorded_at DESC)
 );
-
 -- ============================================================================
 -- END OF COMMUNICATION MEDIATOR SYSTEM
 -- ============================================================================
@@ -6376,7 +6544,6 @@ CREATE TABLE IF NOT EXISTS consensus_sessions (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
 -- Consensus rounds table
 CREATE TABLE IF NOT EXISTS consensus_rounds (
     consensus_id VARCHAR(255) NOT NULL REFERENCES consensus_sessions(consensus_id) ON DELETE CASCADE,
@@ -6865,7 +7032,6 @@ SELECT
 FROM training_enrollments e
 JOIN users u ON e.user_id = u.id
 JOIN training_courses c ON e.course_id = c.course_id;
-
 CREATE OR REPLACE VIEW training_certification_details AS
 SELECT 
     cert.certification_id,
@@ -7312,9 +7478,9 @@ CREATE TABLE IF NOT EXISTS simulation_scenarios (
     description TEXT,
     scenario_type VARCHAR(50) NOT NULL DEFAULT 'regulatory_change', -- 'regulatory_change', 'market_change', 'operational_change'
     regulatory_changes JSONB NOT NULL, -- Hypothetical regulatory changes to simulate
-    impact_parameters JSONB, -- Parameters for impact calculation (thresholds, weights, etc.)
-    baseline_data JSONB, -- Reference data for comparison
-    test_data JSONB, -- Test data to run simulation against
+    impact_parameters JSONB NOT NULL, -- Parameters for impact calculation (thresholds, weights, etc.)
+    baseline_data JSONB NOT NULL, -- Reference data for comparison
+    test_data JSONB NOT NULL, -- Test data to run simulation against
     created_by VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -7345,7 +7511,6 @@ CREATE TABLE IF NOT EXISTS simulation_executions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     metadata JSONB
 );
-
 CREATE INDEX idx_simulation_executions_scenario ON simulation_executions(scenario_id, created_at DESC);
 CREATE INDEX idx_simulation_executions_user ON simulation_executions(user_id, created_at DESC);
 CREATE INDEX idx_simulation_executions_status ON simulation_executions(execution_status, started_at DESC);
@@ -7844,7 +8009,6 @@ CREATE TABLE IF NOT EXISTS embedding_sampling_strategies (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     is_default BOOLEAN DEFAULT false
 );
-
 CREATE INDEX idx_embedding_sampling_name ON embedding_sampling_strategies(strategy_name);
 CREATE INDEX idx_embedding_sampling_type ON embedding_sampling_strategies(strategy_type);
 
@@ -8326,7 +8490,6 @@ CREATE TABLE IF NOT EXISTS tool_test_executions (
     environment_info JSONB, -- System info, dependencies versions
     metadata JSONB
 );
-
 CREATE INDEX idx_tool_test_executions_suite ON tool_test_executions(suite_id, executed_at DESC);
 CREATE INDEX idx_tool_test_executions_tool ON tool_test_executions(tool_name, executed_at DESC);
 CREATE INDEX idx_tool_test_executions_category ON tool_test_executions(tool_category, executed_at DESC);
@@ -8660,4 +8823,180 @@ CREATE INDEX idx_trace_spans_operation ON trace_spans(operation_name);
 
 -- =============================================================================
 -- END WEEK 1 SCHEMA
+-- =============================================================================
+
+-- =============================================================================
+-- PHASE 7A: ADVANCED ANALYTICS & INSIGHTS SCHEMA
+-- =============================================================================
+
+-- Decision analytics records
+CREATE TABLE decision_analytics_records (
+    decision_id UUID PRIMARY KEY,
+    algorithm VARCHAR(100) NOT NULL,
+    alternative_names JSONB NOT NULL,
+    selected_alternative VARCHAR(255) NOT NULL,
+    decision_score DECIMAL(10, 4),
+    confidence DECIMAL(5, 4),
+    criteria_weights JSONB,
+    alternative_scores JSONB,
+    actual_outcome VARCHAR(255),
+    was_correct BOOLEAN,
+    feedback_count INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    INDEX idx_decision_algorithm (algorithm),
+    INDEX idx_decision_created (created_at DESC)
+);
+
+-- Algorithm performance metrics
+CREATE TABLE algorithm_metrics (
+    algorithm_name VARCHAR(100) PRIMARY KEY,
+    total_decisions INT DEFAULT 0,
+    accurate_decisions INT DEFAULT 0,
+    inaccurate_decisions INT DEFAULT 0,
+    accuracy_rate DECIMAL(5, 4),
+    avg_execution_time_ms DECIMAL(10, 2),
+    avg_confidence_score DECIMAL(5, 4),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Ensemble comparison records
+CREATE TABLE ensemble_comparisons (
+    comparison_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID NOT NULL,
+    algorithms_used JSONB NOT NULL,
+    algorithm_results JSONB NOT NULL,
+    ensemble_result VARCHAR(255),
+    actual_outcome VARCHAR(255),
+    ensemble_was_correct BOOLEAN,
+    best_individual_correct BOOLEAN,
+    ensemble_confidence DECIMAL(5, 4),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_ensemble_decision (decision_id),
+    INDEX idx_ensemble_created (created_at DESC)
+);
+
+-- Sensitivity analysis results
+CREATE TABLE sensitivity_analysis_results (
+    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID NOT NULL,
+    parameter_name VARCHAR(255) NOT NULL,
+    min_value DECIMAL(15, 6),
+    max_value DECIMAL(15, 6),
+    step_value DECIMAL(15, 6),
+    impacted_alternatives JSONB,
+    sensitivity_curve JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_sensitivity_decision (decision_id)
+);
+
+-- Rule effectiveness records
+CREATE TABLE rule_effectiveness_records (
+    rule_id UUID PRIMARY KEY,
+    rule_name VARCHAR(255) NOT NULL,
+    rule_type VARCHAR(50),
+    true_positives INT DEFAULT 0,
+    false_positives INT DEFAULT 0,
+    true_negatives INT DEFAULT 0,
+    false_negatives INT DEFAULT 0,
+    total_executions INT DEFAULT 0,
+    successful_executions INT DEFAULT 0,
+    failed_executions INT DEFAULT 0,
+    avg_execution_time_ms DECIMAL(10, 2),
+    min_execution_time_ms DECIMAL(10, 2),
+    max_execution_time_ms DECIMAL(10, 2),
+    p95_execution_time_ms DECIMAL(10, 2),
+    total_events_processed INT DEFAULT 0,
+    business_impact_score DECIMAL(5, 2),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_rule_type (rule_type),
+    INDEX idx_rule_created (created_at DESC)
+);
+
+-- Rule interactions (redundancy detection)
+CREATE TABLE rule_interactions (
+    interaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id_1 UUID NOT NULL,
+    rule_id_2 UUID NOT NULL,
+    overlapping_triggers INT DEFAULT 0,
+    conflicting_outcomes INT DEFAULT 0,
+    similarity_score DECIMAL(5, 4),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_rule_interaction_1 (rule_id_1),
+    INDEX idx_rule_interaction_2 (rule_id_2)
+);
+
+-- Feedback effectiveness tracking
+CREATE TABLE feedback_effectiveness_records (
+    feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    feedback_type VARCHAR(100) NOT NULL,
+    entity_id UUID NOT NULL,
+    improvement_score INT,
+    follow_up_count INT DEFAULT 0,
+    led_to_model_update BOOLEAN DEFAULT FALSE,
+    model_accuracy_before DECIMAL(5, 4),
+    model_accuracy_after DECIMAL(5, 4),
+    submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    processed_at TIMESTAMP WITH TIME ZONE,
+    INDEX idx_feedback_type (feedback_type),
+    INDEX idx_feedback_entity (entity_id),
+    INDEX idx_feedback_submitted (submitted_at DESC)
+);
+
+-- Reward events (reinforcement learning)
+CREATE TABLE reward_events (
+    reward_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    decision_id UUID,
+    rule_id UUID,
+    reward_value DECIMAL(10, 4),
+    reward_reason VARCHAR(255),
+    cumulative_reward DECIMAL(15, 4),
+    occurred_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_reward_decision (decision_id),
+    INDEX idx_reward_rule (rule_id),
+    INDEX idx_reward_occurred (occurred_at DESC)
+);
+
+-- Feature importance tracking
+CREATE TABLE feature_importance (
+    feature_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    feature_name VARCHAR(255) NOT NULL UNIQUE,
+    importance_score DECIMAL(5, 4),
+    usage_count INT DEFAULT 0,
+    avg_correlation_with_outcomes DECIMAL(5, 4),
+    correlated_features JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_feature_name (feature_name),
+    INDEX idx_feature_importance (importance_score DESC)
+);
+
+-- Convergence metrics
+CREATE TABLE convergence_metrics (
+    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    loss_value DECIMAL(15, 8),
+    loss_trend DECIMAL(5, 4),
+    iterations_to_convergence INT,
+    accuracy_improvement_rate DECIMAL(5, 4),
+    has_converged BOOLEAN DEFAULT FALSE,
+    calculated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_convergence_calculated (calculated_at DESC)
+);
+
+-- Learning recommendations
+CREATE TABLE learning_recommendations (
+    recommendation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recommendation_type VARCHAR(100) NOT NULL,
+    target_entity VARCHAR(255),
+    priority INT,
+    description TEXT,
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX idx_recommendation_type (recommendation_type),
+    INDEX idx_recommendation_priority (priority DESC)
+);
+
+-- =============================================================================
+-- END PHASE 7A SCHEMA
 -- =============================================================================

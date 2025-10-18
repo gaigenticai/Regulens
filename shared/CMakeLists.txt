@@ -101,6 +101,11 @@ add_library(regulens_shared STATIC
     async_jobs/async_job_manager.cpp
     # Advanced Rule Engine integration with async processing
     rules/async_rule_evaluator.cpp
+    # Decision, Rule, and Learning Analytics Engines - Phase 7A (Advanced insights)
+    analytics/decision_analytics.cpp
+    analytics/rule_performance_analytics.cpp
+    analytics/learning_insights.cpp
+    analytics/analytics_api_handlers.cpp
 )
 
 # Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)
@@ -143,6 +148,7 @@ target_include_directories(regulens_shared
         ${CMAKE_CURRENT_SOURCE_DIR}/security
         ${CMAKE_CURRENT_SOURCE_DIR}/async_jobs
         ${CMAKE_CURRENT_SOURCE_DIR}/rules
+        ${CMAKE_CURRENT_SOURCE_DIR}/analytics
 )
 
 target_link_libraries(regulens_shared

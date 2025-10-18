@@ -329,7 +329,6 @@ CREATE INDEX IF NOT EXISTS idx_regulatory_changes_status ON regulatory_changes(s
 CREATE INDEX IF NOT EXISTS idx_regulatory_changes_effective_date ON regulatory_changes(effective_date);
 CREATE INDEX IF NOT EXISTS idx_regulatory_changes_entities ON regulatory_changes USING GIN(extracted_entities);
 CREATE INDEX IF NOT EXISTS idx_regulatory_changes_impact ON regulatory_changes USING GIN(impact_assessment);
-
 -- Knowledge base indexes
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_key ON knowledge_base USING HASH(key);
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_tags ON knowledge_base USING GIN(tags);
@@ -667,6 +666,195 @@ CREATE TABLE IF NOT EXISTS audit_anomalies (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+-- =============================================================================
+-- WEEK 1: ASYNC JOBS & CACHING INFRASTRUCTURE
+-- =============================================================================
+
+-- Async job queue for long-running operations
+CREATE TABLE async_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_type VARCHAR(100) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    execution_mode VARCHAR(50) NOT NULL, -- SYNCHRONOUS, ASYNCHRONOUS, BATCH, STREAMING
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING', -- PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
+    priority INT DEFAULT 0, -- 0=low, 1=medium, 2=high, 3=critical
+    request_payload JSONB NOT NULL,
+    result_payload JSONB,
+    error_message TEXT,
+    progress_percentage INT DEFAULT 0,
+    estimated_completion_time INT, -- seconds
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    cancelled_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metadata JSONB
+);
+
+CREATE INDEX idx_async_jobs_user_id ON async_jobs(user_id);
+CREATE INDEX idx_async_jobs_status ON async_jobs(status);
+CREATE INDEX idx_async_jobs_job_type ON async_jobs(job_type);
+CREATE INDEX idx_async_jobs_priority ON async_jobs(priority DESC);
+CREATE INDEX idx_async_jobs_created_at ON async_jobs(created_at DESC);
+CREATE INDEX idx_async_jobs_execution_mode ON async_jobs(execution_mode);
+
+-- Job batch execution tracking
+CREATE TABLE batch_executions (
+    batch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_job_id UUID REFERENCES async_jobs(job_id) ON DELETE CASCADE,
+    batch_number INT NOT NULL,
+    total_items INT NOT NULL,
+    processed_items INT DEFAULT 0,
+    failed_items INT DEFAULT 0,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_batch_executions_parent_job ON batch_executions(parent_job_id);
+CREATE INDEX idx_batch_executions_status ON batch_executions(status);
+
+-- Job results and history
+CREATE TABLE job_results (
+    result_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id UUID REFERENCES async_jobs(job_id) ON DELETE CASCADE,
+    batch_id UUID REFERENCES batch_executions(batch_id) ON DELETE SET NULL,
+    item_index INT,
+    success BOOLEAN NOT NULL,
+    output_data JSONB,
+    error_details JSONB,
+    execution_time_ms INT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_job_results_job_id ON job_results(job_id);
+CREATE INDEX idx_job_results_batch_id ON job_results(batch_id);
+CREATE INDEX idx_job_results_success ON job_results(success);
+
+-- Cache statistics and monitoring
+CREATE TABLE cache_statistics (
+    cache_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cache_key VARCHAR(500) NOT NULL UNIQUE,
+    value_type VARCHAR(100),
+    size_bytes INT,
+    ttl_seconds INT,
+    hit_count INT DEFAULT 0,
+    miss_count INT DEFAULT 0,
+    last_hit_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_cache_statistics_key ON cache_statistics(cache_key);
+CREATE INDEX idx_cache_statistics_expires ON cache_statistics(expires_at);
+
+-- Cache invalidation rules
+CREATE TABLE cache_invalidation_rules (
+    rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cache_key_pattern VARCHAR(500) NOT NULL,
+    trigger_event VARCHAR(100) NOT NULL, -- UPDATE, DELETE, INSERT, EXTERNAL
+    trigger_table VARCHAR(100),
+    trigger_column VARCHAR(100),
+    ttl_seconds INT DEFAULT 1800,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_by VARCHAR(255)
+);
+
+CREATE INDEX idx_cache_invalidation_pattern ON cache_invalidation_rules(cache_key_pattern);
+CREATE INDEX idx_cache_invalidation_active ON cache_invalidation_rules(is_active);
+
+-- WebSocket subscriptions tracking (for Week 3)
+CREATE TABLE ws_subscriptions (
+    subscription_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(255) NOT NULL,
+    session_id VARCHAR(255) NOT NULL,
+    subscription_type VARCHAR(100) NOT NULL,
+    resource_id VARCHAR(255),
+    subscribed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT true,
+    metadata JSONB
+);
+
+CREATE INDEX idx_ws_subscriptions_user ON ws_subscriptions(user_id);
+CREATE INDEX idx_ws_subscriptions_session ON ws_subscriptions(session_id);
+CREATE INDEX idx_ws_subscriptions_type ON ws_subscriptions(subscription_type);
+CREATE INDEX idx_ws_subscriptions_active ON ws_subscriptions(is_active);
+
+-- Message log for real-time communication
+CREATE TABLE message_log (
+    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL,
+    sender_id VARCHAR(255) NOT NULL,
+    message_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    delivery_status VARCHAR(50) DEFAULT 'SENT', -- SENT, DELIVERED, READ, FAILED
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    delivered_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_message_log_session ON message_log(session_id);
+CREATE INDEX idx_message_log_sender ON message_log(sender_id);
+CREATE INDEX idx_message_log_created ON message_log(created_at DESC);
+
+-- Circuit breaker state tracking (for Week 1 integration)
+CREATE TABLE circuit_breaker_state (
+    service_name VARCHAR(255) PRIMARY KEY,
+    state VARCHAR(20) NOT NULL, -- CLOSED, OPEN, HALF_OPEN
+    failure_count INT DEFAULT 0,
+    last_failure_time TIMESTAMP WITH TIME ZONE,
+    last_state_change TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    success_threshold INT DEFAULT 5,
+    failure_threshold INT DEFAULT 5
+);
+
+CREATE INDEX idx_circuit_breaker_state ON circuit_breaker_state(state);
+
+-- =============================================================================
+-- ANALYTICS & OBSERVABILITY (for Week 4)
+-- =============================================================================
+
+-- Metric events for monitoring
+CREATE TABLE metric_events (
+    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    metric_name VARCHAR(255) NOT NULL,
+    metric_type VARCHAR(50), -- COUNTER, GAUGE, HISTOGRAM, TIMER
+    value DECIMAL(20, 6),
+    unit VARCHAR(50),
+    tags JSONB,
+    service_name VARCHAR(255),
+    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_metric_events_name ON metric_events(metric_name);
+CREATE INDEX idx_metric_events_service ON metric_events(service_name);
+CREATE INDEX idx_metric_events_recorded ON metric_events(recorded_at DESC);
+
+-- Distributed trace spans
+CREATE TABLE trace_spans (
+    span_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id UUID NOT NULL,
+    parent_span_id UUID,
+    operation_name VARCHAR(255) NOT NULL,
+    service_name VARCHAR(255) NOT NULL,
+    status VARCHAR(50), -- SUCCESS, ERROR, TIMEOUT
+    start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    end_time TIMESTAMP WITH TIME ZONE,
+    duration_ms INT,
+    tags JSONB,
+    logs JSONB
+);
+
+CREATE INDEX idx_trace_spans_trace_id ON trace_spans(trace_id);
+CREATE INDEX idx_trace_spans_operation ON trace_spans(operation_name);
+CREATE INDEX idx_trace_spans_service ON trace_spans(service_name);
+
+-- =============================================================================
+-- END OF WEEK 1 SCHEMA ADDITIONS
+-- =============================================================================
 -- Agent learning data and feedback
 CREATE TABLE IF NOT EXISTS agent_learning_data (
     learning_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1007,7 +1195,6 @@ CREATE TABLE IF NOT EXISTS tool_operation_logs (
     started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP WITH TIME ZONE
 );
-
 -- Tool templates and configurations
 CREATE TABLE IF NOT EXISTS tool_templates (
     template_id VARCHAR(255) PRIMARY KEY,
@@ -1336,7 +1523,6 @@ CREATE INDEX IF NOT EXISTS idx_function_call_audit_function ON function_call_aud
 CREATE INDEX IF NOT EXISTS idx_function_call_audit_success ON function_call_audit(success);
 CREATE INDEX IF NOT EXISTS idx_function_call_audit_timestamp ON function_call_audit(request_timestamp);
 CREATE INDEX IF NOT EXISTS idx_function_call_audit_completion ON function_call_audit(completion_timestamp);
-
 -- Function call metrics indexes
 CREATE INDEX IF NOT EXISTS idx_function_call_metrics_function ON function_call_metrics(function_name);
 CREATE INDEX IF NOT EXISTS idx_function_call_metrics_calls ON function_call_metrics(total_calls);
@@ -1991,7 +2177,6 @@ CREATE TABLE IF NOT EXISTS performance_baselines (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE(metric_name, entity_id, entity_type, baseline_start_date)
 );
-
 -- Activity feed persistence
 CREATE TABLE IF NOT EXISTS activity_feed_persistence (
     activity_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2319,7 +2504,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     is_active BOOLEAN DEFAULT true
 );
-
 -- Create indexes for fast session lookups
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token) WHERE is_active = true;
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id) WHERE is_active = true;
@@ -2665,7 +2849,6 @@ CREATE TABLE IF NOT EXISTS collaboration_sessions (
     INDEX idx_collaboration_sessions_created_by (created_by),
     INDEX idx_collaboration_sessions_created_at (created_at DESC)
 );
-
 -- Real-time reasoning stream for agent decision-making visualization
 CREATE TABLE IF NOT EXISTS collaboration_reasoning_stream (
     stream_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -3010,7 +3193,6 @@ CREATE TABLE IF NOT EXISTS export_statistics (
     INDEX idx_export_stats_date (date DESC),
     INDEX idx_export_stats_type (export_type, date DESC)
 );
-
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_export_requests_expires ON export_requests(expires_at) WHERE expires_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_export_requests_recent ON export_requests(created_at DESC) WHERE created_at > NOW() - INTERVAL '30 days';
@@ -3353,7 +3535,6 @@ CREATE TABLE IF NOT EXISTS bi_dashboards (
     INDEX idx_dashboards_type (dashboard_type),
     INDEX idx_dashboards_public (is_public) WHERE is_public = true
 );
-
 -- Analytics metrics and KPIs
 CREATE TABLE IF NOT EXISTS analytics_metrics (
     metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -3703,7 +3884,6 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_entry_a ON knowledge_entry_re
 CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_entry_b ON knowledge_entry_relationships(entry_b_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_type ON knowledge_entry_relationships(relationship_type);
 CREATE INDEX IF NOT EXISTS idx_knowledge_entry_rel_similarity ON knowledge_entry_relationships(similarity_score DESC);
-
 CREATE INDEX IF NOT EXISTS idx_knowledge_qa_created ON knowledge_qa_sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_qa_user ON knowledge_qa_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_qa_confidence ON knowledge_qa_sessions(confidence DESC);
@@ -4045,7 +4225,6 @@ CREATE TABLE IF NOT EXISTS training_quiz_results (
     passed BOOLEAN,
     completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS training_leaderboard (
     entry_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id VARCHAR(255) NOT NULL,
@@ -4386,7 +4565,6 @@ CREATE TABLE IF NOT EXISTS data_quality_checks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     metadata JSONB
 );
-
 -- Data quality dimensions summary
 CREATE TABLE IF NOT EXISTS data_quality_summary (
     summary_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -4735,11 +4913,6 @@ CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_pattern ON transaction_patter
 CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_transaction ON transaction_pattern_occurrences(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_customer ON transaction_pattern_occurrences(customer_id, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pattern_occurrences_detected ON transaction_pattern_occurrences(detected_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_anomalies_transaction ON transaction_anomalies(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_anomalies_severity ON transaction_anomalies(severity, detected_at DESC);
-CREATE INDEX IF NOT EXISTS idx_anomalies_type ON transaction_anomalies(anomaly_type, severity);
-CREATE INDEX IF NOT EXISTS idx_anomalies_resolved ON transaction_anomalies(resolved, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_anomalies_score ON transaction_anomalies(anomaly_score DESC);
 
 CREATE INDEX IF NOT EXISTS idx_metrics_snapshot_period ON transaction_metrics_snapshot(time_period, snapshot_timestamp DESC);
@@ -5084,7 +5257,6 @@ CREATE TABLE IF NOT EXISTS message_types (
     is_system_type BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
 -- Insert standard message types
 INSERT INTO message_types (message_type, description, requires_response, default_priority, default_expiry_hours, is_system_type) VALUES
 ('TASK_ASSIGNMENT', 'Assign a task to another agent', true, 2, 168, false),
@@ -5409,7 +5581,6 @@ CREATE TABLE IF NOT EXISTS configuration_access_logs (
     user_agent TEXT,
     accessed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
 -- Indexes for configuration system
 CREATE INDEX IF NOT EXISTS idx_config_values_scope ON configuration_values(scope);
 CREATE INDEX IF NOT EXISTS idx_config_values_module ON configuration_values(module_name);
@@ -5747,7 +5918,6 @@ CREATE TABLE IF NOT EXISTS message_translations (
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
 -- Indexes
 CREATE INDEX idx_message_translations_message ON message_translations(message_id);
 CREATE INDEX idx_message_translations_protocols ON message_translations(source_protocol, target_protocol);
@@ -6091,11 +6261,6 @@ CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_user ON tool_usage_metrics(use
 CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_agent ON tool_usage_metrics(agent_id, executed_at);
 CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_success ON tool_usage_metrics(success, executed_at);
 CREATE INDEX IF NOT EXISTS idx_tool_usage_metrics_operation ON tool_usage_metrics(operation, tool_name);
-
-CREATE INDEX IF NOT EXISTS idx_tool_health_status_tool ON tool_health_status(tool_name, last_check);
-CREATE INDEX IF NOT EXISTS idx_tool_health_status_status ON tool_health_status(status, last_check);
-
-CREATE INDEX IF NOT EXISTS idx_tool_config_templates_category ON tool_config_templates(tool_category, is_active);
 CREATE INDEX IF NOT EXISTS idx_tool_config_templates_type ON tool_config_templates(tool_type, is_active);
 
 -- ============================================================================
@@ -6433,7 +6598,6 @@ CREATE TABLE IF NOT EXISTS consensus_vote_counts (
     PRIMARY KEY (consensus_id, round_number, decision),
     FOREIGN KEY (consensus_id, round_number) REFERENCES consensus_rounds(consensus_id, round_number) ON DELETE CASCADE
 );
-
 -- Create indexes for consensus engine tables
 CREATE INDEX IF NOT EXISTS idx_consensus_agents_active ON consensus_agents(is_active, last_active DESC);
 CREATE INDEX IF NOT EXISTS idx_consensus_sessions_state ON consensus_sessions(state, created_at DESC);
@@ -7088,7 +7252,6 @@ CREATE TABLE IF NOT EXISTS alert_incidents (
     status VARCHAR(50) DEFAULT 'active', -- 'active', 'acknowledged', 'resolved', 'false_positive'
     notification_status JSONB -- Per-channel delivery status
 );
-
 CREATE INDEX idx_alert_incidents_rule ON alert_incidents(rule_id, triggered_at DESC);
 CREATE INDEX idx_alert_incidents_status ON alert_incidents(status, severity);
 CREATE INDEX idx_alert_incidents_time ON alert_incidents(triggered_at DESC);
@@ -7312,9 +7475,9 @@ CREATE TABLE IF NOT EXISTS simulation_scenarios (
     description TEXT,
     scenario_type VARCHAR(50) NOT NULL DEFAULT 'regulatory_change', -- 'regulatory_change', 'market_change', 'operational_change'
     regulatory_changes JSONB NOT NULL, -- Hypothetical regulatory changes to simulate
-    impact_parameters JSONB, -- Parameters for impact calculation (thresholds, weights, etc.)
-    baseline_data JSONB, -- Reference data for comparison
-    test_data JSONB, -- Test data to run simulation against
+    impact_parameters JSONB NOT NULL, -- Parameters for impact calculation (thresholds, weights, etc.)
+    baseline_data JSONB NOT NULL, -- Reference data for comparison
+    test_data JSONB NOT NULL, -- Test data to run simulation against
     created_by VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -7358,13 +7521,13 @@ CREATE TABLE IF NOT EXISTS simulation_results (
     user_id VARCHAR(255) NOT NULL,
     result_type VARCHAR(50) NOT NULL DEFAULT 'impact_analysis', -- 'impact_analysis', 'compliance_check', 'risk_assessment'
     impact_summary JSONB NOT NULL, -- Overall impact metrics
-    detailed_results JSONB, -- Detailed analysis results by category
-    affected_entities JSONB, -- Which entities/policies/rules are affected
-    recommendations JSONB, -- Recommended actions based on results
-    risk_assessment JSONB, -- Risk analysis of the changes
-    cost_impact JSONB, -- Financial impact analysis
-    compliance_impact JSONB, -- Compliance impact details
-    operational_impact JSONB, -- Operational changes required
+    detailed_results JSONB NOT NULL, -- Detailed analysis results by category
+    affected_entities JSONB NOT NULL, -- Which entities/policies/rules are affected
+    recommendations JSONB NOT NULL, -- Recommended actions based on results
+    risk_assessment JSONB NOT NULL, -- Risk analysis of the changes
+    cost_impact JSONB NOT NULL, -- Financial impact analysis
+    compliance_impact JSONB NOT NULL, -- Compliance impact details
+    operational_impact JSONB NOT NULL, -- Operational changes required
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     metadata JSONB
 );
@@ -7425,459 +7588,11 @@ CREATE TABLE IF NOT EXISTS simulation_analytics (
     collected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     metadata JSONB
 );
-
 CREATE INDEX idx_simulation_analytics_scenario ON simulation_analytics(scenario_id, collected_at DESC);
 CREATE INDEX idx_simulation_analytics_execution ON simulation_analytics(execution_id, collected_at DESC);
 CREATE INDEX idx_simulation_analytics_metric ON simulation_analytics(metric_name, collected_at DESC);
-
--- ========================================
--- LLM KEY MANAGEMENT Schema
--- ========================================
-
--- LLM API keys inventory
-CREATE TABLE IF NOT EXISTS llm_api_keys (
-    key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_name VARCHAR(255) NOT NULL,
-    provider VARCHAR(50) NOT NULL CHECK (provider IN ('openai', 'anthropic', 'google', 'azure', 'other')),
-    model VARCHAR(100), -- Specific model this key is for
-    encrypted_key TEXT NOT NULL, -- Encrypted full key
-    key_hash VARCHAR(64), -- SHA-256 hash for verification
-    key_last_four VARCHAR(4), -- Last 4 characters for display
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'expired', 'compromised', 'rotated')),
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    last_used_at TIMESTAMP WITH TIME ZONE,
-    usage_count INTEGER DEFAULT 0,
-    error_count INTEGER DEFAULT 0,
-    rate_limit_remaining INTEGER,
-    rate_limit_reset_at TIMESTAMP WITH TIME ZONE,
-    rotation_schedule VARCHAR(50), -- 'daily', 'weekly', 'monthly', 'quarterly', 'manual'
-    last_rotated_at TIMESTAMP WITH TIME ZONE,
-    rotation_reminder_days INTEGER DEFAULT 30,
-    auto_rotate BOOLEAN DEFAULT false,
-    tags TEXT[], -- User-defined tags
-    metadata JSONB, -- Additional key metadata
-    is_default BOOLEAN DEFAULT false, -- Default key for provider
-    environment VARCHAR(20) DEFAULT 'production' CHECK (environment IN ('development', 'staging', 'production'))
-);
-
-CREATE INDEX idx_llm_api_keys_provider ON llm_api_keys(provider, status);
-CREATE INDEX idx_llm_api_keys_created_by ON llm_api_keys(created_by, created_at DESC);
-CREATE INDEX idx_llm_api_keys_status ON llm_api_keys(status, updated_at DESC);
-CREATE INDEX idx_llm_api_keys_expires ON llm_api_keys(expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX idx_llm_api_keys_default ON llm_api_keys(provider, is_default, environment);
-
--- Key rotation history
-CREATE TABLE IF NOT EXISTS key_rotation_history (
-    rotation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES llm_api_keys(key_id) ON DELETE CASCADE,
-    rotated_by VARCHAR(255) NOT NULL,
-    rotation_reason VARCHAR(255), -- 'scheduled', 'manual', 'compromised', 'expired'
-    rotation_method VARCHAR(50), -- 'automatic', 'manual'
-    old_key_last_four VARCHAR(4),
-    new_key_last_four VARCHAR(4),
-    old_key_hash VARCHAR(64),
-    new_key_hash VARCHAR(64),
-    rotation_success BOOLEAN DEFAULT true,
-    error_message TEXT,
-    rotated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_key_rotation_history_key ON key_rotation_history(key_id, rotated_at DESC);
-CREATE INDEX idx_key_rotation_history_rotated_by ON key_rotation_history(rotated_by, rotated_at DESC);
-CREATE INDEX idx_key_rotation_history_reason ON key_rotation_history(rotation_reason, rotated_at DESC);
-
--- Key usage tracking
-CREATE TABLE IF NOT EXISTS key_usage_stats (
-    usage_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES llm_api_keys(key_id) ON DELETE CASCADE,
-    request_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    provider VARCHAR(50) NOT NULL,
-    model VARCHAR(100),
-    operation_type VARCHAR(50), -- 'chat_completion', 'embeddings', 'moderation', etc.
-    tokens_used INTEGER,
-    cost_usd DECIMAL(10,6),
-    response_time_ms INTEGER,
-    success BOOLEAN DEFAULT true,
-    error_type VARCHAR(100),
-    error_message TEXT,
-    user_id VARCHAR(255), -- Who made the request
-    session_id VARCHAR(255), -- Session context
-    metadata JSONB -- Additional usage metadata
-);
-
-CREATE INDEX idx_key_usage_stats_key ON key_usage_stats(key_id, request_timestamp DESC);
-CREATE INDEX idx_key_usage_stats_provider ON key_usage_stats(provider, request_timestamp DESC);
-CREATE INDEX idx_key_usage_stats_user ON key_usage_stats(user_id, request_timestamp DESC);
-CREATE INDEX idx_key_usage_stats_timestamp ON key_usage_stats(request_timestamp DESC);
-
--- Daily usage aggregations for analytics
-CREATE TABLE IF NOT EXISTS key_usage_daily (
-    daily_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES llm_api_keys(key_id) ON DELETE CASCADE,
-    date DATE NOT NULL,
-    provider VARCHAR(50) NOT NULL,
-    total_requests INTEGER DEFAULT 0,
-    total_tokens INTEGER DEFAULT 0,
-    total_cost_usd DECIMAL(10,2) DEFAULT 0.0,
-    avg_response_time_ms INTEGER,
-    success_rate DECIMAL(5,2),
-    error_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(key_id, date)
-);
-
-CREATE INDEX idx_key_usage_daily_key_date ON key_usage_daily(key_id, date DESC);
-CREATE INDEX idx_key_usage_daily_date ON key_usage_daily(date DESC);
-
--- Key health monitoring
-CREATE TABLE IF NOT EXISTS key_health_checks (
-    check_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES llm_api_keys(key_id) ON DELETE CASCADE,
-    check_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    check_type VARCHAR(50) NOT NULL, -- 'liveness', 'rate_limit', 'quota'
-    status VARCHAR(20) NOT NULL, -- 'healthy', 'warning', 'error'
-    response_time_ms INTEGER,
-    rate_limit_remaining INTEGER,
-    quota_remaining DECIMAL(10,2),
-    error_message TEXT,
-    metadata JSONB
-);
-
-CREATE INDEX idx_key_health_checks_key ON key_health_checks(key_id, check_timestamp DESC);
-CREATE INDEX idx_key_health_checks_status ON key_health_checks(status, check_timestamp DESC);
-
--- Key alerts and notifications
-CREATE TABLE IF NOT EXISTS key_alerts (
-    alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID REFERENCES llm_api_keys(key_id) ON DELETE CASCADE,
-    alert_type VARCHAR(50) NOT NULL, -- 'expiration', 'rotation_due', 'rate_limit', 'error_rate', 'cost_limit'
-    severity VARCHAR(20) DEFAULT 'warning' CHECK (severity IN ('info', 'warning', 'error', 'critical')),
-    title VARCHAR(255) NOT NULL,
-    message TEXT NOT NULL,
-    threshold_value DECIMAL(10,2),
-    actual_value DECIMAL(10,2),
-    resolved BOOLEAN DEFAULT false,
-    resolved_at TIMESTAMP WITH TIME ZONE,
-    resolved_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_key_alerts_key ON key_alerts(key_id, created_at DESC);
-CREATE INDEX idx_key_alerts_type ON key_alerts(alert_type, created_at DESC);
-CREATE INDEX idx_key_alerts_severity ON key_alerts(severity, created_at DESC);
-CREATE INDEX idx_key_alerts_resolved ON key_alerts(resolved, created_at DESC);
-
--- Key backup and recovery
-CREATE TABLE IF NOT EXISTS key_backups (
-    backup_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES llm_api_keys(key_id) ON DELETE CASCADE,
-    backup_type VARCHAR(50) NOT NULL, -- 'automatic', 'manual', 'rotation'
-    encrypted_backup TEXT NOT NULL,
-    backup_hash VARCHAR(64),
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE, -- When backup should be deleted
-    restored BOOLEAN DEFAULT false,
-    restored_at TIMESTAMP WITH TIME ZONE,
-    metadata JSONB
-);
-
-CREATE INDEX idx_key_backups_key ON key_backups(key_id, created_at DESC);
-CREATE INDEX idx_key_backups_type ON key_backups(backup_type, created_at DESC);
-
--- ========================================
--- MEMORY MANAGEMENT Schema
--- ========================================
-
--- Extend existing agent_memory table (assuming it exists)
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS memory_type VARCHAR(50) DEFAULT 'episodic';
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS strength DECIMAL(5,2) DEFAULT 0.5;
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMP WITH TIME ZONE DEFAULT NOW();
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS access_count INT DEFAULT 0;
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS decay_factor DECIMAL(5,4) DEFAULT 0.0001;
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS tags TEXT[];
--- ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS metadata JSONB;
-
--- Memory relationships for graph visualization
-CREATE TABLE IF NOT EXISTS memory_relationships (
-    relationship_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_memory_id VARCHAR(255) NOT NULL,
-    target_memory_id VARCHAR(255) NOT NULL,
-    relationship_type VARCHAR(50) NOT NULL CHECK (relationship_type IN ('causes', 'relates_to', 'derived_from', 'contradicts', 'supports', 'temporal_before', 'temporal_after')),
-    strength DECIMAL(5,2) NOT NULL CHECK (strength >= 0 AND strength <= 1),
-    confidence DECIMAL(5,2) DEFAULT 1.0,
-    bidirectional BOOLEAN DEFAULT false,
-    context TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_memory_relationships_source ON memory_relationships(source_memory_id, relationship_type);
-CREATE INDEX idx_memory_relationships_target ON memory_relationships(target_memory_id, relationship_type);
-CREATE INDEX idx_memory_relationships_type ON memory_relationships(relationship_type, strength DESC);
-CREATE INDEX idx_memory_relationships_strength ON memory_relationships(strength DESC);
-
--- Memory search index for full-text search
-CREATE TABLE IF NOT EXISTS memory_search_index (
-    index_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    memory_id VARCHAR(255) NOT NULL,
-    agent_id VARCHAR(255) NOT NULL,
-    content_vector TSVECTOR,
-    title_vector TSVECTOR,
-    tag_vector TSVECTOR,
-    last_indexed TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    search_relevance DECIMAL(5,2) DEFAULT 1.0
-);
-
-CREATE INDEX idx_memory_search_content ON memory_search_index USING GIN(content_vector);
-CREATE INDEX idx_memory_search_title ON memory_search_index USING GIN(title_vector);
-CREATE INDEX idx_memory_search_tags ON memory_search_index USING GIN(tag_vector);
-CREATE INDEX idx_memory_search_agent ON memory_search_index(agent_id, last_indexed DESC);
-
--- Memory consolidation log
-CREATE TABLE IF NOT EXISTS memory_consolidation_log (
-    consolidation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id VARCHAR(255) NOT NULL,
-    consolidation_type VARCHAR(50) NOT NULL CHECK (consolidation_type IN ('decay', 'merge', 'prune', 'strengthen', 'manual')),
-    affected_memories JSONB NOT NULL, -- Array of memory IDs affected
-    consolidation_rules JSONB, -- Rules applied during consolidation
-    before_metrics JSONB, -- Memory stats before consolidation
-    after_metrics JSONB, -- Memory stats after consolidation
-    triggered_by VARCHAR(50) DEFAULT 'automatic', -- 'automatic', 'manual', 'scheduled'
-    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    completed_at TIMESTAMP WITH TIME ZONE,
-    success BOOLEAN DEFAULT true,
-    error_message TEXT,
-    metadata JSONB
-);
-
-CREATE INDEX idx_memory_consolidation_agent ON memory_consolidation_log(agent_id, started_at DESC);
-CREATE INDEX idx_memory_consolidation_type ON memory_consolidation_log(consolidation_type, started_at DESC);
-
--- Memory visualization cache
-CREATE TABLE IF NOT EXISTS memory_visualization_cache (
-    cache_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id VARCHAR(255) NOT NULL,
-    visualization_type VARCHAR(50) NOT NULL CHECK (visualization_type IN ('graph', 'timeline', 'cluster', 'strength_distribution')),
-    cache_data JSONB NOT NULL, -- Cached visualization data
-    parameters JSONB, -- Parameters used to generate cache
-    hit_count INT DEFAULT 0,
-    last_accessed TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_memory_viz_cache_agent ON memory_visualization_cache(agent_id, visualization_type, last_accessed DESC);
-CREATE INDEX idx_memory_viz_cache_expires ON memory_visualization_cache(expires_at) WHERE expires_at IS NOT NULL;
-
--- Memory access patterns for analytics
-CREATE TABLE IF NOT EXISTS memory_access_patterns (
-    pattern_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id VARCHAR(255) NOT NULL,
-    memory_id VARCHAR(255) NOT NULL,
-    access_type VARCHAR(50) NOT NULL CHECK (access_type IN ('read', 'write', 'search', 'consolidate')),
-    access_context VARCHAR(100), -- 'conversation', 'decision_making', 'learning', etc.
-    access_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    response_time_ms INTEGER,
-    success BOOLEAN DEFAULT true,
-    metadata JSONB
-);
-
-CREATE INDEX idx_memory_access_agent ON memory_access_patterns(agent_id, access_timestamp DESC);
-CREATE INDEX idx_memory_access_memory ON memory_access_patterns(memory_id, access_timestamp DESC);
-CREATE INDEX idx_memory_access_type ON memory_access_patterns(access_type, access_timestamp DESC);
-
--- Memory performance metrics
-CREATE TABLE IF NOT EXISTS memory_performance_metrics (
-    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id VARCHAR(255) NOT NULL,
-    metric_type VARCHAR(50) NOT NULL, -- 'search_speed', 'consolidation_time', 'memory_utilization', 'relationship_density'
-    metric_value DECIMAL(10,4),
-    metric_unit VARCHAR(20), -- 'ms', 'percentage', 'count', etc.
-    collection_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    context JSONB -- Additional context for the metric
-);
-
-CREATE INDEX idx_memory_metrics_agent ON memory_performance_metrics(agent_id, metric_type, collection_timestamp DESC);
-CREATE INDEX idx_memory_metrics_type ON memory_performance_metrics(metric_type, collection_timestamp DESC);
-
--- Memory backup and recovery
-CREATE TABLE IF NOT EXISTS memory_backups (
-    backup_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id VARCHAR(255) NOT NULL,
-    backup_type VARCHAR(50) NOT NULL CHECK (backup_type IN ('full', 'incremental', 'selective')),
-    backup_data JSONB NOT NULL, -- Complete or partial memory state
-    memory_count INTEGER NOT NULL,
-    relationship_count INTEGER NOT NULL,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    restored BOOLEAN DEFAULT false,
-    restored_at TIMESTAMP WITH TIME ZONE,
-    metadata JSONB
-);
-
-CREATE INDEX idx_memory_backups_agent ON memory_backups(agent_id, created_at DESC);
-CREATE INDEX idx_memory_backups_type ON memory_backups(backup_type, created_at DESC);
-
--- ========================================
--- EMBEDDINGS EXPLORER Schema
--- ========================================
-
--- Embedding visualization cache
-CREATE TABLE IF NOT EXISTS embedding_visualization_cache (
-    cache_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    visualization_type VARCHAR(50) NOT NULL CHECK (visualization_type IN ('tsne', 'umap', 'pca', 'mds', 'isomap')),
-    embedding_model VARCHAR(100) NOT NULL,
-    embedding_subset JSONB NOT NULL, -- Sample of embeddings for visualization
-    reduced_coordinates JSONB NOT NULL, -- 2D/3D coordinates
-    metadata JSONB, -- Labels, categories, distances, etc.
-    parameters JSONB, -- Algorithm parameters used
-    quality_metrics JSONB, -- KL divergence, reconstruction error, etc.
-    sample_size INTEGER NOT NULL,
-    total_embeddings INTEGER NOT NULL,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '24 hours',
-    access_count INTEGER DEFAULT 0,
-    last_accessed TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_embedding_viz_type ON embedding_visualization_cache(visualization_type, created_at DESC);
-CREATE INDEX idx_embedding_viz_model ON embedding_visualization_cache(embedding_model, created_at DESC);
-CREATE INDEX idx_embedding_viz_expires ON embedding_visualization_cache(expires_at) WHERE expires_at IS NOT NULL;
-
--- Embedding search cache for semantic search
-CREATE TABLE IF NOT EXISTS embedding_search_cache (
-    search_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    query_embedding JSONB NOT NULL,
-    query_text TEXT,
-    search_results JSONB NOT NULL, -- Top N similar embeddings with distances
-    search_parameters JSONB, -- Similarity metric, k, etc.
-    embedding_model VARCHAR(100) NOT NULL,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '1 hour'
-);
-
 CREATE INDEX idx_embedding_search_model ON embedding_search_cache(embedding_model, created_at DESC);
 CREATE INDEX idx_embedding_search_expires ON embedding_search_cache(expires_at) WHERE expires_at IS NOT NULL;
-
--- Embedding clusters and analysis
-CREATE TABLE IF NOT EXISTS embedding_clusters (
-    cluster_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    visualization_id UUID REFERENCES embedding_visualization_cache(cache_id) ON DELETE CASCADE,
-    cluster_algorithm VARCHAR(50) NOT NULL CHECK (cluster_algorithm IN ('kmeans', 'dbscan', 'hdbscan', 'gmm', 'hierarchical')),
-    cluster_labels JSONB NOT NULL, -- Cluster assignments for each point
-    cluster_centers JSONB, -- Cluster centroids (for centroid-based algorithms)
-    cluster_metrics JSONB, -- Silhouette scores, inertia, etc.
-    parameters JSONB, -- Algorithm parameters
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_embedding_clusters_viz ON embedding_clusters(visualization_id, created_at DESC);
-
--- Embedding metadata and statistics
-CREATE TABLE IF NOT EXISTS embedding_metadata (
-    metadata_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    embedding_model VARCHAR(100) NOT NULL,
-    total_embeddings INTEGER NOT NULL,
-    embedding_dimension INTEGER NOT NULL,
-    embedding_stats JSONB, -- Mean, std, min, max per dimension
-    vocabulary_size INTEGER, -- For text embeddings
-    training_data_info JSONB, -- Dataset info, training parameters
-    quality_metrics JSONB, -- Perplexity, coherence, etc.
-    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_embedding_metadata_model ON embedding_metadata(embedding_model, last_updated DESC);
-
--- Embedding comparison results
-CREATE TABLE IF NOT EXISTS embedding_comparisons (
-    comparison_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    model_a VARCHAR(100) NOT NULL,
-    model_b VARCHAR(100) NOT NULL,
-    comparison_type VARCHAR(50) NOT NULL CHECK (comparison_type IN ('cosine_similarity', 'euclidean_distance', 'alignment_score')),
-    comparison_results JSONB NOT NULL, -- Detailed comparison metrics
-    sample_size INTEGER NOT NULL,
-    statistical_significance JSONB, -- p-values, confidence intervals
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '7 days'
-);
-
-CREATE INDEX idx_embedding_comparisons_models ON embedding_comparisons(model_a, model_b, created_at DESC);
-CREATE INDEX idx_embedding_comparisons_type ON embedding_comparisons(comparison_type, created_at DESC);
-
--- Embedding performance metrics
-CREATE TABLE IF NOT EXISTS embedding_performance_metrics (
-    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    operation_type VARCHAR(50) NOT NULL CHECK (operation_type IN ('dimensionality_reduction', 'search', 'clustering', 'comparison')),
-    embedding_model VARCHAR(100),
-    parameters JSONB,
-    execution_time_ms INTEGER NOT NULL,
-    memory_usage_mb DECIMAL(10,2),
-    quality_score DECIMAL(5,4), -- 0-1 quality metric
-    error_details TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_embedding_performance_type ON embedding_performance_metrics(operation_type, created_at DESC);
-CREATE INDEX idx_embedding_performance_model ON embedding_performance_metrics(embedding_model, created_at DESC);
-
--- Embedding space sampling strategies
-CREATE TABLE IF NOT EXISTS embedding_sampling_strategies (
-    strategy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    strategy_name VARCHAR(100) NOT NULL,
-    strategy_type VARCHAR(50) NOT NULL CHECK (strategy_type IN ('random', 'stratified', 'clustered', 'diversity', 'importance')),
-    parameters JSONB NOT NULL,
-    quality_metrics JSONB,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_default BOOLEAN DEFAULT false
-);
-
-CREATE INDEX idx_embedding_sampling_name ON embedding_sampling_strategies(strategy_name);
-CREATE INDEX idx_embedding_sampling_type ON embedding_sampling_strategies(strategy_type);
-
--- Embedding space bookmarks and saved views
-CREATE TABLE IF NOT EXISTS embedding_bookmarks (
-    bookmark_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id VARCHAR(255) NOT NULL,
-    bookmark_name VARCHAR(200) NOT NULL,
-    visualization_type VARCHAR(50) NOT NULL,
-    embedding_model VARCHAR(100) NOT NULL,
-    view_parameters JSONB NOT NULL, -- Camera position, zoom, filters
-    selected_points JSONB, -- Selected embeddings/points
-    annotations JSONB, -- User annotations and notes
-    is_public BOOLEAN DEFAULT false,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_accessed TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_embedding_bookmarks_user ON embedding_bookmarks(user_id, created_at DESC);
-CREATE INDEX idx_embedding_bookmarks_model ON embedding_bookmarks(embedding_model, created_at DESC);
-
--- Embedding space analytics
-CREATE TABLE IF NOT EXISTS embedding_analytics (
-    analytic_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    analytic_type VARCHAR(50) NOT NULL CHECK (analytic_type IN ('usage_stats', 'quality_trends', 'performance_trends')),
-    time_range VARCHAR(20) NOT NULL, -- 'hour', 'day', 'week', 'month'
-    data_points JSONB NOT NULL,
-    embedding_model VARCHAR(100),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '30 days'
-);
-
-CREATE INDEX idx_embedding_analytics_type ON embedding_analytics(analytic_type, time_range, created_at DESC);
 
 -- ========================================
 -- FUNCTION CALLING DEBUGGER Schema
@@ -8112,379 +7827,7 @@ CREATE TABLE IF NOT EXISTS mcda_calculations (
     quality_score DECIMAL(5,4), -- 0-1 quality metric
     metadata JSONB
 );
-
 CREATE INDEX idx_mcda_calculations_model ON mcda_calculations(model_id, calculated_at DESC);
 CREATE INDEX idx_mcda_calculations_algorithm ON mcda_calculations(algorithm_used, calculated_at DESC);
-
--- MCDA sensitivity analysis
-CREATE TABLE IF NOT EXISTS mcda_sensitivity_analysis (
-    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    model_id VARCHAR(255) NOT NULL,
-    parameter_varied VARCHAR(255) NOT NULL,
-    parameter_type VARCHAR(50) NOT NULL CHECK (parameter_type IN ('criterion_weight', 'alternative_score', 'threshold')),
-    variation_range JSONB NOT NULL,
-    baseline_result JSONB NOT NULL,
-    impact_results JSONB NOT NULL,
-    statistical_summary JSONB, -- Mean, std, confidence intervals
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    analysis_time_ms INTEGER,
-    metadata JSONB
-);
-
-CREATE INDEX idx_mcda_sensitivity_model ON mcda_sensitivity_analysis(model_id, created_at DESC);
-CREATE INDEX idx_mcda_sensitivity_parameter ON mcda_sensitivity_analysis(parameter_varied, parameter_type, created_at DESC);
-
--- MCDA visualization cache
-CREATE TABLE IF NOT EXISTS mcda_visualizations (
-    visualization_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    calculation_id UUID REFERENCES mcda_calculations(calculation_id) ON DELETE CASCADE,
-    visualization_type VARCHAR(50) NOT NULL CHECK (visualization_type IN ('radar_chart', 'bar_chart', 'spider_chart', 'sensitivity_plot', 'ranking_table')),
-    visualization_data JSONB NOT NULL,
-    chart_config JSONB, -- Chart.js or D3.js configuration
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '24 hours'
-);
-
-CREATE INDEX idx_mcda_visualizations_calc ON mcda_visualizations(calculation_id, visualization_type);
-CREATE INDEX idx_mcda_visualizations_expires ON mcda_visualizations(expires_at) WHERE expires_at IS NOT NULL;
-
--- MCDA export history
-CREATE TABLE IF NOT EXISTS mcda_exports (
-    export_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    calculation_id UUID REFERENCES mcda_calculations(calculation_id) ON DELETE CASCADE,
-    export_format VARCHAR(20) NOT NULL CHECK (export_format IN ('pdf', 'excel', 'csv', 'json', 'xml')),
-    export_data JSONB NOT NULL, -- Complete export payload
-    file_size_bytes INTEGER,
-    exported_by VARCHAR(255),
-    exported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    download_count INTEGER DEFAULT 0,
-    metadata JSONB
-);
-
-CREATE INDEX idx_mcda_exports_calc ON mcda_exports(calculation_id, exported_at DESC);
-CREATE INDEX idx_mcda_exports_format ON mcda_exports(export_format, exported_at DESC);
-
--- MCDA collaboration and comments
-CREATE TABLE IF NOT EXISTS mcda_comments (
-    comment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    model_id VARCHAR(255),
-    calculation_id UUID REFERENCES mcda_calculations(calculation_id) ON DELETE CASCADE,
-    parent_comment_id UUID REFERENCES mcda_comments(comment_id) ON DELETE CASCADE,
-    author VARCHAR(255) NOT NULL,
-    comment_text TEXT NOT NULL,
-    comment_type VARCHAR(20) DEFAULT 'general' CHECK (comment_type IN ('general', 'question', 'suggestion', 'approval', 'rejection')),
-    attachments JSONB, -- File attachments
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_resolved BOOLEAN DEFAULT false,
-    metadata JSONB
-);
-
-CREATE INDEX idx_mcda_comments_model ON mcda_comments(model_id, created_at DESC);
-CREATE INDEX idx_mcda_comments_calc ON mcda_comments(calculation_id, created_at DESC);
-CREATE INDEX idx_mcda_comments_parent ON mcda_comments(parent_comment_id);
-
--- MCDA algorithm configurations
-CREATE TABLE IF NOT EXISTS mcda_algorithm_configs (
-    config_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    algorithm_name VARCHAR(50) NOT NULL,
-    config_name VARCHAR(100) NOT NULL,
-    config_parameters JSONB NOT NULL,
-    description TEXT,
-    is_default BOOLEAN DEFAULT false,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    usage_count INTEGER DEFAULT 0
-);
-
-CREATE INDEX idx_mcda_configs_algorithm ON mcda_algorithm_configs(algorithm_name, is_default DESC);
-CREATE INDEX idx_mcda_configs_name ON mcda_algorithm_configs(config_name);
-
--- MCDA performance metrics
-CREATE TABLE IF NOT EXISTS mcda_performance_metrics (
-    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    operation_type VARCHAR(50) NOT NULL CHECK (operation_type IN ('calculation', 'sensitivity_analysis', 'visualization', 'export')),
-    algorithm_used VARCHAR(50),
-    alternatives_count INTEGER,
-    criteria_count INTEGER,
-    execution_time_ms INTEGER NOT NULL,
-    memory_usage_bytes INTEGER,
-    success BOOLEAN DEFAULT true,
-    error_message TEXT,
-    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_mcda_performance_type ON mcda_performance_metrics(operation_type, recorded_at DESC);
-CREATE INDEX idx_mcda_performance_algorithm ON mcda_performance_metrics(algorithm_used, recorded_at DESC);
-
--- MCDA model templates
-CREATE TABLE IF NOT EXISTS mcda_model_templates (
-    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    template_name VARCHAR(255) NOT NULL,
-    template_description TEXT,
-    algorithm VARCHAR(50) NOT NULL,
-    sample_criteria JSONB NOT NULL,
-    sample_alternatives JSONB NOT NULL,
-    default_weights JSONB,
-    category VARCHAR(50), -- 'business', 'engineering', 'environmental', 'financial', etc.
-    is_public BOOLEAN DEFAULT true,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    usage_count INTEGER DEFAULT 0,
-    rating DECIMAL(3,2) DEFAULT 0.0,
-    metadata JSONB
-);
-
-CREATE INDEX idx_mcda_templates_category ON mcda_model_templates(category, is_public);
-CREATE INDEX idx_mcda_templates_algorithm ON mcda_model_templates(algorithm, usage_count DESC);
-
--- MCDA user preferences
-CREATE TABLE IF NOT EXISTS mcda_user_preferences (
-    preference_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id VARCHAR(255) NOT NULL,
-    default_algorithm VARCHAR(50) DEFAULT 'ahp',
-    default_normalization VARCHAR(50) DEFAULT 'minmax',
-    default_visualization VARCHAR(50) DEFAULT 'radar_chart',
-    preferred_export_formats TEXT[] DEFAULT ARRAY['pdf', 'excel'],
-    ui_preferences JSONB, -- Theme, layout preferences
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_mcda_preferences_user ON mcda_user_preferences(user_id);
-
--- MCDA analytics and reporting
-CREATE TABLE IF NOT EXISTS mcda_analytics (
-    analytic_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    analytic_type VARCHAR(50) NOT NULL CHECK (analytic_type IN ('usage_stats', 'algorithm_popularity', 'performance_trends', 'user_engagement')),
-    time_range VARCHAR(20) NOT NULL, -- 'hour', 'day', 'week', 'month'
-    data_points JSONB NOT NULL,
-    algorithm_filter VARCHAR(50),
-    user_filter VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '30 days'
-);
-
-CREATE INDEX idx_mcda_analytics_type ON mcda_analytics(analytic_type, time_range, created_at DESC);
-CREATE INDEX idx_mcda_analytics_algorithm ON mcda_analytics(algorithm_filter, created_at DESC);
-
--- ========================================
--- TOOL CATEGORIES TESTING Schema
--- ========================================
-
--- Tool registry (extend existing table)
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'general';
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS subcategory VARCHAR(100);
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS version VARCHAR(50) DEFAULT '1.0.0';
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS configuration_schema JSONB;
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS test_coverage DECIMAL(5,2) DEFAULT 0.0;
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMP WITH TIME ZONE;
--- ALTER TABLE tools ADD COLUMN IF NOT EXISTS health_status VARCHAR(20) DEFAULT 'unknown' CHECK (health_status IN ('healthy', 'degraded', 'unhealthy', 'unknown'));
-
--- Tool test suites
-CREATE TABLE IF NOT EXISTS tool_test_suites (
-    suite_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    suite_name VARCHAR(255) NOT NULL,
-    tool_category VARCHAR(100) NOT NULL,
-    test_configuration JSONB NOT NULL,
-    test_categories TEXT[], -- 'unit', 'integration', 'performance', 'stress', 'security'
-    target_tools TEXT[], -- Specific tools to test, empty means all in category
-    execution_mode VARCHAR(20) DEFAULT 'sequential' CHECK (execution_mode IN ('sequential', 'parallel', 'batch')),
-    timeout_seconds INTEGER DEFAULT 300,
-    max_parallel_tests INTEGER DEFAULT 5,
-    created_by VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
-    tags TEXT[],
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_test_suites_category ON tool_test_suites(tool_category, is_active);
-CREATE INDEX idx_tool_test_suites_created_by ON tool_test_suites(created_by, created_at DESC);
-
--- Tool test executions
-CREATE TABLE IF NOT EXISTS tool_test_executions (
-    execution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    suite_id UUID NOT NULL REFERENCES tool_test_suites(suite_id) ON DELETE CASCADE,
-    tool_name VARCHAR(255) NOT NULL,
-    tool_version VARCHAR(50),
-    tool_category VARCHAR(100) NOT NULL,
-    test_data JSONB NOT NULL,
-    execution_result JSONB NOT NULL,
-    performance_metrics JSONB, -- CPU, memory, network usage
-    success BOOLEAN NOT NULL,
-    execution_time_ms INTEGER,
-    error_message TEXT,
-    error_category VARCHAR(50), -- 'timeout', 'exception', 'validation', 'configuration'
-    stack_trace TEXT,
-    executed_by VARCHAR(255),
-    executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    environment_info JSONB, -- System info, dependencies versions
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_test_executions_suite ON tool_test_executions(suite_id, executed_at DESC);
-CREATE INDEX idx_tool_test_executions_tool ON tool_test_executions(tool_name, executed_at DESC);
-CREATE INDEX idx_tool_test_executions_category ON tool_test_executions(tool_category, executed_at DESC);
-CREATE INDEX idx_tool_test_executions_success ON tool_test_executions(success, executed_at DESC);
-
--- Test data templates
-CREATE TABLE IF NOT EXISTS tool_test_data_templates (
-    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    template_name VARCHAR(255) NOT NULL,
-    tool_category VARCHAR(100) NOT NULL,
-    data_template JSONB NOT NULL,
-    validation_schema JSONB,
-    sample_data JSONB,
-    description TEXT,
-    usage_count INTEGER DEFAULT 0,
-    is_public BOOLEAN DEFAULT true,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_test_data_templates_category ON tool_test_data_templates(tool_category, is_public);
-CREATE INDEX idx_tool_test_data_templates_name ON tool_test_data_templates(template_name);
-
--- Tool test reports
-CREATE TABLE IF NOT EXISTS tool_test_reports (
-    report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    suite_id UUID REFERENCES tool_test_suites(suite_id),
-    report_type VARCHAR(50) NOT NULL CHECK (report_type IN ('execution_summary', 'performance_analysis', 'error_analysis', 'coverage_report')),
-    report_data JSONB NOT NULL,
-    summary_stats JSONB,
-    generated_by VARCHAR(255),
-    generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '30 days',
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_test_reports_suite ON tool_test_reports(suite_id, generated_at DESC);
-CREATE INDEX idx_tool_test_reports_type ON tool_test_reports(report_type, generated_at DESC);
-
--- Tool performance benchmarks
-CREATE TABLE IF NOT EXISTS tool_performance_benchmarks (
-    benchmark_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tool_name VARCHAR(255) NOT NULL,
-    tool_category VARCHAR(100) NOT NULL,
-    benchmark_type VARCHAR(50) NOT NULL CHECK (benchmark_type IN ('latency', 'throughput', 'resource_usage', 'scalability')),
-    test_scenario VARCHAR(100) NOT NULL,
-    benchmark_result JSONB NOT NULL,
-    baseline_comparison JSONB,
-    environment_details JSONB,
-    measured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_performance_tool ON tool_performance_benchmarks(tool_name, measured_at DESC);
-CREATE INDEX idx_tool_performance_category ON tool_performance_benchmarks(tool_category, benchmark_type, measured_at DESC);
-
--- Tool test schedules
-CREATE TABLE IF NOT EXISTS tool_test_schedules (
-    schedule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    suite_id UUID NOT NULL REFERENCES tool_test_suites(suite_id) ON DELETE CASCADE,
-    schedule_name VARCHAR(255) NOT NULL,
-    cron_expression VARCHAR(100) NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    last_run_at TIMESTAMP WITH TIME ZONE,
-    next_run_at TIMESTAMP WITH TIME ZONE,
-    max_runtime_minutes INTEGER DEFAULT 60,
-    notification_settings JSONB,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_test_schedules_suite ON tool_test_schedules(suite_id, is_active);
-CREATE INDEX idx_tool_test_schedules_next_run ON tool_test_schedules(next_run_at) WHERE is_active = true;
-
--- Tool test analytics
-CREATE TABLE IF NOT EXISTS tool_test_analytics (
-    analytic_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    analytic_type VARCHAR(50) NOT NULL CHECK (analytic_type IN ('success_rates', 'performance_trends', 'error_patterns', 'usage_stats')),
-    time_range VARCHAR(20) NOT NULL, -- 'hour', 'day', 'week', 'month'
-    tool_category VARCHAR(100),
-    tool_name VARCHAR(255),
-    data_points JSONB NOT NULL,
-    statistical_summary JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '30 days'
-);
-
-CREATE INDEX idx_tool_test_analytics_type ON tool_test_analytics(analytic_type, time_range, created_at DESC);
-CREATE INDEX idx_tool_test_analytics_category ON tool_test_analytics(tool_category, created_at DESC);
-
--- Tool test notifications
-CREATE TABLE IF NOT EXISTS tool_test_notifications (
-    notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    execution_id UUID REFERENCES tool_test_executions(execution_id) ON DELETE CASCADE,
-    notification_type VARCHAR(50) NOT NULL CHECK (notification_type IN ('test_failed', 'test_succeeded', 'performance_degraded', 'new_error_pattern')),
-    severity VARCHAR(20) DEFAULT 'info' CHECK (severity IN ('info', 'warning', 'error', 'critical')),
-    message TEXT NOT NULL,
-    recipients JSONB,
-    sent_at TIMESTAMP WITH TIME ZONE,
-    delivery_status VARCHAR(20) DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'sent', 'failed', 'delivered')),
-    retry_count INTEGER DEFAULT 0,
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_test_notifications_execution ON tool_test_notifications(execution_id, sent_at DESC);
-CREATE INDEX idx_tool_test_notifications_type ON tool_test_notifications(notification_type, severity);
-
--- Tool health monitoring
-CREATE TABLE IF NOT EXISTS tool_health_monitoring (
-    health_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tool_name VARCHAR(255) NOT NULL,
-    tool_category VARCHAR(100) NOT NULL,
-    health_status VARCHAR(20) NOT NULL CHECK (health_status IN ('healthy', 'warning', 'critical', 'offline')),
-    health_score DECIMAL(5,2), -- 0-100 health score
-    response_time_ms INTEGER,
-    error_rate DECIMAL(5,2),
-    last_check_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    consecutive_failures INTEGER DEFAULT 0,
-    details JSONB,
-    metadata JSONB
-);
-
 CREATE INDEX idx_tool_health_tool ON tool_health_monitoring(tool_name, last_check_at DESC);
 CREATE INDEX idx_tool_health_status ON tool_health_monitoring(health_status, last_check_at DESC);
-
--- Tool version compatibility
-CREATE TABLE IF NOT EXISTS tool_version_compatibility (
-    compatibility_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tool_name VARCHAR(255) NOT NULL,
-    tool_version VARCHAR(50) NOT NULL,
-    compatible_with JSONB, -- Compatible system versions, dependencies
-    known_issues JSONB,
-    test_coverage DECIMAL(5,2) DEFAULT 0.0,
-    deprecated BOOLEAN DEFAULT false,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    metadata JSONB
-);
-
-CREATE INDEX idx_tool_compatibility_tool ON tool_version_compatibility(tool_name, tool_version);
-CREATE INDEX idx_tool_compatibility_deprecated ON tool_version_compatibility(deprecated, created_at DESC);
-
--- =============================================================================
--- AGENT COMMUNICATION REGISTRY
--- =============================================================================
-
--- Registry for managing agent communication components and their registrations
-CREATE TABLE agent_comm_registry (
-    agent_id VARCHAR(255) PRIMARY KEY,
-    agent_type VARCHAR(100) NOT NULL,
-    capabilities TEXT,
-    is_active BOOLEAN DEFAULT true,
-    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_agent_comm_registry_type ON agent_comm_registry(agent_type);
-CREATE INDEX idx_agent_comm_registry_active ON agent_comm_registry(is_active);
-CREATE INDEX idx_agent_comm_registry_last_active ON agent_comm_registry(last_active);

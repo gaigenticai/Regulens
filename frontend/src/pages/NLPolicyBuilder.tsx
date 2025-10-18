@@ -81,7 +81,6 @@ const NLPolicyBuilder: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Describe the policy in natural language *</label>
-                <textarea name="natural_language_input" required rows={4} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g., All transactions over $10,000 must be flagged for review within 24 hours..." />
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowCreate(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">

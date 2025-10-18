@@ -237,38 +237,15 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({
   // Mock analysis data (replace with real API calls)
   useEffect(() => {
     if (scenarioId) {
-      const mockAnalysis: ImpactAnalysisData = {
-        analysis_id: `analysis-${Date.now()}`,
-        scenario_id: scenarioId,
-        analysis_type: selectedAnalysisType,
-        baseline_scenario: 'scenario-baseline',
-        comparison_scenarios: comparisonScenarios,
-        time_horizon_months: timeHorizon,
-        analysis_parameters: analysisParameters,
-        results: {
-          summary_metrics: {
-            total_impact_score: 7.8,
-            confidence_level: 89.5,
-            risk_adjusted_impact: 6.9,
-            time_to_full_impact: 8.5
-          },
-          temporal_projection: {
-            monthly_impact: Array.from({ length: timeHorizon }, (_, i) => ({
-              month: addMonths(new Date(), i).toISOString(),
-              compliance_impact: Math.random() * 2 - 1,
-              operational_impact: Math.random() * 3 - 1.5,
-              financial_impact: Math.random() * 50000 - 25000,
-              risk_impact: Math.random() * 1.5 - 0.5
-            })),
-            cumulative_impact: Array.from({ length: timeHorizon }, (_, i) => {
-              const months = i + 1;
-              return {
-                month: addMonths(new Date(), i).toISOString(),
-                total_compliance_change: (Math.random() - 0.5) * months * 0.5,
-                total_operational_change: (Math.random() - 0.3) * months,
-                total_financial_change: (Math.random() - 0.5) * months * 10000,
-                total_risk_change: (Math.random() - 0.4) * months * 0.3
-              };
+      // Fetch real analysis data from API instead of hardcoding mock
+        const authToken = localStorage.getItem('authToken');
+        const apiResponse = await fetch(`/api/simulator/impact-analysis?executionId=${executionId}`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        const mockAnalysis = apiResponse.ok 
+          ? await apiResponse.json()
+          : { /* fallback empty analysis */ entities_affected: 0, regulatory_impact: '', operational_impact: '', financial_impact: '' };
             })
           },
           dimensional_breakdown: {
@@ -558,7 +535,6 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Add scenario ID..."
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   onKeyPress={(e) => {
                     if (e.key === 'Enter') {

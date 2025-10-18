@@ -209,7 +209,6 @@ const DecisionEngine: React.FC = () => {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., Vendor Selection for Project X"
                 />
               </div>
 
@@ -222,7 +221,6 @@ const DecisionEngine: React.FC = () => {
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Describe the decision context and objectives..."
                 />
               </div>
             </div>

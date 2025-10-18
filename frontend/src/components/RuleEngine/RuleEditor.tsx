@@ -313,7 +313,6 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                       'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                       validationErrors.name ? 'border-red-300' : 'border-gray-300'
                     )}
-                    placeholder="Enter rule name"
                   />
                   {validationErrors.name && (
                     <p className="mt-1 text-sm text-red-600">{validationErrors.name}</p>
@@ -349,7 +348,6 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                     'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                     validationErrors.description ? 'border-red-300' : 'border-gray-300'
                   )}
-                  placeholder="Describe what this rule does and when it should trigger"
                 />
                 {validationErrors.description && (
                   <p className="mt-1 text-sm text-red-600">{validationErrors.description}</p>
@@ -467,7 +465,6 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                             updateCondition(index, { value });
                           }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Enter value"
                         />
                       </div>
 
@@ -567,7 +564,6 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                         tags: e.target.value.split(',').map(tag => tag.trim()).filter(tag => tag)
                       }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="fraud, high-risk, transaction"
                     />
                   </div>
 

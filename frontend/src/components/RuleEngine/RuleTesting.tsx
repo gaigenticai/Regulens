@@ -266,7 +266,6 @@ const RuleTesting: React.FC = () => {
               <Label htmlFor="rule-select">Select Rule *</Label>
               <Select value={selectedRule} onValueChange={setSelectedRule}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Choose a rule to test" />
                 </SelectTrigger>
                 <SelectContent>
                   {mockRules.map((rule) => (
@@ -338,7 +337,6 @@ const RuleTesting: React.FC = () => {
                       }}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select sample transaction" />
                       </SelectTrigger>
                       <SelectContent>
                         {sampleTransactions.map((txn) => (
@@ -371,7 +369,6 @@ const RuleTesting: React.FC = () => {
 
                   <TabsContent value="custom" className="space-y-4">
                     <Textarea
-                      placeholder="Paste JSON transaction data here..."
                       value={customTransactionData}
                       onChange={(e) => setCustomTransactionData(e.target.value)}
                       rows={10}

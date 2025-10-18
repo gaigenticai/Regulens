@@ -502,7 +502,6 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search templates..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -813,7 +812,6 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
                           [variable.name]: e.target.value
                         }))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder={variable.defaultValue || ''}
                       />
                     )}
 
@@ -826,7 +824,6 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
                           [variable.name]: Number(e.target.value) || 0
                         }))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder={variable.defaultValue?.toString() || ''}
                       />
                     )}
 
@@ -865,7 +862,6 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
                         }}
                         rows={3}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-                        placeholder="JSON array"
                       />
                     )}
 
@@ -890,7 +886,6 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
                         }}
                         rows={4}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-                        placeholder="JSON object"
                       />
                     )}
                   </div>
@@ -916,7 +911,6 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
         </div>
       )}
 
-      {/* Create Template Modal - Placeholder for now */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">

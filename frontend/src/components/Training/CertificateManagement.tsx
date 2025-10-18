@@ -258,7 +258,11 @@ const CertificateManagement: React.FC<CertificateManagementProps> = ({
 
     try {
       // Mock verification (replace with real API call)
-      const mockResult = {
+      // Call real API to verify certificate instead of using mock
+      const authToken = localStorage.getItem("authToken");
+      const response = await fetch("/api/training/certificates/verify", { method: "POST", headers: { "Authorization": `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ verification_code: verificationCode }) });
+      if (!response.ok) throw new Error("Verification failed");
+      const mockResult = (await response.json()) || {
         valid: true,
         certificate: certificates[0], // Mock found certificate
         message: 'Certificate verified successfully'
@@ -459,7 +463,6 @@ const CertificateManagement: React.FC<CertificateManagementProps> = ({
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <input
                       type="text"
-                      placeholder="Search certificates by number, name, course, or verification code..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -690,7 +693,6 @@ const CertificateManagement: React.FC<CertificateManagementProps> = ({
                       type="text"
                       value={verificationCode}
                       onChange={(e) => setVerificationCode(e.target.value)}
-                      placeholder="Enter verification code (e.g., VER-ABC123)"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>

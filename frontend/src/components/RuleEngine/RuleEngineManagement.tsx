@@ -211,7 +211,6 @@ const RuleEngineManagement: React.FC = () => {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <Input
-                placeholder="Search rules..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -220,7 +219,6 @@ const RuleEngineManagement: React.FC = () => {
 
             <Select value={filterType} onValueChange={setFilterType}>
               <SelectTrigger>
-                <SelectValue placeholder="Rule Type" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
@@ -233,7 +231,6 @@ const RuleEngineManagement: React.FC = () => {
 
             <Select value={filterPriority} onValueChange={setFilterPriority}>
               <SelectTrigger>
-                <SelectValue placeholder="Priority" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Priorities</SelectItem>
@@ -246,7 +243,6 @@ const RuleEngineManagement: React.FC = () => {
 
             <Select value={filterStatus} onValueChange={setFilterStatus}>
               <SelectTrigger>
-                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>

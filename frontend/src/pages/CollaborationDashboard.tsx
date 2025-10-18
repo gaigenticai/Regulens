@@ -249,7 +249,6 @@ const CollaborationDashboard: React.FC = () => {
                   name="title"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g., Risk Assessment Review"
                 />
               </div>
 
@@ -261,7 +260,6 @@ const CollaborationDashboard: React.FC = () => {
                   name="description"
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Describe the purpose of this collaboration session..."
                 />
               </div>
 
@@ -273,7 +271,6 @@ const CollaborationDashboard: React.FC = () => {
                   type="text"
                   name="objective"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g., Evaluate compliance implications"
                 />
               </div>
 

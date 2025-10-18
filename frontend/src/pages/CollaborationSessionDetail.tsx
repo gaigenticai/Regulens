@@ -289,7 +289,6 @@ const CollaborationSessionDetail: React.FC = () => {
                   required
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  placeholder="Enter your override decision..."
                 />
               </div>
 
@@ -302,7 +301,6 @@ const CollaborationSessionDetail: React.FC = () => {
                   name="reason"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  placeholder="e.g., Missing regulatory context"
                 />
               </div>
 
@@ -314,7 +312,6 @@ const CollaborationSessionDetail: React.FC = () => {
                   name="justification"
                   rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  placeholder="Provide additional context or justification..."
                 />
               </div>
 

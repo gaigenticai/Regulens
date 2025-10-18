@@ -275,7 +275,6 @@ const RuleCreationForm: React.FC = () => {
                       id="name"
                       value={formData.name}
                       onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                      placeholder="Enter rule name"
                       required
                     />
                   </div>
@@ -322,7 +321,6 @@ const RuleCreationForm: React.FC = () => {
                     id="description"
                     value={formData.description}
                     onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Describe what this rule does and when it should trigger"
                     rows={3}
                     required
                   />
@@ -393,7 +391,6 @@ const RuleCreationForm: React.FC = () => {
                                 <Input
                                   value={rule.field}
                                   onChange={(e) => updateValidationRule(index, { field: e.target.value })}
-                                  placeholder="e.g., amount"
                                 />
                               </div>
                               <div>
@@ -422,7 +419,6 @@ const RuleCreationForm: React.FC = () => {
                                 <Input
                                   value={rule.value}
                                   onChange={(e) => updateValidationRule(index, { value: e.target.value })}
-                                  placeholder="threshold value"
                                 />
                               </div>
                               <div>

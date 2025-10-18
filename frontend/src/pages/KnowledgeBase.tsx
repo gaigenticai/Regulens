@@ -183,7 +183,6 @@ const KnowledgeBase: React.FC = () => {
                   type="text"
                   value={aiQuestion}
                   onChange={(e) => setAiQuestion(e.target.value)}
-                  placeholder="Ask about compliance, regulations..."
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                   onKeyDown={(e) => e.key === 'Enter' && handleAskAI()}
                 />
@@ -222,7 +221,6 @@ const KnowledgeBase: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Semantic search (min 3 chars)..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -291,14 +289,12 @@ const KnowledgeBase: React.FC = () => {
                 value={newEntry.title}
                 onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg"
-                placeholder="Title..."
               />
               <textarea
                 value={newEntry.content}
                 onChange={(e) => setNewEntry({ ...newEntry, content: e.target.value })}
                 rows={8}
                 className="w-full px-3 py-2 border rounded-lg"
-                placeholder="Content..."
               />
               <select
                 value={newEntry.category}

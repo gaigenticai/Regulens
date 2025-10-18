@@ -431,7 +431,6 @@ export const TestReporting: React.FC<TestReportingProps> = ({
             </div>
           </div>
 
-          {/* Trends Chart Placeholder */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">Execution Trends</h4>
             <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">

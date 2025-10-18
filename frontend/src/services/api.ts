@@ -1,6 +1,5 @@
 /**
  * API Service - Production-grade API client
- * Connects to the temporary API server while C++ backend is being fixed
  */
 
 import axios from 'axios';

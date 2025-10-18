@@ -259,7 +259,6 @@ const LLMIntegration: React.FC = () => {
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Enter your prompt here..."
               className="w-full border rounded-lg px-3 py-2 h-32 resize-none"
             />
           </div>

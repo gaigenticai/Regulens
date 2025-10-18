@@ -119,7 +119,6 @@ export default function EmbeddingsExplorer() {
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Enter text to generate embeddings or search for similar content..."
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             rows={4}
           />

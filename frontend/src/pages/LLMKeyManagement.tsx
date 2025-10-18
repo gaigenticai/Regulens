@@ -213,7 +213,6 @@ const LLMKeyManagement: React.FC = () => {
                   name="key_name"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., Production Key"
                 />
               </div>
 
@@ -224,7 +223,6 @@ const LLMKeyManagement: React.FC = () => {
                   name="api_key"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="sk-..."
                 />
                 <p className="text-xs text-gray-500 mt-1">Key will be encrypted before storage</p>
               </div>

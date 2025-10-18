@@ -114,7 +114,6 @@ export const CriteriaManager: React.FC<CriteriaManagerProps> = ({
                 onChange={(e) => handleUpdateCriterion(index, 'name', e.target.value)}
                 disabled={disabled}
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                placeholder="Name"
               />
 
               <input
@@ -126,7 +125,6 @@ export const CriteriaManager: React.FC<CriteriaManagerProps> = ({
                 min="0"
                 max="1"
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                placeholder="Weight"
               />
 
               <select
@@ -145,7 +143,6 @@ export const CriteriaManager: React.FC<CriteriaManagerProps> = ({
                 onChange={(e) => handleUpdateCriterion(index, 'unit', e.target.value)}
                 disabled={disabled}
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                placeholder="Unit (optional)"
               />
             </div>
 
@@ -182,7 +179,6 @@ export const CriteriaManager: React.FC<CriteriaManagerProps> = ({
                   'w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100',
                   errors.name ? 'border-red-300' : 'border-gray-300'
                 )}
-                placeholder="Criterion name"
               />
               {errors.name && (
                 <p className="text-xs text-red-600 mt-1">{errors.name}</p>
@@ -202,7 +198,6 @@ export const CriteriaManager: React.FC<CriteriaManagerProps> = ({
                   'w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100',
                   errors.weight ? 'border-red-300' : 'border-gray-300'
                 )}
-                placeholder="Weight"
               />
               {errors.weight && (
                 <p className="text-xs text-red-600 mt-1">{errors.weight}</p>
@@ -225,7 +220,6 @@ export const CriteriaManager: React.FC<CriteriaManagerProps> = ({
               onChange={(e) => setNewCriterion({ ...newCriterion, unit: e.target.value })}
               disabled={disabled}
               className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-              placeholder="Unit"
             />
           </div>
 

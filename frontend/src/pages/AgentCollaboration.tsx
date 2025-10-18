@@ -298,7 +298,6 @@ const AgentCollaboration: React.FC = () => {
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Type a message..."
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
@@ -382,13 +381,11 @@ const AgentCollaboration: React.FC = () => {
                 type="text"
                 value={newSession.title}
                 onChange={(e) => setNewSession({ ...newSession, title: e.target.value })}
-                placeholder="Session title..."
                 className="w-full px-3 py-2 border rounded-lg"
               />
               <textarea
                 value={newSession.description}
                 onChange={(e) => setNewSession({ ...newSession, description: e.target.value })}
-                placeholder="Description..."
                 rows={3}
                 className="w-full px-3 py-2 border rounded-lg"
               />
@@ -396,7 +393,6 @@ const AgentCollaboration: React.FC = () => {
                 type="text"
                 value={newSession.objective}
                 onChange={(e) => setNewSession({ ...newSession, objective: e.target.value })}
-                placeholder="Session objective..."
                 className="w-full px-3 py-2 border rounded-lg"
               />
             </div>
@@ -426,13 +422,11 @@ const AgentCollaboration: React.FC = () => {
                 type="text"
                 value={newTask.title}
                 onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                placeholder="Task title..."
                 className="w-full px-3 py-2 border rounded-lg"
               />
               <textarea
                 value={newTask.description}
                 onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                placeholder="Description..."
                 rows={3}
                 className="w-full px-3 py-2 border rounded-lg"
               />

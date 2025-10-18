@@ -145,7 +145,13 @@ export const useTestSuites = (category?: string) => {
     queryKey: ['test-suites', category],
     queryFn: async () => {
       // This would be a real API call in production
-      const mockSuites: TestSuite[] = [
+      // Fetch test suites from backend API
+      const authToken = localStorage.getItem('authToken');
+      const response = await fetch('/api/tool-categories/test-suites', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      
+      const mockSuites: TestSuite[] = response.ok ? (await response.json()) : [
         {
           id: 'suite_1',
           name: 'Analytics Test Suite',

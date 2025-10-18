@@ -383,7 +383,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                     'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                     errors.title ? 'border-red-300' : 'border-gray-300'
                   )}
-                  placeholder="Enter course title"
                 />
                 {errors.title && (
                   <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
@@ -406,7 +405,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                     'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                     errors.description ? 'border-red-300' : 'border-gray-300'
                   )}
-                  placeholder="Describe the course content and learning objectives"
                 />
                 {errors.description && (
                   <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
@@ -522,7 +520,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                     onChange={(e) => setNewTag(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Add a tag"
                   />
                   <button
                     onClick={addTag}
@@ -563,7 +560,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                     onChange={(e) => setNewPrerequisite(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addPrerequisite())}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Add a prerequisite course"
                   />
                   <button
                     onClick={addPrerequisite}
@@ -667,7 +663,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                           'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                           errors[`module_${index}_title`] ? 'border-red-300' : 'border-gray-300'
                         )}
-                        placeholder="Enter module title"
                       />
                       {errors[`module_${index}_title`] && (
                         <p className="mt-1 text-sm text-red-600">{errors[`module_${index}_title`]}</p>
@@ -703,7 +698,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                           'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                           errors[`module_${index}_description`] ? 'border-red-300' : 'border-gray-300'
                         )}
-                        placeholder="Describe the module content and objectives"
                       />
                       {errors[`module_${index}_description`] && (
                         <p className="mt-1 text-sm text-red-600">{errors[`module_${index}_description`]}</p>
@@ -752,7 +746,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                           value={module.content_url || ''}
                           onChange={(e) => updateModule(module.id, { content_url: e.target.value })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="https://example.com/content"
                         />
                       </div>
                     )}
@@ -767,7 +760,6 @@ const CourseCreation: React.FC<CourseCreationProps> = ({
                           onChange={(e) => updateModule(module.id, { content_text: e.target.value })}
                           rows={4}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Enter the text content for this module"
                         />
                       </div>
                     )}

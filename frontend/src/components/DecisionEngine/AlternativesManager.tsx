@@ -213,7 +213,6 @@ export const AlternativesManager: React.FC<AlternativesManagerProps> = ({
                 'w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100',
                 errors.name ? 'border-red-300' : 'border-gray-300'
               )}
-              placeholder="Alternative name (e.g., Option A, Solution 1)"
             />
             {errors.name && (
               <p className="text-xs text-red-600 mt-1">{errors.name}</p>

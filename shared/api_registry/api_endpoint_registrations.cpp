@@ -1482,8 +1482,14 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // Alert endpoint implemented with AlertManagementHandlers::handle_acknowledge_alert
-                               return HTTPResponse(200, "OK", R"({"message": "Alert acknowledgement endpoint not yet fully integrated"})", "application/json");
+                               std::string incident_id = req.params.at("id");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_acknowledge_alert(incident_id, req.body, user_id);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1495,8 +1501,14 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // Alert endpoint implemented with AlertManagementHandlers::handle_resolve_alert
-                               return HTTPResponse(200, "OK", R"({"message": "Alert resolution endpoint not yet fully integrated"})", "application/json");
+                               std::string incident_id = req.params.at("id");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_resolve_alert(incident_id, req.body, user_id);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1508,8 +1520,12 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // Alert endpoint implemented with AlertManagementHandlers::handle_get_notification_channels
-                               return HTTPResponse(200, "OK", R"({"message": "Notification channels endpoint not yet fully integrated"})", "application/json");
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_get_notification_channels(req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1521,8 +1537,13 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // Alert endpoint implemented with AlertManagementHandlers::handle_create_notification_channel
-                               return HTTPResponse(201, "Created", R"({"message": "Notification channel creation not yet fully integrated"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_create_notification_channel(req.body, user_id);
+                               return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1534,8 +1555,13 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // Alert endpoint implemented with AlertManagementHandlers::handle_test_alert_delivery
-                               return HTTPResponse(200, "OK", R"({"message": "Alert testing endpoint not yet fully integrated"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_test_alert_delivery(req.body, user_id);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");

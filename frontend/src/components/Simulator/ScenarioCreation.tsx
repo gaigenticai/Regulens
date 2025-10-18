@@ -349,7 +349,6 @@ const ScenarioCreation: React.FC<ScenarioCreationProps> = ({
                     'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                     validationErrors.scenario_name ? 'border-red-300' : 'border-gray-300'
                   )}
-                  placeholder="Enter scenario name"
                 />
                 {validationErrors.scenario_name && (
                   <p className="mt-1 text-sm text-red-600">{validationErrors.scenario_name}</p>
@@ -368,7 +367,6 @@ const ScenarioCreation: React.FC<ScenarioCreationProps> = ({
                     'w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                     validationErrors.description ? 'border-red-300' : 'border-gray-300'
                   )}
-                  placeholder="Describe the scenario and its objectives"
                 />
                 {validationErrors.description && (
                   <p className="mt-1 text-sm text-red-600">{validationErrors.description}</p>
@@ -417,7 +415,6 @@ const ScenarioCreation: React.FC<ScenarioCreationProps> = ({
                     onChange={(e) => setNewTag(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addTag()}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Add tag"
                   />
                   <button
                     onClick={addTag}
@@ -562,7 +559,6 @@ const ScenarioCreation: React.FC<ScenarioCreationProps> = ({
                     onChange={(e) => updateRegulatoryChange('summary', e.target.value)}
                     rows={3}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Brief summary of the regulatory changes"
                   />
                 </div>
               </div>
@@ -583,7 +579,6 @@ const ScenarioCreation: React.FC<ScenarioCreationProps> = ({
                   }}
                   rows={20}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter regulatory changes as JSON"
                 />
               </div>
             )}
@@ -732,7 +727,6 @@ const ScenarioCreation: React.FC<ScenarioCreationProps> = ({
                       value={scenario.version}
                       onChange={(e) => setScenario(prev => ({ ...prev, version: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="1.0"
                     />
                   </div>
                 </div>

@@ -1,6 +1,5 @@
 /**
  * Simple Dashboard - Working production dashboard
- * Uses real API calls to the temporary backend server
  */
 
 import React, { useState, useEffect } from 'react';

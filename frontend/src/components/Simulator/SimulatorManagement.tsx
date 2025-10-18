@@ -166,151 +166,37 @@ const SimulatorManagement: React.FC<SimulatorManagementProps> = ({
     const loadManagementData = async () => {
       setIsLoading(true);
       try {
-        // Simulate API calls
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Mock scenarios data with enhanced management fields
-        const mockScenarios: SimulationScenario[] = [
-          {
-            scenario_id: 'scenario-001',
-            scenario_name: 'Enhanced KYC Requirements v2.1',
-            description: 'Updated simulation of enhanced KYC verification requirements for high-risk customers with new regulatory changes',
-            scenario_type: 'regulatory_change',
-            regulatory_changes: {},
-            impact_parameters: {},
-            baseline_data: {},
-            test_data: {},
-            created_by: 'user-001',
-            created_at: '2024-01-15T10:00:00Z',
-            updated_at: '2024-01-22T14:30:00Z',
-            is_template: false,
-            is_active: true,
-            tags: ['KYC', 'Regulatory', 'Compliance', 'v2.1'],
-            metadata: { version_notes: 'Updated with new EU regulations' },
-            estimated_runtime_seconds: 300,
-            max_concurrent_simulations: 5,
-            version: '2.1',
-            parent_scenario_id: 'scenario-001-v1',
-            approval_status: 'approved',
-            approved_by: 'admin',
-            approved_at: '2024-01-20T09:15:00Z',
-            execution_count: 15,
-            last_execution_at: '2024-01-25T16:45:00Z',
-            success_rate: 93.3
-          },
-          {
-            scenario_id: 'scenario-002',
-            scenario_name: 'Cryptocurrency Regulation Impact',
-            description: 'Analysis of potential cryptocurrency regulation changes on transaction processing',
-            scenario_type: 'market_change',
-            regulatory_changes: {},
-            impact_parameters: {},
-            baseline_data: {},
-            test_data: {},
-            created_by: 'user-002',
-            created_at: '2024-01-20T14:30:00Z',
-            updated_at: '2024-01-20T14:30:00Z',
-            is_template: false,
-            is_active: true,
-            tags: ['Crypto', 'Market', 'Transactions'],
-            metadata: {},
-            estimated_runtime_seconds: 450,
-            max_concurrent_simulations: 3,
-            version: '1.0',
-            approval_status: 'pending_review',
-            execution_count: 3,
-            last_execution_at: '2024-01-22T09:00:00Z',
-            success_rate: 100.0
-          },
-          {
-            scenario_id: 'scenario-003',
-            scenario_name: 'Operational Efficiency Optimization',
-            description: 'Simulation of operational process optimizations and their impact on compliance workflows',
-            scenario_type: 'operational_change',
-            regulatory_changes: {},
-            impact_parameters: {},
-            baseline_data: {},
-            test_data: {},
-            created_by: 'user-003',
-            created_at: '2024-01-18T11:20:00Z',
-            updated_at: '2024-01-18T11:20:00Z',
-            is_template: false,
-            is_active: false,
-            tags: ['Operations', 'Efficiency', 'Workflow'],
-            metadata: {},
-            estimated_runtime_seconds: 180,
-            max_concurrent_simulations: 10,
-            version: '1.0',
-            approval_status: 'draft',
-            execution_count: 0,
-            success_rate: 0.0
+        // Fetch real simulation data from backend API
+        const authToken = localStorage.getItem('authToken');
+        
+        try {
+          const [scenariosRes, workflowsRes] = await Promise.all([
+            fetch('/api/simulator/scenarios', {
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            }),
+            fetch('/api/simulator/workflows', {
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            })
+          ]);
+          
+          if (scenariosRes.ok) {
+            const data = await scenariosRes.json();
+            setScenarios(Array.isArray(data) ? data : data.data || []);
+          } else {
+            setScenarios([]);
           }
-        ];
-
-        // Mock workflows data
-        const mockWorkflows: SimulationWorkflow[] = [
-          {
-            workflow_id: 'workflow-001',
-            workflow_name: 'Regulatory Impact Assessment',
-            description: 'Complete workflow for assessing regulatory changes from creation to reporting',
-            steps: [
-              {
-                step_id: 'step-1',
-                step_name: 'Scenario Validation',
-                step_type: 'data_validation',
-                parameters: { validation_rules: ['regulatory_compliance', 'data_integrity'] },
-                dependencies: [],
-                timeout_seconds: 300,
-                retry_count: 2
-              },
-              {
-                step_id: 'step-2',
-                step_name: 'Impact Simulation',
-                step_type: 'scenario_execution',
-                scenario_id: 'scenario-001',
-                parameters: { execution_mode: 'comprehensive' },
-                dependencies: ['step-1'],
-                timeout_seconds: 1800,
-                retry_count: 1
-              },
-              {
-                step_id: 'step-3',
-                step_name: 'Generate Report',
-                step_type: 'report_generation',
-                parameters: { report_type: 'executive_summary', include_charts: true },
-                dependencies: ['step-2'],
-                timeout_seconds: 600,
-                retry_count: 1
-              }
-            ],
-            is_active: true,
-            created_at: '2024-01-10T08:00:00Z',
-            created_by: 'admin',
-            execution_count: 8,
-            success_rate: 87.5
+          
+          if (workflowsRes.ok) {
+            const data = await workflowsRes.json();
+            setWorkflows(Array.isArray(data) ? data : data.data || []);
+          } else {
+            setWorkflows([]);
           }
-        ];
-
-        // Mock schedules data
-        const mockSchedules: SimulationSchedule[] = [
-          {
-            schedule_id: 'schedule-001',
-            scenario_id: 'scenario-001',
-            schedule_name: 'Weekly Compliance Check',
-            schedule_type: 'recurring',
-            cron_expression: '0 9 * * 1', // Every Monday at 9 AM
-            next_run_at: addDays(new Date(), 2).toISOString(),
-            last_run_at: '2024-01-22T09:00:00Z',
-            is_active: true,
-            execution_parameters: { priority: 2 },
-            notification_settings: { email_on_failure: true, email_recipients: ['compliance@company.com'] },
-            created_at: '2024-01-15T10:00:00Z',
-            created_by: 'admin'
-          }
-        ];
-
-        setScenarios(mockScenarios);
-        setWorkflows(mockWorkflows);
+        } catch (error) {
+          console.error('Failed to load simulator data:', error);
+          setScenarios([]);
+          setWorkflows([]);
+        }
         setSchedules(mockSchedules);
       } catch (error) {
         console.error('Failed to load management data:', error);
@@ -552,7 +438,6 @@ const SimulatorManagement: React.FC<SimulatorManagementProps> = ({
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <input
                       type="text"
-                      placeholder="Search scenarios..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

@@ -266,7 +266,6 @@ const AlertManagement: React.FC = () => {
                   name="name"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g., High Severity SEC Alerts"
                 />
               </div>
 
@@ -278,7 +277,6 @@ const AlertManagement: React.FC = () => {
                   name="description"
                   rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Describe when this alert should trigger..."
                 />
               </div>
 
@@ -291,7 +289,6 @@ const AlertManagement: React.FC = () => {
                   name="recipients"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="email1@example.com, email2@example.com"
                 />
               </div>
 

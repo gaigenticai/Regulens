@@ -200,7 +200,6 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
                     id="agentName"
                     value={agentName}
                     onChange={(e) => setAgentName(e.target.value)}
-                    placeholder="e.g., primary_transaction_guardian"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
@@ -385,7 +384,6 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
                       id="alertEmail"
                       value={alertEmail}
                       onChange={(e) => setAlertEmail(e.target.value)}
-                      placeholder="alerts@company.com"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       disabled={isSubmitting}
                     />

@@ -472,7 +472,6 @@ export default function AgentCommunicationConsole() {
                 value={fromAgent}
                 onChange={(e) => setFromAgent(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., regulatory_assessor"
               />
             </div>
 
@@ -485,7 +484,6 @@ export default function AgentCommunicationConsole() {
                 value={toAgent}
                 onChange={(e) => setToAgent(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., audit_intelligence (leave empty for broadcast)"
               />
             </div>
           </div>
@@ -534,7 +532,6 @@ export default function AgentCommunicationConsole() {
               onChange={(e) => setMessageContent(e.target.value)}
               rows={4}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder='{"task": "Process compliance check", "priority": "high"}'
             />
           </div>
 

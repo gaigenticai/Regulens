@@ -218,7 +218,6 @@ export const TestSuiteManagement: React.FC<TestSuiteManagementProps> = ({
                 value={newSuiteName}
                 onChange={(e) => setNewSuiteName(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter test suite name"
               />
             </div>
             <div>
@@ -230,7 +229,6 @@ export const TestSuiteManagement: React.FC<TestSuiteManagementProps> = ({
                 onChange={(e) => setNewSuiteDescription(e.target.value)}
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Describe what this test suite covers"
               />
             </div>
             <div className="flex gap-3">

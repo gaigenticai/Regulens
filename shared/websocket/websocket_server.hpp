@@ -1,368 +1,217 @@
 /**
- * WebSocket Server - Header
- * 
- * Production-grade WebSocket server for real-time regulatory updates.
- * Supports WebSocket protocol, real-time push notifications, and broadcast messaging.
+ * WebSocket Server - Week 3 Phase 1
+ * Real-time bidirectional communication infrastructure
+ * Production-grade WebSocket server with connection pooling
  */
 
-#ifndef REGULENS_WEBSOCKET_SERVER_HPP
-#define REGULENS_WEBSOCKET_SERVER_HPP
+#pragma once
 
 #include <string>
-#include <vector>
 #include <map>
-#include <set>
 #include <memory>
-#include <mutex>
-#include <thread>
 #include <functional>
+#include <vector>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <chrono>
+#include <nlohmann/json.hpp>
 
 namespace regulens {
+namespace websocket {
 
-// WebSocket message types
-enum class WSMessageType {
-    TEXT,
-    BINARY,
-    PING,
-    PONG,
-    CLOSE
+using json = nlohmann::json;
+
+// Connection states
+enum class ConnectionState {
+  CONNECTING,
+  CONNECTED,
+  AUTHENTICATED,
+  DISCONNECTING,
+  DISCONNECTED
 };
 
-// WebSocket connection state
-enum class WSConnectionState {
-    CONNECTING,
-    OPEN,
-    CLOSING,
-    CLOSED
+// Message types for real-time events
+enum class MessageType {
+  CONNECTION_ESTABLISHED,
+  HEARTBEAT,
+  SUBSCRIBE,
+  UNSUBSCRIBE,
+  BROADCAST,
+  DIRECT_MESSAGE,
+  SESSION_UPDATE,
+  RULE_EVALUATION_RESULT,
+  DECISION_ANALYSIS_RESULT,
+  CONSENSUS_UPDATE,
+  LEARNING_FEEDBACK,
+  ALERT,
+  ERROR
 };
 
-// WebSocket message
-struct WSMessage {
-    WSMessageType type;
-    std::string data;
-    std::chrono::system_clock::time_point timestamp;
-    std::string client_id;
+// Connection information
+struct WebSocketConnection {
+  std::string connection_id;
+  std::string user_id;
+  std::string session_id;
+  ConnectionState state;
+  std::chrono::system_clock::time_point connected_at;
+  std::chrono::system_clock::time_point last_heartbeat;
+  std::vector<std::string> subscriptions;
+  int failed_pings = 0;
+  uint64_t messages_sent = 0;
+  uint64_t messages_received = 0;
 };
 
-// WebSocket client connection
-struct WSClient {
-    std::string client_id;
-    int socket_fd;
-    WSConnectionState state;
-    std::string user_id;
-    std::string session_id;
-    std::set<std::string> subscribed_topics;
-    std::chrono::system_clock::time_point connected_at;
-    std::chrono::system_clock::time_point last_activity;
-    std::string ip_address;
-    std::string user_agent;
+// Real-time message structure
+struct WebSocketMessage {
+  std::string message_id;
+  MessageType type;
+  std::string sender_id;
+  std::string recipient_id;  // Empty for broadcast
+  json payload;
+  std::chrono::system_clock::time_point timestamp;
+  bool requires_acknowledgment = false;
+  std::string acknowledgment_id;
+};
+
+// Connection pool entry
+struct ConnectionPoolEntry {
+  std::shared_ptr<WebSocketConnection> connection;
+  std::queue<WebSocketMessage> message_queue;
+  std::mutex queue_lock;
 };
 
 // Message handler callback
-using MessageHandler = std::function<void(const WSClient&, const WSMessage&)>;
+using MessageHandler = std::function<void(const WebSocketMessage&, const std::shared_ptr<WebSocketConnection>&)>;
 
-// Connection handler callback
-using ConnectionHandler = std::function<void(const WSClient&)>;
+// Event callbacks
+using OnConnectHandler = std::function<void(const std::shared_ptr<WebSocketConnection>&)>;
+using OnDisconnectHandler = std::function<void(const std::shared_ptr<WebSocketConnection>&)>;
+using OnErrorHandler = std::function<void(const std::string&, const std::string&)>;
 
-/**
- * WebSocket Server
- * 
- * Production-grade WebSocket server for real-time communication.
- * Features:
- * - WebSocket protocol (RFC 6455) support
- * - Real-time push notifications
- * - Topic-based subscriptions
- * - Broadcast messaging
- * - Connection management
- * - Heartbeat/ping-pong
- * - Authentication integration
- * - Message queueing
- * - Compression support
- * - SSL/TLS support
- */
 class WebSocketServer {
 public:
-    /**
-     * Constructor
-     * 
-     * @param port Port to listen on
-     * @param host Host to bind to (default: 0.0.0.0)
-     */
-    explicit WebSocketServer(int port = 8081, const std::string& host = "0.0.0.0");
+  WebSocketServer(int port, int max_connections = 5000);
+  ~WebSocketServer();
 
-    ~WebSocketServer();
+  // Lifecycle management
+  bool initialize();
+  void start();
+  void stop();
+  void shutdown();
 
-    /**
-     * Start the WebSocket server
-     * 
-     * @return true if started successfully
-     */
-    bool start();
+  // Connection management
+  std::shared_ptr<WebSocketConnection> create_connection(
+    const std::string& user_id,
+    const std::string& session_id
+  );
+  bool add_connection(std::shared_ptr<WebSocketConnection> connection);
+  bool remove_connection(const std::string& connection_id);
+  std::shared_ptr<WebSocketConnection> get_connection(const std::string& connection_id);
+  std::vector<std::shared_ptr<WebSocketConnection>> get_user_connections(const std::string& user_id);
+  int get_connection_count();
+  int get_active_connection_count();
 
-    /**
-     * Stop the WebSocket server
-     */
-    void stop();
-
-    /**
-     * Check if server is running
-     * 
-     * @return true if running
-     */
-    bool is_running() const;
-
-    /**
-     * Send message to a specific client
-     * 
-     * @param client_id Client ID
-     * @param message Message to send
-     * @return true if sent successfully
-     */
-    bool send_to_client(const std::string& client_id, const std::string& message);
-
-    /**
-     * Broadcast message to all connected clients
-     * 
-     * @param message Message to broadcast
-     * @return Number of clients message was sent to
-     */
-    int broadcast(const std::string& message);
-
-    /**
-     * Broadcast message to clients subscribed to a topic
-     * 
-     * @param topic Topic name
-     * @param message Message to send
-     * @return Number of clients message was sent to
-     */
-    int broadcast_to_topic(const std::string& topic, const std::string& message);
-
-    /**
-     * Send regulatory update to all subscribed clients
-     * 
-     * @param update_data Regulatory update data (JSON)
-     * @return Number of clients notified
-     */
-    int send_regulatory_update(const std::string& update_data);
-
-    /**
-     * Send transaction alert to specific user
-     * 
-     * @param user_id User ID
-     * @param alert_data Alert data (JSON)
-     * @return true if sent successfully
-     */
-    bool send_transaction_alert(const std::string& user_id, const std::string& alert_data);
-
-    /**
-     * Send system notification
-     * 
-     * @param notification_data Notification data (JSON)
-     * @param target_users Optional list of specific users (empty = all users)
-     * @return Number of clients notified
-     */
-    int send_system_notification(
-        const std::string& notification_data,
-        const std::vector<std::string>& target_users = {}
-    );
-
-    /**
-     * Subscribe client to topic
-     * 
-     * @param client_id Client ID
-     * @param topic Topic name
-     * @return true if subscribed successfully
-     */
-    bool subscribe_client_to_topic(const std::string& client_id, const std::string& topic);
-
-    /**
-     * Unsubscribe client from topic
-     * 
-     * @param client_id Client ID
-     * @param topic Topic name
-     * @return true if unsubscribed successfully
-     */
-    bool unsubscribe_client_from_topic(const std::string& client_id, const std::string& topic);
-
-    /**
-     * Get all connected clients
-     * 
-     * @return Vector of client IDs
-     */
-    std::vector<std::string> get_connected_clients() const;
-
-    /**
-     * Get client count
-     * 
-     * @return Number of connected clients
-     */
-    int get_client_count() const;
-
-    /**
-     * Get clients subscribed to a topic
-     * 
-     * @param topic Topic name
-     * @return Vector of client IDs
-     */
-    std::vector<std::string> get_topic_subscribers(const std::string& topic) const;
-
-    /**
-     * Disconnect a client
-     * 
-     * @param client_id Client ID
-     * @param reason Disconnect reason
-     * @return true if disconnected
-     */
-    bool disconnect_client(const std::string& client_id, const std::string& reason = "");
-
-    /**
-     * Set message handler
-     * 
-     * @param handler Message handler function
-     */
-    void set_message_handler(MessageHandler handler);
-
-    /**
-     * Set connection handler
-     * 
-     * @param handler Connection handler function
-     */
-    void set_connection_handler(ConnectionHandler handler);
-
-    /**
-     * Set disconnection handler
-     * 
-     * @param handler Disconnection handler function
-     */
-    void set_disconnection_handler(ConnectionHandler handler);
-
-    /**
-     * Enable compression
-     * 
-     * @param enabled Whether to enable compression
-     */
-    void set_compression_enabled(bool enabled);
-
-    /**
-     * Set heartbeat interval
-     * 
-     * @param interval_seconds Interval in seconds (0 to disable)
-     */
-    void set_heartbeat_interval(int interval_seconds);
-
-    /**
-     * Get server statistics
-     * 
-     * @return JSON string with statistics
-     */
-    std::string get_statistics() const;
+  // Message handling
+  void register_message_handler(MessageType type, MessageHandler handler);
+  void handle_message(const WebSocketMessage& message, const std::string& connection_id);
+  
+  // Broadcasting and messaging
+  void broadcast_message(const WebSocketMessage& message);
+  void send_to_connection(const std::string& connection_id, const WebSocketMessage& message);
+  void send_to_user(const std::string& user_id, const WebSocketMessage& message);
+  void send_to_subscriptions(const std::vector<std::string>& subscriptions, const WebSocketMessage& message);
+  
+  // Subscription management
+  bool subscribe(const std::string& connection_id, const std::string& channel);
+  bool unsubscribe(const std::string& connection_id, const std::string& channel);
+  std::vector<std::shared_ptr<WebSocketConnection>> get_subscribers(const std::string& channel);
+  
+  // Heartbeat and keep-alive
+  void start_heartbeat();
+  void stop_heartbeat();
+  void send_heartbeat();
+  void handle_pong(const std::string& connection_id);
+  
+  // Connection state management
+  bool authenticate_connection(const std::string& connection_id, const std::string& user_id);
+  ConnectionState get_connection_state(const std::string& connection_id);
+  bool is_connection_alive(const std::string& connection_id);
+  
+  // Statistics and monitoring
+  struct ServerStats {
+    int total_connections;
+    int active_connections;
+    int authenticated_connections;
+    uint64_t total_messages_processed;
+    uint64_t total_messages_sent;
+    double average_latency_ms;
+    std::chrono::system_clock::time_point uptime;
+  };
+  ServerStats get_stats();
+  
+  // Configuration
+  void set_heartbeat_interval(int milliseconds);
+  void set_message_queue_size(int size);
+  void set_max_message_size(int bytes);
+  void set_connection_timeout(int seconds);
+  
+  // Event handlers
+  void on_connect(OnConnectHandler handler) { connect_handler = handler; }
+  void on_disconnect(OnDisconnectHandler handler) { disconnect_handler = handler; }
+  void on_error(OnErrorHandler handler) { error_handler = handler; }
 
 private:
-    int port_;
-    std::string host_;
-    int server_socket_;
-    bool running_;
-    bool compression_enabled_;
-    int heartbeat_interval_seconds_;
-
-    std::map<std::string, WSClient> clients_;
-    std::map<std::string, std::set<std::string>> topic_subscribers_;  // topic -> client_ids
-    
-    std::mutex clients_mutex_;
-    std::mutex topics_mutex_;
-
-    MessageHandler message_handler_;
-    ConnectionHandler connection_handler_;
-    ConnectionHandler disconnection_handler_;
-
-    std::thread server_thread_;
-    std::thread heartbeat_thread_;
-
-    /**
-     * Server loop
-     */
-    void server_loop();
-
-    /**
-     * Heartbeat loop
-     */
-    void heartbeat_loop();
-
-    /**
-     * Handle new connection
-     */
-    void handle_connection(int client_socket, const std::string& ip_address);
-
-    /**
-     * Handle client messages
-     */
-    void handle_client(const std::string& client_id);
-
-    /**
-     * Perform WebSocket handshake
-     */
-    bool perform_websocket_handshake(int socket_fd, const std::string& request);
-
-    /**
-     * Send WebSocket frame
-     */
-    bool send_websocket_frame(
-        int socket_fd,
-        const std::string& data,
-        WSMessageType type = WSMessageType::TEXT
-    );
-
-    /**
-     * Receive WebSocket frame
-     */
-    WSMessage receive_websocket_frame(int socket_fd);
-
-    /**
-     * Generate client ID
-     */
-    std::string generate_client_id() const;
-
-    /**
-     * Parse WebSocket upgrade request
-     */
-    std::map<std::string, std::string> parse_http_headers(const std::string& request);
-
-    /**
-     * Generate WebSocket accept key
-     */
-    std::string generate_accept_key(const std::string& client_key) const;
-
-    /**
-     * Close client connection
-     */
-    void close_client_connection(const std::string& client_id);
-
-    /**
-     * Clean up inactive clients
-     */
-    void cleanup_inactive_clients();
-
-    /**
-     * Encode WebSocket frame
-     */
-    std::vector<uint8_t> encode_websocket_frame(
-        const std::string& payload,
-        uint8_t opcode,
-        bool mask = false
-    );
-
-    /**
-     * Decode WebSocket frame
-     */
-    bool decode_websocket_frame(
-        const std::vector<uint8_t>& frame,
-        std::string& payload,
-        uint8_t& opcode
-    );
+  int port_;
+  int max_connections_;
+  bool is_running_ = false;
+  
+  // Connection pool
+  std::map<std::string, ConnectionPoolEntry> connection_pool_;
+  std::mutex pool_lock_;
+  
+  // Message handlers
+  std::map<MessageType, MessageHandler> message_handlers_;
+  std::mutex handlers_lock_;
+  
+  // Event handlers
+  OnConnectHandler connect_handler;
+  OnDisconnectHandler disconnect_handler;
+  OnErrorHandler error_handler;
+  
+  // Heartbeat management
+  std::thread heartbeat_thread_;
+  bool heartbeat_running_ = false;
+  int heartbeat_interval_ms_ = 30000;
+  std::mutex heartbeat_lock_;
+  std::condition_variable heartbeat_cv_;
+  
+  // Message processing
+  std::thread message_processor_thread_;
+  bool processor_running_ = false;
+  int message_queue_size_ = 1000;
+  int max_message_size_ = 1048576;  // 1MB
+  
+  // Connection timeout
+  int connection_timeout_seconds_ = 300;
+  std::thread timeout_monitor_thread_;
+  bool timeout_monitor_running_ = false;
+  
+  // Statistics
+  uint64_t total_messages_processed_ = 0;
+  uint64_t total_messages_sent_ = 0;
+  std::mutex stats_lock_;
+  
+  // Internal methods
+  void heartbeat_loop();
+  void message_processing_loop();
+  void timeout_monitoring_loop();
+  void cleanup_dead_connections();
+  std::string generate_connection_id();
+  bool validate_message(const WebSocketMessage& message);
 };
 
-} // namespace regulens
-
-#endif // REGULENS_WEBSOCKET_SERVER_HPP
+}  // namespace websocket
+}  // namespace regulens
 

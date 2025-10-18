@@ -467,4 +467,115 @@ export const securityAPI = {
   },
 };
 
+// ============================================================================
+// PHASE 7C: ADVANCED MONITORING & ALERTING API
+// ============================================================================
+
+export const monitoringAPI = {
+  // Metrics Collection
+  getBusinessMetrics: async (minutes: number = 60) => {
+    const response = await api.get('/api/monitoring/metrics/business', {
+      params: { minutes },
+    });
+    return response.data.data;
+  },
+
+  getTechnicalMetrics: async (minutes: number = 60) => {
+    const response = await api.get('/api/monitoring/metrics/technical', {
+      params: { minutes },
+    });
+    return response.data.data;
+  },
+
+  getCostMetrics: async (months: number = 1) => {
+    const response = await api.get('/api/monitoring/metrics/cost', {
+      params: { months },
+    });
+    return response.data.data;
+  },
+
+  recordCustomMetric: async (metricData: any) => {
+    const response = await api.post('/api/monitoring/metrics/custom', metricData);
+    return response.data.data;
+  },
+
+  // Alerting
+  getActiveAlerts: async () => {
+    const response = await api.get('/api/monitoring/alerts/active');
+    return response.data.data;
+  },
+
+  getAnomalies: async (limit: number = 10) => {
+    const response = await api.get('/api/monitoring/anomalies', {
+      params: { limit },
+    });
+    return response.data.data;
+  },
+
+  acknowledgeAlert: async (alertId: string, userId: string) => {
+    const response = await api.post(`/api/monitoring/alerts/${alertId}/acknowledge`, {
+      user_id: userId,
+    });
+    return response.data.data;
+  },
+
+  resolveAlert: async (alertId: string) => {
+    const response = await api.post(`/api/monitoring/alerts/${alertId}/resolve`);
+    return response.data.data;
+  },
+
+  getAlertCorrelations: async (alertId: string) => {
+    const response = await api.get(`/api/monitoring/alerts/${alertId}/correlations`);
+    return response.data.data;
+  },
+
+  // SLA Management
+  registerSLA: async (slaData: any) => {
+    const response = await api.post('/api/monitoring/sla/register', slaData);
+    return response.data.data;
+  },
+
+  checkSLACompliance: async (serviceName: string) => {
+    const response = await api.get(`/api/monitoring/sla/${serviceName}/compliance`);
+    return response.data.data;
+  },
+
+  getSLAReport: async (days: number = 30) => {
+    const response = await api.get('/api/monitoring/sla/report', {
+      params: { days },
+    });
+    return response.data.data;
+  },
+
+  // Analytics
+  getMetricsStatistics: async (days: number = 30) => {
+    const response = await api.get('/api/monitoring/metrics/statistics', {
+      params: { days },
+    });
+    return response.data.data;
+  },
+
+  getTimeSeries: async (metricName: string, hours: number = 24) => {
+    const response = await api.get('/api/monitoring/metrics/timeseries', {
+      params: { metric_name: metricName, hours },
+    });
+    return response.data.data;
+  },
+
+  getCostOptimizations: async () => {
+    const response = await api.get('/api/monitoring/recommendations/cost');
+    return response.data.data;
+  },
+
+  getPerformanceOptimizations: async () => {
+    const response = await api.get('/api/monitoring/recommendations/performance');
+    return response.data.data;
+  },
+
+  getMonitoringDashboard: async () => {
+    const response = await api.get('/api/monitoring/dashboard');
+    return response.data.data;
+  },
+};
+
 export default api;

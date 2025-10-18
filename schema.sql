@@ -8488,3 +8488,176 @@ CREATE TABLE agent_comm_registry (
 CREATE INDEX idx_agent_comm_registry_type ON agent_comm_registry(agent_type);
 CREATE INDEX idx_agent_comm_registry_active ON agent_comm_registry(is_active);
 CREATE INDEX idx_agent_comm_registry_last_active ON agent_comm_registry(last_active);
+
+-- =============================================================================
+-- WEEK 1: ASYNC JOBS & CACHING INFRASTRUCTURE
+-- =============================================================================
+
+-- Async job queue for long-running operations
+CREATE TABLE async_jobs (
+    job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_type VARCHAR(100) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    execution_mode VARCHAR(50) NOT NULL, -- SYNCHRONOUS, ASYNCHRONOUS, BATCH, STREAMING
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING', -- PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
+    priority INT DEFAULT 0, -- 0=low, 1=medium, 2=high, 3=critical
+    request_payload JSONB NOT NULL,
+    result_payload JSONB,
+    error_message TEXT,
+    progress_percentage INT DEFAULT 0,
+    estimated_completion_time INT, -- seconds
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    cancelled_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metadata JSONB
+);
+
+CREATE INDEX idx_async_jobs_user_id ON async_jobs(user_id);
+CREATE INDEX idx_async_jobs_status ON async_jobs(status);
+CREATE INDEX idx_async_jobs_job_type ON async_jobs(job_type);
+CREATE INDEX idx_async_jobs_priority ON async_jobs(priority DESC);
+CREATE INDEX idx_async_jobs_created_at ON async_jobs(created_at DESC);
+
+-- Job batch execution tracking
+CREATE TABLE batch_executions (
+    batch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_job_id UUID REFERENCES async_jobs(job_id) ON DELETE CASCADE,
+    batch_number INT NOT NULL,
+    total_items INT NOT NULL,
+    processed_items INT DEFAULT 0,
+    failed_items INT DEFAULT 0,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_batch_executions_parent_job ON batch_executions(parent_job_id);
+CREATE INDEX idx_batch_executions_status ON batch_executions(status);
+
+-- Job results history
+CREATE TABLE job_results (
+    result_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id UUID REFERENCES async_jobs(job_id) ON DELETE CASCADE,
+    batch_id UUID REFERENCES batch_executions(batch_id) ON DELETE SET NULL,
+    item_index INT,
+    success BOOLEAN NOT NULL,
+    output_data JSONB,
+    error_details JSONB,
+    execution_time_ms INT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_job_results_job_id ON job_results(job_id);
+CREATE INDEX idx_job_results_batch_id ON job_results(batch_id);
+
+-- Cache statistics
+CREATE TABLE cache_statistics (
+    cache_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cache_key VARCHAR(500) NOT NULL UNIQUE,
+    value_type VARCHAR(100),
+    size_bytes INT,
+    ttl_seconds INT,
+    hit_count INT DEFAULT 0,
+    miss_count INT DEFAULT 0,
+    last_hit_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_cache_statistics_key ON cache_statistics(cache_key);
+CREATE INDEX idx_cache_statistics_expires ON cache_statistics(expires_at);
+
+-- Cache invalidation rules
+CREATE TABLE cache_invalidation_rules (
+    rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cache_key_pattern VARCHAR(500) NOT NULL,
+    trigger_event VARCHAR(100) NOT NULL,
+    trigger_table VARCHAR(100),
+    trigger_column VARCHAR(100),
+    ttl_seconds INT DEFAULT 1800,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_by VARCHAR(255)
+);
+
+CREATE INDEX idx_cache_invalidation_pattern ON cache_invalidation_rules(cache_key_pattern);
+
+-- WebSocket subscriptions (Week 3)
+CREATE TABLE ws_subscriptions (
+    subscription_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(255) NOT NULL,
+    session_id VARCHAR(255) NOT NULL,
+    subscription_type VARCHAR(100) NOT NULL,
+    resource_id VARCHAR(255),
+    subscribed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT true,
+    metadata JSONB
+);
+
+CREATE INDEX idx_ws_subscriptions_user ON ws_subscriptions(user_id);
+CREATE INDEX idx_ws_subscriptions_session ON ws_subscriptions(session_id);
+
+-- Message log for real-time communication
+CREATE TABLE message_log (
+    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL,
+    sender_id VARCHAR(255) NOT NULL,
+    message_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    delivery_status VARCHAR(50) DEFAULT 'SENT',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_message_log_session ON message_log(session_id);
+CREATE INDEX idx_message_log_created ON message_log(created_at DESC);
+
+-- Circuit breaker state
+CREATE TABLE circuit_breaker_state (
+    service_name VARCHAR(255) PRIMARY KEY,
+    state VARCHAR(20) NOT NULL,
+    failure_count INT DEFAULT 0,
+    last_failure_time TIMESTAMP WITH TIME ZONE,
+    last_state_change TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Metric events (Week 4)
+CREATE TABLE metric_events (
+    metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    metric_name VARCHAR(255) NOT NULL,
+    metric_type VARCHAR(50),
+    value DECIMAL(20, 6),
+    unit VARCHAR(50),
+    tags JSONB,
+    service_name VARCHAR(255),
+    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_metric_events_name ON metric_events(metric_name);
+CREATE INDEX idx_metric_events_recorded ON metric_events(recorded_at DESC);
+
+-- Trace spans (Week 4)
+CREATE TABLE trace_spans (
+    span_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id UUID NOT NULL,
+    parent_span_id UUID,
+    operation_name VARCHAR(255) NOT NULL,
+    service_name VARCHAR(255) NOT NULL,
+    status VARCHAR(50),
+    start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    end_time TIMESTAMP WITH TIME ZONE,
+    duration_ms INT,
+    tags JSONB,
+    logs JSONB
+);
+
+CREATE INDEX idx_trace_spans_trace_id ON trace_spans(trace_id);
+CREATE INDEX idx_trace_spans_operation ON trace_spans(operation_name);
+
+-- =============================================================================
+-- END WEEK 1 SCHEMA
+-- =============================================================================

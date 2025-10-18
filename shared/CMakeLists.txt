@@ -99,6 +99,8 @@ add_library(regulens_shared STATIC
     api_config/error_response_helpers.cpp
     # Async Jobs & Batch Processing - Enterprise job queue management (Rule 1 compliance - production-grade async)
     async_jobs/async_job_manager.cpp
+    # Advanced Rule Engine integration with async processing
+    rules/async_rule_evaluator.cpp
 )
 
 # Resilience module for fault tolerance (Rule 1 compliance - production-grade resilience)
@@ -140,6 +142,7 @@ target_include_directories(regulens_shared
         ${CMAKE_CURRENT_SOURCE_DIR}/auth
         ${CMAKE_CURRENT_SOURCE_DIR}/security
         ${CMAKE_CURRENT_SOURCE_DIR}/async_jobs
+        ${CMAKE_CURRENT_SOURCE_DIR}/rules
 )
 
 target_link_libraries(regulens_shared

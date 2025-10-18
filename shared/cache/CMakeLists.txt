@@ -3,10 +3,12 @@
 
 set(CACHE_SOURCES
     redis_client.cpp
+    redis_cache_manager.cpp
 )
 
 set(CACHE_HEADERS
     redis_client.hpp
+    redis_cache_manager.hpp
 )
 
 # Create cache library

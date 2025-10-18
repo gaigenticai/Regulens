@@ -70,7 +70,7 @@ public:
     bool validate_config() const;
 
     // Validate HTTP method usage
-    std::vector<ValidationResult> validate_http_methods() const;
+    std::vector<HTTPValidationResult> validate_http_methods() const;
 
     // Get permission description
     std::string get_permission_description(const std::string& permission) const;

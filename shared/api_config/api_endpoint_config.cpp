@@ -262,7 +262,7 @@ bool APIEndpointConfig::validate_config() const {
     return is_valid;
 }
 
-std::vector<ValidationResult> APIEndpointConfig::validate_http_methods() const {
+std::vector<HTTPValidationResult> APIEndpointConfig::validate_http_methods() const {
     // Initialize HTTP method validator if not already done
     static bool validator_initialized = false;
     static HTTPMethodValidator* validator_instance = nullptr;

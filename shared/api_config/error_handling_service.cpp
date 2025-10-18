@@ -342,7 +342,14 @@ ErrorResponse ErrorHandlingService::create_retry_response(const std::string& err
         "Operation can be retried after the specified delay"
     );
 
-    auto response = format_error_response(error);
+    auto http_response = format_error_response(error);
+    
+    // Convert HTTPResponse to ErrorResponse
+    ErrorResponse response;
+    response.status_code = http_response.status_code;
+    response.content_type = http_response.content_type;
+    response.body = http_response.body;
+    response.headers = http_response.headers;
 
     if (retry_after) {
         response.headers["Retry-After"] = std::to_string(*retry_after);
@@ -485,7 +492,9 @@ std::string ErrorHandlingService::apply_data_masking(const std::string& data) {
     std::string masked = data;
 
     // Mask JSON string values that might contain sensitive data
-    std::regex sensitive_regex(R"("([^"]*(?:password|token|secret|key)[^"]*)":\s*"[^"]*")");
+    // Use custom delimiter to avoid conflicts with the closing ")
+    std::string pattern = R"===("((?:password|token|secret|key)[^"]*)":\s*"[^"]*")===";
+    std::regex sensitive_regex(pattern);
     masked = std::regex_replace(masked, sensitive_regex, R"("$1": "********")");
 
     return masked;

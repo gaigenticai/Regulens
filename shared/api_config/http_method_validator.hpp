@@ -65,7 +65,7 @@ public:
     std::string get_recommended_method(const std::string& operation_type) const;
 
     // Validate entire API endpoint configuration
-    std::vector<ValidationResult> validate_api_endpoints(const nlohmann::json& endpoints_config) const;
+    std::vector<HTTPValidationResult> validate_api_endpoints(const nlohmann::json& endpoints_config) const;
 
 private:
     HTTPMethodValidator() = default;
@@ -86,11 +86,11 @@ private:
     std::unordered_map<std::string, std::string> operation_to_method_mapping_;
 
     // Validation helper methods
-    ValidationResult validate_request_body(const std::string& method, bool has_request_body) const;
-    ValidationResult validate_headers(const std::string& method, const std::vector<std::string>& headers) const;
-    ValidationResult validate_content_type(const std::string& method, const std::string& content_type) const;
-    ValidationResult validate_parameters(const std::string& method, const std::string& path) const;
-    ValidationResult validate_operation_semantics(const std::string& method, const std::string& path) const;
+    HTTPValidationResult validate_request_body(const std::string& method, bool has_request_body) const;
+    HTTPValidationResult validate_headers(const std::string& method, const std::vector<std::string>& headers) const;
+    HTTPValidationResult validate_content_type(const std::string& method, const std::string& content_type) const;
+    HTTPValidationResult validate_parameters(const std::string& method, const std::string& path) const;
+    HTTPValidationResult validate_operation_semantics(const std::string& method, const std::string& path) const;
 
     // Utility methods
     bool is_valid_http_method(const std::string& method) const;

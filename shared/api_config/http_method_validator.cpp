@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <regex>
 #include <sstream>
+#include <fstream>
 
 namespace regulens {
 

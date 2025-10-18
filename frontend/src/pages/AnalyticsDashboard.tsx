@@ -1,184 +1,173 @@
-import React from 'react';
-import { BarChart3, Lightbulb, TrendingUp, Eye } from 'lucide-react';
-import { useBIDashboards, useAnalyticsMetrics, useDataInsights, useAnalyticsStats } from '@/hooks/useAnalytics';
-import { LoadingSpinner } from '@/components/LoadingSpinner';
+/**
+ * Analytics Dashboard - Phase 7A
+ * Real-time decision, rule, and learning analytics
+ */
 
-const AnalyticsDashboard: React.FC = () => {
-  const { data: dashboards = [], isLoading: dashLoading } = useBIDashboards();
-  const { data: metrics = [] } = useAnalyticsMetrics();
-  const { data: insights = [] } = useDataInsights();
-  const { data: stats, isLoading: statsLoading } = useAnalyticsStats();
+import React, { useState, useEffect } from 'react';
+import { analyticsAPI } from '../services/api';
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell
+} from 'recharts';
 
-  if (dashLoading || statsLoading) {
-    return <LoadingSpinner fullScreen message="Loading analytics..." />;
-  }
+interface AnalyticsStat {
+  label: string;
+  value: number | string;
+  color: string;
+}
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'critical': return 'text-red-600 bg-red-100';
-      case 'high': return 'text-orange-600 bg-orange-100';
-      case 'medium': return 'text-yellow-600 bg-yellow-100';
-      case 'low': return 'text-green-600 bg-green-100';
-      default: return 'text-gray-600 bg-gray-100';
+interface AlgorithmPerformance {
+  algorithm: string;
+  accuracy_rate: number;
+  total_decisions: number;
+}
+
+export const AnalyticsDashboard: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'decision' | 'rule' | 'learning'>('decision');
+  const [decisionStats, setDecisionStats] = useState<any>(null);
+  const [ruleStats, setRuleStats] = useState<any>(null);
+  const [learningStats, setLearningStats] = useState<any>(null);
+  const [algorithmComparison, setAlgorithmComparison] = useState<AlgorithmPerformance[]>([]);
+  const [ensembleAnalysis, setEnsembleAnalysis] = useState<any>(null);
+  const [highFPRules, setHighFPRules] = useState<any[]>([]);
+  const [featureImportance, setFeatureImportance] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadAnalytics();
+  }, [activeTab]);
+
+  const loadAnalytics = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (activeTab === 'decision') {
+        const [stats, ensemble, algComparison] = await Promise.all([
+          analyticsAPI.getDecisionStats(30),
+          analyticsAPI.getEnsembleComparison(30),
+          analyticsAPI.getAlgorithmComparison(['AHP', 'TOPSIS', 'PROMETHEE', 'ELECTRE'], 30),
+        ]);
+        setDecisionStats(stats);
+        setEnsembleAnalysis(ensemble);
+        setAlgorithmComparison(algComparison);
+      } else if (activeTab === 'rule') {
+        const [stats, fpRules] = await Promise.all([
+          analyticsAPI.getRuleStats(30),
+          analyticsAPI.getHighFalsePositiveRules(10),
+        ]);
+        setRuleStats(stats);
+        setHighFPRules(fpRules);
+      } else if (activeTab === 'learning') {
+        const [stats, features, recs] = await Promise.all([
+          analyticsAPI.getLearningStats(30),
+          analyticsAPI.getFeatureImportance(20),
+          analyticsAPI.getLearningRecommendations(),
+        ]);
+        setLearningStats(stats);
+        setFeatureImportance(features);
+      }
+    } catch (err) {
+      setError('Failed to load analytics data');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
+  const renderDecisionAnalytics = () => (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Advanced Analytics & BI Dashboard</h1>
-        <p className="text-gray-600 mt-1">Executive insights and data storytelling</p>
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {decisionStats && [
+          { label: 'Total Decisions', value: decisionStats.total_decisions, color: 'bg-blue-500' },
+          { label: 'Overall Accuracy', value: `${(decisionStats.overall_accuracy * 100).toFixed(1)}%`, color: 'bg-green-500' },
+          { label: 'Avg Confidence', value: (decisionStats.avg_confidence * 100).toFixed(1) + '%', color: 'bg-purple-500' },
+          { label: 'Best Algorithm', value: decisionStats.best_algorithm, color: 'bg-orange-500' },
+        ].map((stat, i) => (
+          <div key={i} className={`${stat.color} text-white p-4 rounded-lg`}>
+            <div className="text-sm font-medium opacity-90">{stat.label}</div>
+            <div className="text-2xl font-bold mt-2">{stat.value}</div>
+          </div>
+        ))}
       </div>
 
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <BarChart3 className="w-5 h-5 text-blue-600" />
-            </div>
-            <h3 className="text-sm font-medium text-gray-600">BI Dashboards</h3>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{stats?.total_dashboards || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">Total available</p>
+      {/* Algorithm Comparison Chart */}
+      {algorithmComparison.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-4">Algorithm Performance Comparison</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={algorithmComparison}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="algorithm" />
+              <YAxis label={{ value: 'Accuracy Rate', angle: -90, position: 'insideLeft' }} />
+              <Tooltip />
+              <Bar dataKey="accuracy_rate" fill="#3b82f6" name="Accuracy Rate" />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
+      )}
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <TrendingUp className="w-5 h-5 text-purple-600" />
+      {/* Ensemble vs Individual */}
+      {ensembleAnalysis && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-4">Ensemble vs Individual Performance</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="text-center p-4 bg-blue-50 rounded">
+              <div className="text-3xl font-bold text-blue-600">{ensembleAnalysis.ensemble_correct_count}</div>
+              <div className="text-sm text-gray-600 mt-2">Ensemble Correct</div>
+              <div className="text-xs text-gray-500 mt-1">Win Rate: {(ensembleAnalysis.ensemble_win_rate * 100).toFixed(1)}%</div>
             </div>
-            <h3 className="text-sm font-medium text-gray-600">Recent Metrics</h3>
+            <div className="text-center p-4 bg-green-50 rounded">
+              <div className="text-3xl font-bold text-green-600">{ensembleAnalysis.individual_best_correct_count}</div>
+              <div className="text-sm text-gray-600 mt-2">Individual Best Correct</div>
+              <div className="text-xs text-gray-500 mt-1">Total: {ensembleAnalysis.total_comparisons}</div>
+            </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">{stats?.recent_metrics || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">Last 24 hours</p>
         </div>
+      )}
+    </div>
+  );
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <Lightbulb className="w-5 h-5 text-green-600" />
-            </div>
-            <h3 className="text-sm font-medium text-gray-600">Active Insights</h3>
+  const renderRuleAnalytics = () => (
+    <div className="space-y-6">
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {ruleStats && [
+          { label: 'Total Rules', value: ruleStats.total_rules, color: 'bg-blue-500' },
+          { label: 'Avg Precision', value: (ruleStats.avg_precision * 100).toFixed(1) + '%', color: 'bg-green-500' },
+          { label: 'Avg F1-Score', value: (ruleStats.avg_f1_score * 100).toFixed(1) + '%', color: 'bg-purple-500' },
+          { label: 'Redundant Pairs', value: ruleStats.redundant_rule_pairs, color: 'bg-orange-500' },
+        ].map((stat, i) => (
+          <div key={i} className={`${stat.color} text-white p-4 rounded-lg`}>
+            <div className="text-sm font-medium opacity-90">{stat.label}</div>
+            <div className="text-2xl font-bold mt-2">{stat.value}</div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">{stats?.active_insights || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">Automated discoveries</p>
-        </div>
+        ))}
       </div>
 
-      {/* Data Insights */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Automated Data Insights</h2>
-          <p className="text-sm text-gray-600 mt-1">AI-powered discoveries and recommendations</p>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {insights.length === 0 ? (
-            <div className="p-12 text-center">
-              <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No insights yet</h3>
-              <p className="text-gray-600">Automated insights will appear as data is analyzed</p>
-            </div>
-          ) : (
-            insights.map((insight) => (
-              <div key={insight.insight_id} className="p-6 hover:bg-gray-50">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">{insight.title}</h3>
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(insight.priority)}`}>
-                        {insight.priority}
-                      </span>
-                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                        {insight.insight_type}
-                      </span>
-                    </div>
-                    <p className="text-gray-600 text-sm mb-2">{insight.description}</p>
-                    <div className="flex items-center gap-4 text-xs text-gray-500">
-                      <span>Confidence: {(insight.confidence_score * 100).toFixed(1)}%</span>
-                      <span>Discovered: {new Date(insight.discovered_at).toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* BI Dashboards */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Business Intelligence Dashboards</h2>
-          <p className="text-sm text-gray-600 mt-1">Customizable analytics dashboards</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
-          {dashboards.length === 0 ? (
-            <div className="col-span-2 p-12 text-center">
-              <BarChart3 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No dashboards configured</h3>
-              <p className="text-gray-600">Create your first BI dashboard to visualize data</p>
-            </div>
-          ) : (
-            dashboards.map((dashboard) => (
-              <div key={dashboard.dashboard_id} className="p-6 border border-gray-200 rounded-lg hover:border-blue-500 cursor-pointer">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">{dashboard.dashboard_name}</h3>
-                    <p className="text-sm text-gray-600 mt-1">{dashboard.description}</p>
-                  </div>
-                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800">
-                    {dashboard.dashboard_type}
-                  </span>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-gray-500">
-                  <div className="flex items-center gap-1">
-                    <Eye className="w-4 h-4" />
-                    <span>{dashboard.view_count} views</span>
-                  </div>
-                  <span>Created: {new Date(dashboard.created_at).toLocaleDateString()}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Recent Metrics */}
-      {metrics.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Metrics (24h)</h2>
-          </div>
+      {/* High False Positive Rules */}
+      {highFPRules.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+            Rules with High False Positive Rate
+          </h3>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Metric</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                  <th className="px-4 py-2 text-left text-sm font-semibold">Rule</th>
+                  <th className="px-4 py-2 text-left text-sm font-semibold">FP Rate</th>
+                  <th className="px-4 py-2 text-left text-sm font-semibold">Precision</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {metrics.slice(0, 10).map((metric, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {metric.metric_name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {metric.metric_category}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {metric.metric_value} {metric.metric_unit}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {metric.aggregation_period}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(metric.calculated_at).toLocaleTimeString()}
-                    </td>
+              <tbody>
+                {highFPRules.map((rule, i) => (
+                  <tr key={i} className="border-t hover:bg-gray-50">
+                    <td className="px-4 py-2">{rule.rule_name}</td>
+                    <td className="px-4 py-2 text-red-600">{(rule.false_positive_rate * 100).toFixed(1)}%</td>
+                    <td className="px-4 py-2">{(rule.precision * 100).toFixed(1)}%</td>
                   </tr>
                 ))}
               </tbody>
@@ -186,6 +175,102 @@ const AnalyticsDashboard: React.FC = () => {
           </div>
         </div>
       )}
+    </div>
+  );
+
+  const renderLearningAnalytics = () => (
+    <div className="space-y-6">
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {learningStats && [
+          { label: 'Feedback Items', value: learningStats.total_feedback_items, color: 'bg-blue-500' },
+          { label: 'Avg Effectiveness', value: (learningStats.avg_feedback_effectiveness).toFixed(1), color: 'bg-green-500' },
+          { label: 'Total Reward', value: learningStats.total_cumulative_reward.toFixed(1), color: 'bg-purple-500' },
+          { label: 'Converged', value: learningStats.learning_converged ? 'Yes' : 'No', color: learningStats.learning_converged ? 'bg-green-500' : 'bg-yellow-500' },
+        ].map((stat, i) => (
+          <div key={i} className={`${stat.color} text-white p-4 rounded-lg`}>
+            <div className="text-sm font-medium opacity-90">{stat.label}</div>
+            <div className="text-2xl font-bold mt-2">{stat.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Feature Importance */}
+      {featureImportance.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-4">Top 20 Feature Importance</h3>
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart data={featureImportance}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="feature_name" angle={-45} textAnchor="end" height={100} />
+              <YAxis label={{ value: 'Importance Score', angle: -90, position: 'insideLeft' }} />
+              <Tooltip />
+              <Bar dataKey="importance_score" fill="#8b5cf6" name="Importance" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Analytics Dashboard</h1>
+          <p className="text-gray-600 mt-2">Real-time insights into decision, rule, and learning analytics</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="bg-white rounded-lg shadow mb-6 border-b">
+          <div className="flex">
+            {[
+              { id: 'decision', label: 'Decision Analytics', icon: '📊' },
+              { id: 'rule', label: 'Rule Performance', icon: '⚙️' },
+              { id: 'learning', label: 'Learning Insights', icon: '🧠' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex-1 px-6 py-4 font-medium text-center transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-b-2 border-blue-600 text-blue-600'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <span className="mr-2">{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="bg-white rounded-lg shadow p-6">
+          {loading ? (
+            <div className="flex justify-center items-center h-96">
+              <div className="text-center">
+                <div className="w-12 h-12 bg-blue-200 rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading analytics...</p>
+              </div>
+            </div>
+          ) : error ? (
+            <div className="text-red-600 p-4 bg-red-50 rounded">{error}</div>
+          ) : (
+            <>
+              {activeTab === 'decision' && renderDecisionAnalytics()}
+              {activeTab === 'rule' && renderRuleAnalytics()}
+              {activeTab === 'learning' && renderLearningAnalytics()}
+            </>
+          )}
+        </div>
+
+        {/* Auto-refresh Info */}
+        <div className="mt-4 text-sm text-gray-600 text-center">
+          Auto-refreshes every 30 seconds • Last updated: {new Date().toLocaleTimeString()}
+        </div>
+      </div>
     </div>
   );
 };

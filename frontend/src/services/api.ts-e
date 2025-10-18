@@ -1468,6 +1468,248 @@ class RegulesAPIClient {
     const response = await this.client.get<API.AlertStats>('/v1/alerts/stats');
     return response.data;
   }
+
+  // ============================================================================
+  // WEEK 1: ASYNC JOB MANAGEMENT
+  // ============================================================================
+
+  async submitJob(request: {
+    job_type: string;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    parameters: Record<string, any>;
+  }): Promise<{ job_id: string; status: string }> {
+    const response = await this.client.post('/v1/async/jobs', request);
+    return response.data;
+  }
+
+  async getJob(jobId: string): Promise<any> {
+    const response = await this.client.get(`/v1/async/jobs/${jobId}`);
+    return response.data;
+  }
+
+  async listJobs(params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ jobs: any[]; total: number }> {
+    const response = await this.client.get('/v1/async/jobs', { params });
+    return response.data;
+  }
+
+  async cancelJob(jobId: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post(`/v1/async/jobs/${jobId}/cancel`);
+    return response.data;
+  }
+
+  async getQueueStats(): Promise<{
+    pending_count: number;
+    running_count: number;
+    completed_count: number;
+    failed_count: number;
+    avg_processing_time: number;
+  }> {
+    const response = await this.client.get('/v1/async/queue/stats');
+    return response.data;
+  }
+
+  async retryJob(jobId: string): Promise<{ job_id: string; status: string }> {
+    const response = await this.client.post(`/v1/async/jobs/${jobId}/retry`);
+    return response.data;
+  }
+
+  async submitBatchJobs(jobs: Array<{
+    job_type: string;
+    parameters: Record<string, any>;
+  }>): Promise<{ batch_id: string; job_ids: string[] }> {
+    const response = await this.client.post('/v1/async/jobs/batch', { jobs });
+    return response.data;
+  }
+
+  // ============================================================================
+  // WEEK 1: CACHE MANAGEMENT
+  // ============================================================================
+
+  async getCacheStats(): Promise<{
+    total_keys: number;
+    memory_usage: number;
+    hit_rate: number;
+    eviction_count: number;
+    by_type: Record<string, any>;
+  }> {
+    const response = await this.client.get('/v1/cache/stats');
+    return response.data;
+  }
+
+  async getCacheInvalidationRules(): Promise<any[]> {
+    const response = await this.client.get('/v1/cache/invalidation-rules');
+    return response.data;
+  }
+
+  async invalidateCacheKey(key: string): Promise<{ success: boolean }> {
+    const response = await this.client.post(`/v1/cache/invalidate/${key}`);
+    return response.data;
+  }
+
+  async invalidateCachePattern(pattern: string): Promise<{ success: boolean; keys_invalidated: number }> {
+    const response = await this.client.post('/v1/cache/invalidate-pattern', { pattern });
+    return response.data;
+  }
+
+  async warmCache(keys: string[]): Promise<{ success: boolean; keys_warmed: number }> {
+    const response = await this.client.post('/v1/cache/warm', { keys });
+    return response.data;
+  }
+
+  // ============================================================================
+  // WEEK 2: ADVANCED DECISION ANALYSIS (ASYNC/MCDA)
+  // ============================================================================
+
+  async analyzeDecisionAsync(request: {
+    title: string;
+    description: string;
+    algorithm: string;
+    criteria: Array<{ name: string; weight: number; direction: 'maximize' | 'minimize' }>;
+    alternatives: Array<{ name: string; scores: Record<string, number> }>;
+    execution_mode?: 'SYNCHRONOUS' | 'ASYNCHRONOUS' | 'BATCH';
+  }): Promise<{ job_id: string; status: string }> {
+    const response = await this.client.post('/v1/decisions/analyze-async', request);
+    return response.data;
+  }
+
+  async analyzeDecisionEnsemble(request: {
+    title: string;
+    criteria: Array<{ name: string; weight: number; direction: 'maximize' | 'minimize' }>;
+    alternatives: Array<{ name: string; scores: Record<string, number> }>;
+    algorithms: string[];
+    aggregation_method?: 'AVERAGE' | 'WEIGHTED' | 'MEDIAN' | 'BORDA_COUNT';
+  }): Promise<{ job_id: string; status: string }> {
+    const response = await this.client.post('/v1/decisions/ensemble', request);
+    return response.data;
+  }
+
+  async performSensitivityAnalysis(request: {
+    analysis_id: string;
+    parameter_ranges: Record<string, { min: number; max: number; step: number }>;
+  }): Promise<{ job_id: string; status: string }> {
+    const response = await this.client.post('/v1/decisions/sensitivity-analysis', request);
+    return response.data;
+  }
+
+  async getAnalysisResult(jobId: string): Promise<any> {
+    const response = await this.client.get(`/v1/decisions/results/${jobId}`);
+    return response.data;
+  }
+
+  async getAvailableAlgorithms(): Promise<string[]> {
+    const response = await this.client.get('/v1/decisions/algorithms');
+    return response.data;
+  }
+
+  async submitDecisionFeedback(request: {
+    analysis_id: string;
+    actual_outcome: string;
+    confidence: number;
+    notes: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post('/v1/decisions/feedback', request);
+    return response.data;
+  }
+
+  // ============================================================================
+  // WEEK 2: ADVANCED RULE EVALUATION (ASYNC/LEARNING)
+  // ============================================================================
+
+  async evaluateRuleAsync(request: {
+    rule_id: string;
+    context: Record<string, any>;
+    execution_mode?: 'SYNCHRONOUS' | 'ASYNCHRONOUS' | 'BATCH' | 'STREAMING';
+  }): Promise<{ job_id: string; status: string }> {
+    const response = await this.client.post('/v1/rules/evaluate-async', request);
+    return response.data;
+  }
+
+  async evaluateRulesBatch(request: {
+    rule_ids: string[];
+    context: Record<string, any>;
+  }): Promise<{ batch_id: string; job_ids: string[] }> {
+    const response = await this.client.post('/v1/rules/evaluate-batch', request);
+    return response.data;
+  }
+
+  async getEvaluationResult(jobId: string): Promise<any> {
+    const response = await this.client.get(`/v1/rules/results/${jobId}`);
+    return response.data;
+  }
+
+  async getRuleEvaluationHistory(ruleId: string, limit?: number): Promise<any[]> {
+    const response = await this.client.get(`/v1/rules/${ruleId}/history`, { params: { limit } });
+    return response.data;
+  }
+
+  async getRulePerformanceMetrics(ruleId: string): Promise<any> {
+    const response = await this.client.get(`/v1/rules/${ruleId}/metrics`);
+    return response.data;
+  }
+
+  async submitRuleEvaluationFeedback(request: {
+    evaluation_id: string;
+    actual_outcome: string;
+    confidence: number;
+    notes: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post('/v1/rules/feedback', request);
+    return response.data;
+  }
+
+  // ============================================================================
+  // WEEK 2: SYSTEM RESILIENCE & OBSERVABILITY
+  // ============================================================================
+
+  async getSystemHealth(): Promise<{
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    components: Record<string, any>;
+    timestamp: number;
+  }> {
+    const response = await this.client.get('/v1/health/system');
+    return response.data;
+  }
+
+  async getCircuitBreakerStatus(): Promise<Array<{
+    name: string;
+    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    failure_count: number;
+    success_count: number;
+    last_state_change: number;
+  }>> {
+    const response = await this.client.get('/v1/resilience/circuit-breakers');
+    return response.data;
+  }
+
+  async resetCircuitBreaker(name: string): Promise<{ success: boolean }> {
+    const response = await this.client.post(`/v1/resilience/circuit-breakers/${name}/reset`);
+    return response.data;
+  }
+
+  async getResilienceMetrics(): Promise<{
+    total_operations: number;
+    failed_operations: number;
+    retry_count: number;
+    fallback_invocations: number;
+    avg_recovery_time: number;
+  }> {
+    const response = await this.client.get('/v1/resilience/metrics');
+    return response.data;
+  }
+
+  async getServiceHealth(serviceName: string): Promise<{
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    latency: number;
+    error_rate: number;
+    request_rate: number;
+  }> {
+    const response = await this.client.get(`/v1/health/services/${serviceName}`);
+    return response.data;
+  }
 }
 
 // Export singleton instance

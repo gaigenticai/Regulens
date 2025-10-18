@@ -14,6 +14,7 @@
 #include "../shared/knowledge_base/knowledge_api_handlers_complete.hpp"
 #include "../shared/memory/memory_api_handlers.hpp"
 #include "../shared/decisions/decision_api_handlers_complete.hpp"
+#include "../shared/auth/jwt_parser.hpp"
 #include <sstream>
 #include <cstring>
 #include <algorithm>
@@ -42,6 +43,38 @@
 #endif
 
 namespace regulens {
+
+// Helper function to extract user ID from JWT token in Authorization header
+std::string extract_user_id_from_jwt(const std::map<std::string, std::string>& headers) {
+    const char* jwt_secret_env = std::getenv("JWT_SECRET");
+    if (!jwt_secret_env) {
+        return "system"; // Fallback if JWT secret not configured
+    }
+    std::string secret_key = jwt_secret_env;
+
+    auto auth_it = headers.find("authorization");
+    if (auth_it == headers.end()) {
+        auth_it = headers.find("Authorization");
+        if (auth_it == headers.end()) {
+            return "system"; // Fallback for system operations
+        }
+    }
+
+    std::string auth_header = auth_it->second;
+    if (auth_header.substr(0, 7) != "Bearer ") {
+        return "system"; // Fallback for system operations
+    }
+
+    std::string token = auth_header.substr(7); // Remove "Bearer " prefix
+
+    JWTParser parser(secret_key);
+    auto claims = parser.parse_token(token);
+    if (claims) {
+        return claims->user_id;
+    }
+
+    return "system"; // Fallback for invalid tokens
+}
 
 RESTAPIServer::RESTAPIServer(
     std::shared_ptr<ConnectionPool> db_pool,
@@ -1493,7 +1526,7 @@ APIResponse RESTAPIServer::handle_transaction_routes(const APIRequest& req) {
     
     try {
         // Extract user ID from token
-        std::string user_id = "system";
+        std::string user_id = extract_user_id_from_jwt(req.headers);
         auto auth_it = req.headers.find("Authorization");
         if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
             std::string token = auth_it->second.substr(7);
@@ -1574,7 +1607,7 @@ APIResponse RESTAPIServer::handle_fraud_routes(const APIRequest& req) {
     
     try {
         // Extract user ID from token
-        std::string user_id = "system";
+        std::string user_id = extract_user_id_from_jwt(req.headers);
         auto auth_it = req.headers.find("Authorization");
         if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
             std::string token = auth_it->second.substr(7);
@@ -1662,7 +1695,7 @@ APIResponse RESTAPIServer::handle_knowledge_routes(const APIRequest& req) {
     
     try {
         // Extract user ID from token
-        std::string user_id = "system";
+        std::string user_id = extract_user_id_from_jwt(req.headers);
         auto auth_it = req.headers.find("Authorization");
         if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
             std::string token = auth_it->second.substr(7);
@@ -1741,7 +1774,7 @@ APIResponse RESTAPIServer::handle_memory_routes(const APIRequest& req) {
     
     try {
         // Extract user ID from token
-        std::string user_id = "system";
+        std::string user_id = extract_user_id_from_jwt(req.headers);
         auto auth_it = req.headers.find("Authorization");
         if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
             std::string token = auth_it->second.substr(7);
@@ -1821,7 +1854,7 @@ APIResponse RESTAPIServer::handle_decision_routes(const APIRequest& req) {
     
     try {
         // Extract user ID from token
-        std::string user_id = "system";
+        std::string user_id = extract_user_id_from_jwt(req.headers);
         auto auth_it = req.headers.find("Authorization");
         if (auth_it != req.headers.end() && auth_it->second.substr(0, 7) == "Bearer ") {
             std::string token = auth_it->second.substr(7);

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <random>
 #include <regex>
+#include <future>
 #include <uuid/uuid.h>
 #include <spdlog/spdlog.h>
 #include <thread>
@@ -719,7 +720,7 @@ void AdvancedRuleEngine::log_rule_evaluation(const RuleResult& result, const Eva
         log_data["processing_time_ms"] = result.processing_time.count();
         log_data["matched_conditions"] = result.matched_conditions;
 
-        logger_->log("rule_evaluation", log_data, spdlog::level::info);
+        logger_->log(LogLevel::INFO, "rule_evaluation", "AdvancedRuleEngine", "evaluate_rules_parallel", log_data);
     }
 }
 
@@ -802,10 +803,11 @@ bool AdvancedRuleEngine::validate_rule_definition(const RuleDefinition& rule) {
     return true;
 }
 
-void AdvancedRuleEngine::update_rule_in_cache(const RuleDefinition& rule) {
+bool AdvancedRuleEngine::update_rule_in_cache(const RuleDefinition& rule) {
     std::lock_guard<std::mutex> lock(rules_mutex_);
     rules_cache_[rule.rule_id] = rule;
     cache_last_updated_ = std::chrono::system_clock::now();
+    return true;
 }
 
 void AdvancedRuleEngine::remove_rule_from_cache(const std::string& rule_id) {

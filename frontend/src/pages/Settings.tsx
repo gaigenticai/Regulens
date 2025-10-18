@@ -7,6 +7,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, ArrowLeft, Save, RefreshCw, AlertTriangle, CheckCircle, XCircle, ExternalLink, FileText, Code } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { getUserIdFromToken } from '../utils/auth';
 
 interface ConfigItem {
   key: string;
@@ -27,12 +28,13 @@ interface ConfigUpdateResult {
   }>;
 }
 
+
 const Settings: React.FC = () => {
   const [configItems, setConfigItems] = useState<ConfigItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [updateResult, setUpdateResult] = useState<ConfigUpdateResult | null>(null);
-  const [userId] = useState('web_ui_user'); // TODO: Get from auth context
+  const [userId] = useState(getUserIdFromToken());
   const [reason, setReason] = useState('Web UI configuration update');
 
 

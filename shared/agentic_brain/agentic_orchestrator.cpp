@@ -110,7 +110,7 @@ AgenticOrchestrator::AgenticOrchestrator(
 AgenticOrchestrator::AgenticOrchestrator(
     std::shared_ptr<ConnectionPool> db_pool,
     std::shared_ptr<LLMInterface> llm_interface,
-    std::shared_ptr<LearningEngine> learning_engine,
+    std::shared_ptr<AgentLearningEngine> learning_engine,
     std::shared_ptr<DecisionEngine> decision_engine,
     std::shared_ptr<ToolRegistry> tool_registry,
     std::shared_ptr<EventBus> event_bus,
@@ -194,7 +194,7 @@ bool AgenticOrchestrator::initialize() {
 
         if (!learning_engine_ && llm_interface_) {
             try {
-                learning_engine_ = std::make_shared<LearningEngine>(db_pool_, llm_interface_, logger_);
+                learning_engine_ = std::make_shared<AgentLearningEngine>(db_pool_, llm_interface_, logger_);
             } catch (const std::exception& e) {
                 logger_->log(LogLevel::WARN, "Learning engine initialization failed: " + std::string(e.what()));
                 // Continue without learning engine
@@ -1402,7 +1402,7 @@ std::shared_ptr<LLMInterface> AgenticOrchestrator::create_llm_interface_from_env
     }
 }
 
-std::shared_ptr<LearningEngine> AgenticOrchestrator::create_learning_engine_with_defaults() {
+std::shared_ptr<AgentLearningEngine> AgenticOrchestrator::create_learning_engine_with_defaults() {
     if (!llm_interface_) {
         logger_->log(LogLevel::WARN, "Cannot create LearningEngine without LLMInterface");
         return nullptr;
@@ -1411,7 +1411,7 @@ std::shared_ptr<LearningEngine> AgenticOrchestrator::create_learning_engine_with
     logger_->log(LogLevel::INFO, "Creating LearningEngine with production defaults");
     
     try {
-        auto learning = std::make_shared<LearningEngine>(db_pool_, llm_interface_, logger_);
+        auto learning = std::make_shared<AgentLearningEngine>(db_pool_, llm_interface_, logger_);
         logger_->log(LogLevel::INFO, "LearningEngine created successfully");
         return learning;
         

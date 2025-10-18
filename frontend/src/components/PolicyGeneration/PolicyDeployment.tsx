@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { getUserIdFromToken } from '../../utils/auth';
 import {
   Rocket,
   AlertTriangle,
@@ -434,7 +435,7 @@ const PolicyDeployment: React.FC<PolicyDeploymentProps> = ({
       policyId,
       policyName,
       targetEnvironment: selectedTarget.environment,
-      requestedBy: 'current_user', // TODO: Get from auth context
+      requestedBy: getUserIdFromToken(),
       requestedAt: new Date().toISOString(),
       status: 'pending_approval',
       approvalRequired: true,

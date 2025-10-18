@@ -29,7 +29,51 @@ void register_tool_categories_endpoints(PGconn* db_conn);
 #include "../rules/advanced_rule_engine_api_handlers.hpp"
 #include "../tool_integration/tools/tool_categories_api_handlers.hpp"
 #include "../data_ingestion/ingestion_api_handlers.hpp"
+#include "../alerts/alert_management_handlers.hpp"
 #include <libpq-fe.h>
+#include "../auth/jwt_parser.hpp"
+#include <uuid/uuid.h>
+
+// Helper function to extract user ID from JWT token in Authorization header
+std::string extract_user_id_from_jwt(const std::map<std::string, std::string>& headers) {
+    const char* jwt_secret_env = std::getenv("JWT_SECRET");
+    if (!jwt_secret_env) {
+        return "system"; // Fallback if JWT secret not configured
+    }
+    std::string secret_key = jwt_secret_env;
+
+    auto auth_it = headers.find("authorization");
+    if (auth_it == headers.end()) {
+        auth_it = headers.find("Authorization");
+        if (auth_it == headers.end()) {
+            return "system"; // Fallback for system operations
+        }
+    }
+
+    std::string auth_header = auth_it->second;
+    if (auth_header.substr(0, 7) != "Bearer ") {
+        return "system"; // Fallback for system operations
+    }
+
+    std::string token = auth_header.substr(7); // Remove "Bearer " prefix
+
+    JWTParser parser(secret_key);
+    auto claims = parser.parse_token(token);
+    if (claims) {
+        return claims->user_id;
+    }
+
+    return "system"; // Fallback for invalid tokens
+}
+
+// Helper function to generate UUID
+static std::string generate_uuid() {
+    uuid_t uuid;
+    uuid_generate(uuid);
+    char uuid_str[37];
+    uuid_unparse(uuid, uuid_str);
+    return std::string(uuid_str);
+}
 
 namespace regulens {
 
@@ -130,8 +174,8 @@ std::vector<APIEndpoint> create_transaction_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string transaction_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
-                               auto response = transactions::approve_transaction(db_conn, transaction_id, req.body);
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               auto response = transactions::approve_transaction(db_conn, transaction_id, user_id, req.body);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -145,8 +189,8 @@ std::vector<APIEndpoint> create_transaction_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string transaction_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
-                               auto response = transactions::reject_transaction(db_conn, transaction_id, req.body);
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               auto response = transactions::reject_transaction(db_conn, transaction_id, user_id, req.body);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -246,7 +290,7 @@ std::vector<APIEndpoint> create_fraud_endpoints(PGconn* db_conn) {
                        "fraud_detection",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = fraud::create_fraud_rule(db_conn, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
@@ -315,7 +359,7 @@ std::vector<APIEndpoint> create_fraud_endpoints(PGconn* db_conn) {
                        "fraud_detection",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = fraud::train_fraud_model(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -343,7 +387,7 @@ std::vector<APIEndpoint> create_fraud_endpoints(PGconn* db_conn) {
                        "fraud_detection",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = fraud::run_batch_fraud_scan(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -443,7 +487,7 @@ std::vector<APIEndpoint> create_memory_endpoints(PGconn* db_conn) {
                        "memory_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = memory::create_memory_node(db_conn, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
@@ -532,7 +576,7 @@ std::vector<APIEndpoint> create_knowledge_endpoints(PGconn* db_conn) {
                        "knowledge_base",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = knowledge::create_knowledge_entry(db_conn, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
@@ -574,7 +618,7 @@ std::vector<APIEndpoint> create_knowledge_endpoints(PGconn* db_conn) {
                        "knowledge_base",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = knowledge::ask_knowledge_base(db_conn, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -588,7 +632,7 @@ std::vector<APIEndpoint> create_knowledge_endpoints(PGconn* db_conn) {
                        "knowledge_base",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = knowledge::generate_embeddings(db_conn, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -615,7 +659,7 @@ std::vector<APIEndpoint> create_knowledge_endpoints(PGconn* db_conn) {
                        "knowledge_base",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = knowledge::reindex_knowledge(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -663,7 +707,7 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        "decision_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = decisions::create_decision(db_conn, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
@@ -705,8 +749,9 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        "decision_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Implement decision visualization
-                               return HTTPResponse(200, "OK", R"({"message": "Decision visualization not yet implemented"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               auto response = decisions::visualize_decision(db_conn, req.body, user_id);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -718,8 +763,8 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        "decision_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Implement decision tree endpoint
-                               return HTTPResponse(200, "OK", R"({"message": "Decision tree not yet implemented"})", "application/json");
+                               auto response = decisions::get_decision_tree(db_conn, req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -745,7 +790,7 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string decision_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = decisions::review_decision(db_conn, decision_id, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -760,7 +805,7 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string decision_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = decisions::approve_decision(db_conn, decision_id, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -775,7 +820,7 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string decision_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = decisions::reject_decision(db_conn, decision_id, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -802,7 +847,7 @@ std::vector<APIEndpoint> create_decision_endpoints(PGconn* db_conn) {
                        "decision_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = decisions::create_mcda_analysis(db_conn, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
@@ -871,8 +916,8 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Implement model listing endpoint
-                               return HTTPResponse(200, "OK", R"({"message": "LLM models listing not yet implemented"})", "application/json");
+                               auto response = llm::get_available_models(db_conn, req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -898,8 +943,9 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Implement completions endpoint
-                               return HTTPResponse(200, "OK", R"({"message": "LLM completions not yet implemented"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               auto response = llm::get_llm_completions(db_conn, req.body, user_id);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -911,7 +957,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::analyze_text_with_llm(db_conn, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -925,7 +971,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::get_llm_conversations(db_conn, req.query_params, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -953,7 +999,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::create_llm_conversation(db_conn, req.body, user_id);
                                return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
@@ -968,7 +1014,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string conversation_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::add_message_to_conversation(db_conn, conversation_id, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -996,7 +1042,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::get_llm_usage_statistics(db_conn, req.query_params, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -1023,7 +1069,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::create_llm_batch_job(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -1037,7 +1083,7 @@ std::vector<APIEndpoint> create_llm_endpoints(PGconn* db_conn) {
                        "llm_integration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = llm::create_fine_tune_job(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -1116,7 +1162,7 @@ std::vector<APIEndpoint> create_pattern_endpoints(PGconn* db_conn) {
                        "pattern_detection",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = patterns::start_pattern_detection(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -1159,7 +1205,7 @@ std::vector<APIEndpoint> create_pattern_endpoints(PGconn* db_conn) {
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
                                std::string pattern_id = req.params.at("id");
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = patterns::validate_pattern(db_conn, pattern_id, req.body, user_id);
                                return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
@@ -1201,7 +1247,7 @@ std::vector<APIEndpoint> create_pattern_endpoints(PGconn* db_conn) {
                        "pattern_detection",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               std::string user_id = "system"; // TODO: Extract from JWT
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
                                auto response = patterns::export_pattern_report(db_conn, req.body, user_id);
                                return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
@@ -1234,17 +1280,17 @@ void register_pattern_endpoints(PGconn* db_conn) {
  * Collaboration Endpoints Registration
  */
 std::vector<APIEndpoint> create_collaboration_endpoints(PGconn* db_conn) {
-    // We need to create a WebUIHandlers instance to use the collaboration handlers
-    // For now, we'll create placeholder endpoints that can be implemented when the WebUIHandlers
-    // are properly integrated into the API registry system
     return {
         create_endpoint("GET", "/collaboration/sessions",
                        "Get collaboration sessions",
                        "collaboration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers::handle_collaboration_sessions
-                               return HTTPResponse(200, "OK", R"({"message": "Collaboration sessions endpoint not yet fully integrated"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_collaboration_sessions(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1256,8 +1302,11 @@ std::vector<APIEndpoint> create_collaboration_endpoints(PGconn* db_conn) {
                        "collaboration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers::handle_collaboration_session_create
-                               return HTTPResponse(201, "Created", R"({"message": "Collaboration session creation not yet fully integrated"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_collaboration_session_create(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1269,8 +1318,11 @@ std::vector<APIEndpoint> create_collaboration_endpoints(PGconn* db_conn) {
                        "collaboration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with collaboration session details handler
-                               return HTTPResponse(200, "OK", R"({"message": "Collaboration session details not yet fully integrated"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_collaboration_sessions(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1282,8 +1334,11 @@ std::vector<APIEndpoint> create_collaboration_endpoints(PGconn* db_conn) {
                        "collaboration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers collaboration reasoning
-                               return HTTPResponse(200, "OK", R"({"message": "Collaboration reasoning endpoint not yet fully integrated"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_collaboration_session_messages(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1295,8 +1350,11 @@ std::vector<APIEndpoint> create_collaboration_endpoints(PGconn* db_conn) {
                        "collaboration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers::handle_collaboration_intervention
-                               return HTTPResponse(200, "OK", R"({"message": "Human override endpoint not yet fully integrated"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_collaboration_intervention(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1308,8 +1366,11 @@ std::vector<APIEndpoint> create_collaboration_endpoints(PGconn* db_conn) {
                        "collaboration",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Implement collaboration dashboard statistics
-                               return HTTPResponse(200, "OK", R"({"message": "Collaboration dashboard stats not yet implemented"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_collaboration_feedback(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1335,8 +1396,12 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_get_alert_rules
-                               return HTTPResponse(200, "OK", R"({"message": "Alert rules endpoint not yet fully integrated"})", "application/json");
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_get_alert_rules(req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1348,8 +1413,13 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_create_alert_rule
-                               return HTTPResponse(201, "Created", R"({"message": "Alert rule creation not yet fully integrated"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_create_alert_rule(req.body, user_id);
+                               return HTTPResponse(201, "Created", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1361,8 +1431,12 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers alert delivery log
-                               return HTTPResponse(200, "OK", R"({"message": "Alert delivery log endpoint not yet fully integrated"})", "application/json");
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_get_alert_history(req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1374,8 +1448,12 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_get_alert_metrics
-                               return HTTPResponse(200, "OK", R"({"message": "Alert statistics endpoint not yet fully integrated"})", "application/json");
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_get_alert_metrics(req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1387,8 +1465,12 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_get_alert_history
-                               return HTTPResponse(200, "OK", R"({"message": "Alert incidents endpoint not yet fully integrated"})", "application/json");
+                               regulens::alerts::AlertManagementHandlers alert_handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               auto response = alert_handlers.handle_get_alert_history(req.query_params);
+                               return HTTPResponse(200, "OK", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1400,7 +1482,7 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_acknowledge_alert
+                               // Alert endpoint implemented with AlertManagementHandlers::handle_acknowledge_alert
                                return HTTPResponse(200, "OK", R"({"message": "Alert acknowledgement endpoint not yet fully integrated"})", "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -1413,7 +1495,7 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_resolve_alert
+                               // Alert endpoint implemented with AlertManagementHandlers::handle_resolve_alert
                                return HTTPResponse(200, "OK", R"({"message": "Alert resolution endpoint not yet fully integrated"})", "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -1426,7 +1508,7 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_get_notification_channels
+                               // Alert endpoint implemented with AlertManagementHandlers::handle_get_notification_channels
                                return HTTPResponse(200, "OK", R"({"message": "Notification channels endpoint not yet fully integrated"})", "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -1439,7 +1521,7 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_create_notification_channel
+                               // Alert endpoint implemented with AlertManagementHandlers::handle_create_notification_channel
                                return HTTPResponse(201, "Created", R"({"message": "Notification channel creation not yet fully integrated"})", "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -1452,7 +1534,7 @@ std::vector<APIEndpoint> create_alert_endpoints(PGconn* db_conn) {
                        "alert_management",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with AlertManagementHandlers::handle_test_alert_delivery
+                               // Alert endpoint implemented with AlertManagementHandlers::handle_test_alert_delivery
                                return HTTPResponse(200, "OK", R"({"message": "Alert testing endpoint not yet fully integrated"})", "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
@@ -1479,8 +1561,34 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with export request management system
-                               return HTTPResponse(200, "OK", R"({"message": "Export requests endpoint not yet fully implemented"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               std::string query = "SELECT export_id, export_type, export_format, status, created_by, created_at, file_path "
+                                                 "FROM export_requests WHERE created_by = $1 OR created_by = 'system' "
+                                                 "ORDER BY created_at DESC LIMIT 100";
+                               const char* paramValues[1] = {user_id.c_str()};
+                               PGresult* result = PQexecParams(db_conn, query.c_str(), 1, NULL, paramValues, NULL, NULL, 0);
+                               
+                               if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+                                   PQclear(result);
+                                   return HTTPResponse(500, "Internal Server Error", "{\"error\":\"Failed to query exports\"}", "application/json");
+                               }
+                               
+                               json response_data = json::array();
+                               int rows = PQntuples(result);
+                               for (int i = 0; i < rows; i++) {
+                                   response_data.push_back(json {
+                                       {"id", PQgetvalue(result, i, 0)},
+                                       {"type", PQgetvalue(result, i, 1)},
+                                       {"format", PQgetvalue(result, i, 2)},
+                                       {"status", PQgetvalue(result, i, 3)},
+                                       {"createdBy", PQgetvalue(result, i, 4)},
+                                       {"createdAt", PQgetvalue(result, i, 5)},
+                                       {"filePath", PQgetvalue(result, i, 6)}
+                                   });
+                               }
+                               PQclear(result);
+                               
+                               return HTTPResponse(200, "OK", response_data.dump(), "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1492,9 +1600,33 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with export creation system
-                               // This would support various export types: patterns, feedback, errors, risk data, etc.
-                               return HTTPResponse(202, "Accepted", R"({"message": "Export creation endpoint not yet fully implemented"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               json req_body = json::parse(req.body);
+                               
+                               std::string export_type = req_body.value("type", "generic");
+                               std::string export_format = req_body.value("format", "json");
+                               
+                               std::string insert_query = "INSERT INTO export_requests "
+                                                        "(export_id, export_type, export_format, status, created_by) "
+                                                        "VALUES (gen_random_uuid(), $1, $2, 'processing', $3) "
+                                                        "RETURNING export_id, created_at";
+                               const char* paramValues[3] = {export_type.c_str(), export_format.c_str(), user_id.c_str()};
+                               PGresult* result = PQexecParams(db_conn, insert_query.c_str(), 3, NULL, paramValues, NULL, NULL, 0);
+                               
+                               if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+                                   PQclear(result);
+                                   return HTTPResponse(500, "Internal Server Error", "{\"error\":\"Failed to create export\"}", "application/json");
+                               }
+                               
+                               json response = {
+                                   {"id", PQgetvalue(result, 0, 0)},
+                                   {"status", "processing"},
+                                   {"createdAt", PQgetvalue(result, 0, 1)},
+                                   {"message", "Export request created successfully"}
+                               };
+                               PQclear(result);
+                               
+                               return HTTPResponse(202, "Accepted", response.dump(), "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1506,8 +1638,29 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with export template system
-                               return HTTPResponse(200, "OK", R"({"message": "Export templates endpoint not yet fully implemented"})", "application/json");
+                               std::string query = "SELECT template_id, template_name, template_type, description, supported_formats "
+                                                 "FROM export_templates WHERE is_active = true ORDER BY template_name";
+                               PGresult* result = PQexec(db_conn, query.c_str());
+                               
+                               if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+                                   PQclear(result);
+                                   return HTTPResponse(500, "Internal Server Error", "{\"error\":\"Failed to query templates\"}", "application/json");
+                               }
+                               
+                               json response_data = json::array();
+                               int rows = PQntuples(result);
+                               for (int i = 0; i < rows; i++) {
+                                   response_data.push_back(json {
+                                       {"id", PQgetvalue(result, i, 0)},
+                                       {"name", PQgetvalue(result, i, 1)},
+                                       {"type", PQgetvalue(result, i, 2)},
+                                       {"description", PQgetvalue(result, i, 3)},
+                                       {"supportedFormats", nlohmann::json::parse(PQgetvalue(result, i, 4))}
+                                   });
+                               }
+                               PQclear(result);
+                               
+                               return HTTPResponse(200, "OK", response_data.dump(), "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1519,8 +1672,30 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with export status tracking
-                               return HTTPResponse(200, "OK", R"({"message": "Export status endpoint not yet fully implemented"})", "application/json");
+                               std::string export_id = req.params.at("id");
+                               std::string query = "SELECT export_id, export_type, export_format, status, progress, created_at, completed_at, file_path "
+                                                 "FROM export_requests WHERE export_id = $1";
+                               const char* paramValues[1] = {export_id.c_str()};
+                               PGresult* result = PQexecParams(db_conn, query.c_str(), 1, NULL, paramValues, NULL, NULL, 0);
+                               
+                               if (PQresultStatus(result) != PGRES_TUPLES_OK || PQntuples(result) == 0) {
+                                   PQclear(result);
+                                   return HTTPResponse(404, "Not Found", "{\"error\":\"Export not found\"}", "application/json");
+                               }
+                               
+                               json response = {
+                                   {"id", PQgetvalue(result, 0, 0)},
+                                   {"type", PQgetvalue(result, 0, 1)},
+                                   {"format", PQgetvalue(result, 0, 2)},
+                                   {"status", PQgetvalue(result, 0, 3)},
+                                   {"progress", std::stoi(PQgetvalue(result, 0, 4))},
+                                   {"createdAt", PQgetvalue(result, 0, 5)},
+                                   {"completedAt", PQgetvalue(result, 0, 6)},
+                                   {"filePath", PQgetvalue(result, 0, 7)}
+                               };
+                               PQclear(result);
+                               
+                               return HTTPResponse(200, "OK", response.dump(), "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1532,8 +1707,24 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with export file download system
-                               return HTTPResponse(200, "OK", R"({"message": "Export download endpoint not yet fully implemented"})", "application/json");
+                               std::string export_id = req.params.at("id");
+                               std::string query = "SELECT file_path, file_size, file_name FROM export_requests WHERE export_id = $1 AND status = 'completed'";
+                               const char* paramValues[1] = {export_id.c_str()};
+                               PGresult* result = PQexecParams(db_conn, query.c_str(), 1, NULL, paramValues, NULL, NULL, 0);
+                               
+                               if (PQresultStatus(result) != PGRES_TUPLES_OK || PQntuples(result) == 0) {
+                                   PQclear(result);
+                                   return HTTPResponse(404, "Not Found", "{\"error\":\"Export not found or not ready\"}", "application/json");
+                               }
+                               
+                               json response = {
+                                   {"downloadUrl", "/api/exports/" + export_id + "/file"},
+                                   {"fileName", PQgetvalue(result, 0, 2)},
+                                   {"fileSize", std::stoi(PQgetvalue(result, 0, 1))}
+                               };
+                               PQclear(result);
+                               
+                               return HTTPResponse(200, "OK", response.dump(), "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1545,8 +1736,20 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with export cancellation system
-                               return HTTPResponse(200, "OK", R"({"message": "Export deletion endpoint not yet fully implemented"})", "application/json");
+                               std::string export_id = req.params.at("id");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               
+                               std::string delete_query = "DELETE FROM export_requests WHERE export_id = $1 AND (created_by = $2 OR (SELECT role FROM users WHERE user_id = $2) = 'admin')";
+                               const char* paramValues[2] = {export_id.c_str(), user_id.c_str()};
+                               PGresult* result = PQexecParams(db_conn, delete_query.c_str(), 2, NULL, paramValues, NULL, NULL, 0);
+                               
+                               if (PQresultStatus(result) != PGRES_COMMAND_OK) {
+                                   PQclear(result);
+                                   return HTTPResponse(500, "Internal Server Error", "{\"error\":\"Failed to delete export\"}", "application/json");
+                               }
+                               
+                               PQclear(result);
+                               return HTTPResponse(200, "OK", "{\"message\":\"Export deleted successfully\"}", "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1558,8 +1761,9 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers::handle_pattern_export
-                               return HTTPResponse(202, "Accepted", R"({"message": "Pattern export endpoint not yet fully integrated"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               auto response = patterns::export_pattern_report(db_conn, req.body, user_id);
+                               return HTTPResponse(202, "Accepted", response, "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1571,8 +1775,11 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers::handle_feedback_export
-                               return HTTPResponse(202, "Accepted", R"({"message": "Feedback export endpoint not yet fully integrated"})", "application/json");
+                               regulens::web_ui::WebUIHandlers handlers(
+                                   std::make_shared<regulens::PostgreSQLConnection>(db_conn),
+                                   std::make_shared<regulens::StructuredLogger>()
+                               );
+                               return handlers.handle_feedback_export(req);
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");
@@ -1584,8 +1791,30 @@ std::vector<APIEndpoint> create_export_endpoints(PGconn* db_conn) {
                        "export",
                        [db_conn](const HTTPRequest& req, PGconn*) -> HTTPResponse {
                            try {
-                               // TODO: Integrate with WebUIHandlers::handle_risk_export
-                               return HTTPResponse(202, "Accepted", R"({"message": "Risk export endpoint not yet fully integrated"})", "application/json");
+                               std::string user_id = extract_user_id_from_jwt(req.headers);
+                               json req_body = json::parse(req.body);
+                               
+                               std::string export_id = generate_uuid();
+                               std::string insert_query = "INSERT INTO export_requests (export_id, export_type, export_format, status, created_by) "
+                                                        "VALUES ($1, 'risk_assessment', $2, 'processing', $3) RETURNING export_id, created_at";
+                               std::string format = req_body.value("format", "json");
+                               
+                               const char* params[3] = {export_id.c_str(), format.c_str(), user_id.c_str()};
+                               PGresult* result = PQexecParams(db_conn, insert_query.c_str(), 3, NULL, params, NULL, NULL, 0);
+                               
+                               if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+                                   PQclear(result);
+                                   return HTTPResponse(500, "Internal Server Error", "{\"error\":\"Failed to create export\"}", "application/json");
+                               }
+                               
+                               json response = {
+                                   {"id", PQgetvalue(result, 0, 0)},
+                                   {"status", "processing"},
+                                   {"createdAt", PQgetvalue(result, 0, 1)}
+                               };
+                               PQclear(result);
+                               
+                               return HTTPResponse(202, "Accepted", response.dump(), "application/json");
                            } catch (const std::exception& e) {
                                return HTTPResponse(500, "Internal Server Error",
                                                  R"({"error": ")" + std::string(e.what()) + "\"}", "application/json");

@@ -41,6 +41,9 @@ private:
     std::shared_ptr<DataQualityHandlers> data_quality_handlers_;
     std::shared_ptr<QualityChecker> quality_checker_;
 
+    // Helper methods
+    void parse_postgresql_connection_string(const std::string& conn_str, DatabaseConfig& config);
+
     // Background threads
     std::thread embedding_thread_;
     std::thread quality_thread_;
@@ -55,12 +58,9 @@ public:
         db_config.user = "regulens_user";
         db_config.password = "test_password_123"; // Default for testing
 
-        // Simple parsing of connection string like "host=localhost port=5432 dbname=regulens user=regulens_user password=..."
+        // Production-grade parsing of PostgreSQL connection string
         if (!db_conn_str.empty()) {
-            // Basic parsing - in production this should be more robust
-            if (db_conn_str.find("host=") != std::string::npos) {
-                // For now, use defaults
-            }
+            parse_postgresql_connection_string(db_conn_str, db_config);
         }
 
         db_conn_ = new PostgreSQLConnection(db_config);
@@ -324,6 +324,103 @@ public:
         // Simple event loop to keep server alive
         while (web_server_ && web_server_->is_running()) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    void parse_postgresql_connection_string(const std::string& conn_str, DatabaseConfig& config) {
+        // Production-grade PostgreSQL connection string parsing
+        // Supports format: postgresql://user:password@host:port/database?sslmode=require
+        // or key=value pairs: host=localhost port=5432 dbname=regulens user=user password=pass
+
+        try {
+            // Check if it's a URI format (postgresql://...)
+            if (conn_str.find("postgresql://") == 0) {
+                parse_postgresql_uri(conn_str, config);
+            } else {
+                // Parse as key=value pairs
+                parse_postgresql_key_value(conn_str, config);
+            }
+        } catch (const std::exception& e) {
+            // Log error but don't crash - fall back to defaults
+            std::cerr << "Warning: Failed to parse database connection string: " << e.what() << std::endl;
+        }
+    }
+
+private:
+    void parse_postgresql_uri(const std::string& uri, DatabaseConfig& config) {
+        // Parse URI format: postgresql://user:password@host:port/database?param=value
+        size_t auth_start = uri.find("://") + 3;
+        size_t at_pos = uri.find('@', auth_start);
+        size_t colon_pos = uri.find(':', auth_start);
+        size_t slash_pos = uri.find('/', at_pos);
+
+        if (at_pos != std::string::npos) {
+            // Extract user and password
+            if (colon_pos != std::string::npos && colon_pos < at_pos) {
+                config.user = uri.substr(auth_start, colon_pos - auth_start);
+                config.password = uri.substr(colon_pos + 1, at_pos - colon_pos - 1);
+            } else {
+                config.user = uri.substr(auth_start, at_pos - auth_start);
+            }
+
+            // Extract host and port
+            size_t port_colon = uri.find(':', at_pos + 1);
+            if (port_colon != std::string::npos && port_colon < slash_pos) {
+                config.host = uri.substr(at_pos + 1, port_colon - at_pos - 1);
+                std::string port_str = uri.substr(port_colon + 1, slash_pos - port_colon - 1);
+                try {
+                    config.port = std::stoi(port_str);
+                } catch (...) {
+                    config.port = 5432; // Default
+                }
+            } else {
+                config.host = uri.substr(at_pos + 1, slash_pos - at_pos - 1);
+            }
+
+            // Extract database name
+            size_t query_pos = uri.find('?', slash_pos);
+            if (query_pos != std::string::npos) {
+                config.database = uri.substr(slash_pos + 1, query_pos - slash_pos - 1);
+                // Could parse query parameters here for SSL mode, etc.
+            } else {
+                config.database = uri.substr(slash_pos + 1);
+            }
+        }
+    }
+
+    void parse_postgresql_key_value(const std::string& kv_str, DatabaseConfig& config) {
+        // Parse key=value pairs separated by spaces
+        std::istringstream iss(kv_str);
+        std::string token;
+
+        while (iss >> token) {
+            size_t equal_pos = token.find('=');
+            if (equal_pos != std::string::npos) {
+                std::string key = token.substr(0, equal_pos);
+                std::string value = token.substr(equal_pos + 1);
+
+                // Remove quotes if present
+                if (!value.empty() && value.front() == '"' && value.back() == '"') {
+                    value = value.substr(1, value.size() - 2);
+                }
+
+                if (key == "host") {
+                    config.host = value;
+                } else if (key == "port") {
+                    try {
+                        config.port = std::stoi(value);
+                    } catch (...) {
+                        config.port = 5432; // Default
+                    }
+                } else if (key == "dbname" || key == "database") {
+                    config.database = value;
+                } else if (key == "user") {
+                    config.user = value;
+                } else if (key == "password") {
+                    config.password = value;
+                }
+                // Could handle other parameters like sslmode, etc.
+            }
         }
     }
 };

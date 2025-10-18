@@ -2,12 +2,14 @@
 
 add_library(regulens_agentic_brain STATIC
     agentic_orchestrator.cpp
+    agent_comm_registry.cpp
     consensus_engine.cpp
     consensus_engine_api_handlers.cpp
     advanced_rule_engine.cpp
     advanced_rule_engine_api_handlers.cpp
     communication_mediator.cpp
     communication_mediator_api_handlers.cpp
+    inter_agent_communicator.cpp
     message_translator.cpp
     message_translator_api_handlers.cpp
 )

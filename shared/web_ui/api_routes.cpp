@@ -266,6 +266,11 @@ void register_ui_api_routes(std::shared_ptr<WebUIServer> server,
         return handlers->handle_error_export(req);
     });
 
+    // POST /api/errors/clear - Clear error history
+    server->add_route("POST", "/api/errors/clear", [handlers](const HTTPRequest& req) {
+        return handlers->handle_error_clear(req);
+    });
+
     // ============================================================================
     // LLM INTEGRATION ENDPOINTS
     // ============================================================================

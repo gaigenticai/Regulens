@@ -7,28 +7,39 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <unordered_map>
 #include <string>
-#include <queue>
+#include <vector>
+#include <memory>
+#include <unordered_map>
 #include <list>
+#include <optional>
+#include <chrono>
+#include <random>
+#include <nlohmann/json.hpp>
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
 #include "llm_interface.hpp"
-#include "learning_engine.hpp"
-#include <nlohmann/json.hpp>
+// Use canonical model definitions instead of redefining
+#include "../models/agent_decision.hpp"
+#include "../models/risk_assessment_types.hpp"
+#include "../audit/decision_audit_trail.hpp"
+#include "../memory/learning_engine.hpp"
 
 namespace regulens {
 
-enum class DecisionType {
-    TRANSACTION_APPROVAL,
-    RISK_FLAG,
-    REGULATORY_IMPACT_ASSESSMENT,
-    AUDIT_ANOMALY_DETECTION,
-    COMPLIANCE_ALERT,
-    PROACTIVE_MONITORING
-};
+// NOTE: DecisionType, RiskAssessment, and DecisionConfidence are now defined in:
+// - models/agent_decision.hpp
+// - models/risk_assessment_types.hpp  
+// - audit/decision_audit_trail.hpp
+// DO NOT redefine them here - use the canonical definitions
+
+// Conditional definition - only define if not already defined
+#ifndef DECISION_ENGINE_TYPE_DEFINED
+#define DECISION_ENGINE_TYPE_DEFINED
+
+// DecisionType is now defined in models/agent_decision.hpp - do not redefine
+
+#endif // DECISION_ENGINE_TYPE_DEFINED
 
 enum class RiskLevel {
     LOW,
@@ -38,17 +49,10 @@ enum class RiskLevel {
     UNKNOWN
 };
 
-enum class DecisionConfidence {
-    LOW,
-    MEDIUM,
-    HIGH,
-    VERY_HIGH
-};
-
 struct DecisionModel {
     std::string model_id;
     std::string name;
-    DecisionType type;
+    DecisionType type;  // Uses DecisionType from models/agent_decision.hpp
     nlohmann::json parameters;
     nlohmann::json metadata;
     double accuracy_score;
@@ -58,29 +62,22 @@ struct DecisionModel {
     bool is_active;
 };
 
-struct RiskAssessment {
-    RiskLevel level;
-    double score; // 0.0 to 1.0
-    std::vector<std::string> risk_factors;
-    std::vector<std::string> mitigating_factors;
-    nlohmann::json assessment_details;
-    std::chrono::system_clock::time_point assessed_at;
-};
+// RiskAssessment is now defined in models/risk_assessment_types.hpp - do not redefine
 
 struct DecisionContext {
     std::string context_id;
-    DecisionType decision_type;
+    DecisionType decision_type;  // Uses DecisionType from models/agent_decision.hpp
     nlohmann::json input_data;
     nlohmann::json environmental_context;
-    std::vector<RiskAssessment> risk_assessments;
+    std::vector<RiskAssessment> risk_assessments;  // Uses RiskAssessment from models/risk_assessment_types.hpp
     std::chrono::system_clock::time_point context_timestamp;
 };
 
 struct DecisionResult {
     std::string decision_id;
-    DecisionType decision_type;
+    DecisionType decision_type;  // Uses DecisionType from models/agent_decision.hpp
     std::string decision_outcome;
-    DecisionConfidence confidence;
+    DecisionConfidence confidence;  // Uses DecisionConfidence from audit/decision_audit_trail.hpp
     std::string reasoning;
     std::vector<std::string> recommended_actions;
     nlohmann::json decision_metadata;
@@ -105,7 +102,7 @@ public:
     DecisionEngine(
         std::shared_ptr<ConnectionPool> db_pool,
         std::shared_ptr<LLMInterface> llm_interface,
-        std::shared_ptr<LearningEngine> learning_engine,
+        std::shared_ptr<AgentLearningEngine> learning_engine,
         StructuredLogger* logger
     );
 
@@ -164,7 +161,7 @@ private:
 
     // Pattern-based decision making
     nlohmann::json apply_learned_patterns(const DecisionContext& context);
-    bool matches_known_risk_pattern(const nlohmann::json& data, const std::vector<LearningPattern>& patterns);
+    bool matches_known_risk_pattern(const nlohmann::json& data, const std::vector<LearnedPattern>& patterns);
 
     // Confidence calculation
     DecisionConfidence calculate_decision_confidence(const DecisionContext& context, const DecisionResult& result);
@@ -200,7 +197,7 @@ private:
     // Internal state
     std::shared_ptr<ConnectionPool> db_pool_;
     std::shared_ptr<LLMInterface> llm_interface_;
-    std::shared_ptr<LearningEngine> learning_engine_;
+    std::shared_ptr<AgentLearningEngine> learning_engine_;
     StructuredLogger* logger_;
 
     std::unordered_map<DecisionType, nlohmann::json> decision_thresholds_;
@@ -234,8 +231,8 @@ private:
     DecisionType string_to_decision_type(const std::string& str);
     std::string decision_type_to_string(DecisionType type);
     DecisionConfidence string_to_confidence(const std::string& str);
-    bool matches_learned_pattern(const nlohmann::json& data, const LearningPattern& pattern);
-    bool matches_learned_pattern(const nlohmann::json& data, const std::vector<LearningPattern>& patterns);
+    bool matches_learned_pattern(const nlohmann::json& data, const LearnedPattern& pattern);
+    bool matches_learned_pattern(const nlohmann::json& data, const std::vector<LearnedPattern>& patterns);
     std::string timestamp_to_string(std::chrono::system_clock::time_point tp);
     std::chrono::system_clock::time_point string_to_timestamp(const std::string& str);
     nlohmann::json generate_detailed_explanation(const DecisionResult& decision);

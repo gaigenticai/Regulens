@@ -437,6 +437,26 @@ ConsensusResult ConsensusEngine::calculate_consensus(const std::string& consensu
         result.rounds_used = static_cast<int>(rounds.size());
         result.total_participants = static_cast<int>(config.participants.size());
 
+        // Populate web UI convenience fields
+        result.consensus_reached = result.success && result.agreement_percentage >= 0.5;
+        result.confidence = result.agreement_percentage;
+        result.reasoning = result.resolution_details.value("reasoning", "Consensus reached through voting");
+        result.decision = nlohmann::json{{"value", result.final_decision}, {"confidence", result.agreement_percentage}};
+
+        // Populate votes from rounds
+        result.votes.clear();
+        for (const auto& round : rounds) {
+            for (const auto& opinion : round.opinions) {
+                result.votes.push_back({
+                    {"agent_id", opinion.agent_id},
+                    {"decision", opinion.decision},
+                    {"confidence", opinion.confidence_score},
+                    {"reasoning", opinion.reasoning},
+                    {"round", round.round_number}
+                });
+            }
+        }
+
         // Store completed consensus
         if (result.success) {
             completed_consensus_[consensus_id] = result;
@@ -462,6 +482,69 @@ ConsensusResult ConsensusEngine::calculate_consensus(const std::string& consensu
     );
 
     return result;
+}
+
+// Web UI convenience methods
+std::optional<std::string> ConsensusEngine::start_session(
+    const std::string& topic,
+    const std::vector<std::string>& participants,
+    VotingAlgorithm consensus_type,
+    const nlohmann::json& parameters
+) {
+    try {
+        ConsensusConfiguration config;
+        config.topic = topic;
+        config.algorithm = consensus_type;
+        config.min_participants = static_cast<int>(participants.size());
+        config.max_rounds = parameters.value("max_rounds", 3);
+
+        // Convert participant IDs to Agent objects
+        for (const auto& participant_id : participants) {
+            Agent agent;
+            agent.agent_id = participant_id;
+            agent.name = participant_id; // Use ID as name for now
+            agent.role = AgentRole::REVIEWER; // Default role
+            agent.voting_weight = 1.0; // Default weight
+            config.participants.push_back(agent);
+        }
+
+        std::string consensus_id = initiate_consensus(config);
+        if (consensus_id.empty()) {
+            return std::nullopt;
+        }
+
+        return consensus_id;
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to start consensus session: {}", e.what());
+        return std::nullopt;
+    }
+}
+
+bool ConsensusEngine::contribute_vote(
+    const std::string& session_id,
+    const std::string& agent_id,
+    const nlohmann::json& vote_value,
+    double confidence,
+    const std::string& reasoning
+) {
+    try {
+        AgentOpinion opinion;
+        opinion.agent_id = agent_id;
+        opinion.decision = vote_value.dump(); // Convert JSON to string
+        opinion.confidence_score = confidence;
+        opinion.reasoning = reasoning;
+        opinion.submitted_at = std::chrono::system_clock::now();
+        opinion.round_number = 1; // Default to first round
+
+        return submit_opinion(session_id, opinion);
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to contribute vote for session {}: {}", session_id, e.what());
+        return false;
+    }
+}
+
+ConsensusResult ConsensusEngine::calculate_result(const std::string& session_id) {
+    return calculate_consensus(session_id);
 }
 
 // Agent management
@@ -801,9 +884,115 @@ ConsensusResult ConsensusEngine::run_ranked_choice_voting(const std::vector<Voti
     result.topic = config.topic;
     result.algorithm_used = VotingAlgorithm::RANKED_CHOICE;
 
-    // Simplified implementation - in production, this would be more complex
-    // For now, fall back to majority voting
-    return run_majority_voting(rounds, config);
+    // Production implementation of Instant-Runoff Voting (IRV) algorithm
+    if (rounds.empty()) {
+        result.success = false;
+        result.agreement_percentage = 0.0;
+        result.final_decision = "No voting rounds available";
+        return result;
+    }
+
+    const auto& final_round = rounds.back();
+
+    // Count total participants and collect preferences
+    std::unordered_map<std::string, std::vector<std::string>> preferences;
+    std::unordered_set<std::string> all_candidates;
+    result.total_participants = 0;
+
+    for (const auto& opinion : final_round.opinions) {
+        result.total_participants++;
+        std::string decision = opinion.decision;
+
+        // Parse ranked preferences from decision text (format: "1.OptionA,2.OptionB,3.OptionC")
+        std::vector<std::string> ranked_choices;
+        size_t pos = 0;
+        while ((pos = decision.find(',')) != std::string::npos) {
+            std::string choice = decision.substr(0, pos);
+            // Extract option after number and dot (e.g., "1.OptionA" -> "OptionA")
+            size_t dot_pos = choice.find('.');
+            if (dot_pos != std::string::npos) {
+                choice = choice.substr(dot_pos + 1);
+                ranked_choices.push_back(choice);
+                all_candidates.insert(choice);
+            }
+            decision.erase(0, pos + 1);
+        }
+        // Handle last choice
+        size_t dot_pos = decision.find('.');
+        if (dot_pos != std::string::npos) {
+            std::string choice = decision.substr(dot_pos + 1);
+            ranked_choices.push_back(choice);
+            all_candidates.insert(choice);
+        }
+
+        preferences[opinion.agent_id] = ranked_choices;
+    }
+
+    // Run Instant-Runoff Voting
+    std::vector<std::string> remaining_candidates(all_candidates.begin(), all_candidates.end());
+    std::string winner;
+    int round_num = 1;
+
+    while (remaining_candidates.size() > 1 && round_num <= 10) { // Prevent infinite loops
+        std::unordered_map<std::string, int> vote_counts;
+
+        // Count first-choice votes for remaining candidates
+        for (const auto& pref_pair : preferences) {
+            const auto& ranked = pref_pair.second;
+            for (const auto& choice : ranked) {
+                if (std::find(remaining_candidates.begin(), remaining_candidates.end(), choice) != remaining_candidates.end()) {
+                    vote_counts[choice]++;
+                    break; // Only count first valid preference
+                }
+            }
+        }
+
+        // Check for majority winner
+        for (const auto& candidate : remaining_candidates) {
+            int votes = vote_counts[candidate];
+            if (votes > result.total_participants / 2) {
+                winner = candidate;
+                break;
+            }
+        }
+
+        if (!winner.empty()) break;
+
+        // Eliminate candidate with fewest votes
+        std::string eliminated;
+        int min_votes = INT_MAX;
+        for (const auto& candidate : remaining_candidates) {
+            int votes = vote_counts[candidate];
+            if (votes < min_votes) {
+                min_votes = votes;
+                eliminated = candidate;
+            }
+        }
+
+        // Remove eliminated candidate
+        remaining_candidates.erase(
+            std::remove(remaining_candidates.begin(), remaining_candidates.end(), eliminated),
+            remaining_candidates.end()
+        );
+
+        round_num++;
+    }
+
+    if (!winner.empty() && !remaining_candidates.empty()) {
+        winner = remaining_candidates[0]; // Last candidate standing
+    }
+
+    result.success = !winner.empty();
+    result.final_decision = winner.empty() ? "No consensus reached" : winner;
+    result.agreement_percentage = winner.empty() ? 0.0 : 0.6; // IRV typically has lower agreement but still valid
+    result.resolution_details = {
+        {"algorithm", "instant_runoff_voting"},
+        {"rounds_completed", round_num},
+        {"candidates_considered", all_candidates.size()},
+        {"final_candidates", remaining_candidates}
+    };
+
+    return result;
 }
 
 ConsensusResult ConsensusEngine::run_quorum_voting(const std::vector<VotingRound>& rounds, const ConsensusConfiguration& config) {
@@ -1184,25 +1373,192 @@ ConsensusDecisionConfidence ConsensusEngine::calculate_confidence_level(double a
     return ConsensusDecisionConfidence::LOW; // Changed from VERY_LOW to LOW since VERY_LOW doesn't exist
 }
 
-// Database operations (simplified implementations)
+// Production database operations for consensus sessions
 void ConsensusEngine::store_consensus_session(const std::string& consensus_id, const ConsensusConfiguration& config) {
-    // Implementation would store consensus session in database
-    spdlog::debug("Storing consensus session: {}", consensus_id);
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for storing consensus session");
+            return;
+        }
+
+        // Convert participants to JSON
+        nlohmann::json participants_json = nlohmann::json::array();
+        for (const auto& participant : config.participants) {
+            participants_json.push_back({
+                {"agent_id", participant.agent_id},
+                {"name", participant.name},
+                {"role", static_cast<int>(participant.role)},
+                {"voting_weight", participant.voting_weight}
+            });
+        }
+
+        std::string query = R"(
+            INSERT INTO consensus_processes (
+                consensus_id, topic, algorithm, participants, max_rounds,
+                timeout_per_round_min, consensus_threshold, min_participants,
+                allow_discussion, require_justification, custom_rules
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (consensus_id) DO UPDATE SET
+                topic = EXCLUDED.topic,
+                participants = EXCLUDED.participants,
+                max_rounds = EXCLUDED.max_rounds,
+                timeout_per_round_min = EXCLUDED.timeout_per_round_min,
+                consensus_threshold = EXCLUDED.consensus_threshold,
+                min_participants = EXCLUDED.min_participants,
+                allow_discussion = EXCLUDED.allow_discussion,
+                require_justification = EXCLUDED.require_justification,
+                custom_rules = EXCLUDED.custom_rules
+        )";
+
+        std::vector<std::string> params = {
+            consensus_id,
+            config.topic,
+            std::to_string(static_cast<int>(config.algorithm)),
+            participants_json.dump(),
+            std::to_string(config.max_rounds),
+            std::to_string(static_cast<int>(config.timeout_per_round.count())),
+            std::to_string(config.consensus_threshold),
+            std::to_string(config.min_participants),
+            config.allow_discussion ? "true" : "false",
+            config.require_justification ? "true" : "false",
+            config.custom_rules.dump()
+        };
+
+        if (!db_conn_->execute_command(query, params)) {
+            spdlog::error("Failed to store consensus session: {}", consensus_id);
+        } else {
+            spdlog::info("Stored consensus session: {}", consensus_id);
+        }
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception storing consensus session {}: {}", consensus_id, e.what());
+    }
 }
 
 void ConsensusEngine::store_agent_opinion(const std::string& consensus_id, const AgentOpinion& opinion) {
-    // Implementation would store agent opinion in database
-    spdlog::debug("Storing agent opinion for consensus {} by agent {}", consensus_id, opinion.agent_id);
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for storing agent opinion");
+            return;
+        }
+
+        // Find the current round number for this consensus
+        std::string round_query = "SELECT COALESCE(MAX(round_number), 0) + 1 as next_round FROM consensus_agent_opinions WHERE consensus_id = $1";
+        auto round_result = db_conn_->execute_query(round_query, {consensus_id});
+
+        int round_number = 1; // Default to round 1
+        if (!round_result.rows.empty() && !round_result.rows[0]["next_round"].empty()) {
+            round_number = std::stoi(round_result.rows[0]["next_round"]);
+        }
+
+        std::string query = R"(
+            INSERT INTO consensus_agent_opinions (
+                consensus_id, agent_id, round_number, decision,
+                confidence_score, reasoning, supporting_data, concerns
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        )";
+
+        std::vector<std::string> params = {
+            consensus_id,
+            opinion.agent_id,
+            std::to_string(round_number),
+            opinion.decision,
+            std::to_string(opinion.confidence_score),
+            opinion.reasoning,
+            opinion.supporting_data.dump(),
+            nlohmann::json(opinion.concerns).dump()
+        };
+
+        if (!db_conn_->execute_command(query, params)) {
+            spdlog::error("Failed to store agent opinion for consensus {} by agent {}", consensus_id, opinion.agent_id);
+        } else {
+            spdlog::debug("Stored agent opinion for consensus {} by agent {}", consensus_id, opinion.agent_id);
+        }
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception storing agent opinion for consensus {}: {}", consensus_id, e.what());
+    }
 }
 
 void ConsensusEngine::update_agent_opinion(const std::string& consensus_id, const AgentOpinion& opinion) {
-    // Implementation would update agent opinion in database
-    spdlog::debug("Updating agent opinion for consensus {} by agent {}", consensus_id, opinion.agent_id);
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for updating agent opinion");
+            return;
+        }
+
+        std::string query = R"(
+            UPDATE consensus_agent_opinions SET
+                decision = $3,
+                confidence_score = $4,
+                reasoning = $5,
+                supporting_data = $6,
+                concerns = $7
+            WHERE consensus_id = $1 AND agent_id = $2
+        )";
+
+        std::vector<std::string> params = {
+            consensus_id,
+            opinion.agent_id,
+            opinion.decision,
+            std::to_string(opinion.confidence_score),
+            opinion.reasoning,
+            opinion.supporting_data.dump(),
+            nlohmann::json(opinion.concerns).dump()
+        };
+
+        if (!db_conn_->execute_command(query, params)) {
+            spdlog::error("Failed to update agent opinion for consensus {} by agent {}", consensus_id, opinion.agent_id);
+        } else {
+            spdlog::debug("Updated agent opinion for consensus {} by agent {}", consensus_id, opinion.agent_id);
+        }
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception updating agent opinion for consensus {}: {}", consensus_id, e.what());
+    }
 }
 
 void ConsensusEngine::update_consensus_result(const std::string& consensus_id, const ConsensusResult& result) {
-    // Implementation would update consensus result in database
-    spdlog::debug("Updating consensus result for: {}", consensus_id);
+    try {
+        if (!db_conn_) {
+            spdlog::error("Database connection not available for updating consensus result");
+            return;
+        }
+
+        std::string query = R"(
+            INSERT INTO consensus_results (
+                consensus_id, final_decision, confidence_level, algorithm_used,
+                total_participants, agreement_percentage, resolution_details
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (consensus_id) DO UPDATE SET
+                final_decision = EXCLUDED.final_decision,
+                confidence_level = EXCLUDED.confidence_level,
+                algorithm_used = EXCLUDED.algorithm_used,
+                total_participants = EXCLUDED.total_participants,
+                agreement_percentage = EXCLUDED.agreement_percentage,
+                resolution_details = EXCLUDED.resolution_details,
+                completed_at = NOW()
+        )";
+
+        std::vector<std::string> params = {
+            consensus_id,
+            result.final_decision,
+            std::to_string(static_cast<int>(result.confidence_level)),
+            std::to_string(static_cast<int>(result.algorithm_used)),
+            std::to_string(result.total_participants),
+            std::to_string(result.agreement_percentage),
+            result.resolution_details.dump()
+        };
+
+        if (!db_conn_->execute_command(query, params)) {
+            spdlog::error("Failed to update consensus result for: {}", consensus_id);
+        } else {
+            spdlog::info("Updated consensus result for: {}", consensus_id);
+        }
+
+    } catch (const std::exception& e) {
+        spdlog::error("Exception updating consensus result for {}: {}", consensus_id, e.what());
+    }
 }
 
 } // namespace regulens

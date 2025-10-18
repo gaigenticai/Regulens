@@ -604,9 +604,33 @@ const PolicyGeneration: React.FC = () => {
         {activeTab === 'templates' && (
           <PolicyTemplate
             onUseTemplate={(template, variables) => {
-              // Handle template usage - this would trigger policy generation
-              console.log('Using template:', template.name, 'with variables:', variables);
-              // TODO: Integrate with policy generation logic
+              // Handle template usage - trigger policy generation via API
+              const generatePolicy = async () => {
+                try {
+                  const authToken = localStorage.getItem('authToken');
+                  const response = await fetch('/api/policies/generate', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${authToken}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      template_id: template.id,
+                      variables
+                    })
+                  });
+                  
+                  if (response.ok) {
+                    const result = await response.json();
+                    console.log('Policy generated:', result);
+                    // Reload policies list
+                    loadPolicies();
+                  }
+                } catch (error) {
+                  console.error('Failed to generate policy:', error);
+                }
+              };
+              generatePolicy();
             }}
           />
         )}
@@ -696,38 +720,60 @@ const PolicyGeneration: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'validation' && (
+        {activeTab === 'validation' && policies.length > 0 && (
           <PolicyValidation
-            policyCode={`{
-  "policy": {
-    "name": "sample_transaction_policy",
-    "description": "Validates transaction processing rules",
-    "rules": [
-      {
-        "condition": "transaction.amount > 10000",
-        "action": "flag_for_review",
-        "severity": "high"
-      }
-    ]
-  }
-}`}
-            policyLanguage="json"
-            policyType="compliance_rule"
+            policyCode={policies[0].generated_code}
+            policyLanguage={policies[0].output_format}
+            policyType={policies[0].rule_type}
             onValidationComplete={(report) => {
-              console.log('Validation report:', report);
-              // TODO: Handle validation completion - could update policy status
+              // Update policy validation status in backend
+              const updateValidation = async () => {
+                try {
+                  const authToken = localStorage.getItem('authToken');
+                  await fetch(`/api/policies/${policies[0].id}/validation`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${authToken}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(report)
+                  });
+                  console.log('Validation status updated');
+                  loadPolicies();
+                } catch (error) {
+                  console.error('Failed to update validation:', error);
+                }
+              };
+              updateValidation();
             }}
           />
         )}
 
-        {activeTab === 'deployment' && (
+        {activeTab === 'deployment' && policies.length > 0 && (
           <PolicyDeployment
-            policyId="sample-policy-id"
-            policyName="Sample Transaction Policy"
-            policyVersion="1.0.0"
+            policyId={policies[0].id}
+            policyName={policies[0].name}
+            policyVersion={policies[0].version || '1.0.0'}
             onDeploymentComplete={(deployment) => {
-              console.log('Deployment completed:', deployment);
-              // TODO: Handle deployment completion - could update policy status
+              // Update deployment status in backend
+              const updateDeployment = async () => {
+                try {
+                  const authToken = localStorage.getItem('authToken');
+                  await fetch(`/api/policies/${policies[0].id}/deploy`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${authToken}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(deployment)
+                  });
+                  console.log('Deployment status updated');
+                  loadPolicies();
+                } catch (error) {
+                  console.error('Failed to update deployment:', error);
+                }
+              };
+              updateDeployment();
             }}
           />
         )}

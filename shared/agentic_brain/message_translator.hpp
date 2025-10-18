@@ -122,6 +122,9 @@ public:
     std::optional<nlohmann::json> get_protocol_schema(MessageProtocol protocol);
     bool validate_message_against_schema(const std::string& message, MessageProtocol protocol);
 
+    // Translation validation
+    bool validate_translation(const std::string& original_message, const TranslationResultData& translated_result);
+
     // Batch translation
     std::vector<TranslationResultData> translate_batch(
         const std::vector<std::pair<std::string, MessageHeader>>& messages,

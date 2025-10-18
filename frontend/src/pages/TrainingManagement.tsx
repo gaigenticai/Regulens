@@ -158,129 +158,61 @@ const TrainingManagement: React.FC<TrainingManagementProps> = ({ className = '' 
     const loadTrainingData = async () => {
       setIsLoading(true);
       try {
-        // Simulate API calls
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Fetch courses, enrollments, and stats from the backend API
+        const authToken = localStorage.getItem('authToken');
+        const [coursesRes, enrollmentsRes, statsRes] = await Promise.all([
+          fetch('/api/training/courses', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          }),
+          fetch('/api/training/enrollments', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          }),
+          fetch('/api/training/stats', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          })
+        ]);
 
-        // Mock courses data
-        const mockCourses: TrainingCourse[] = [
-          {
-            course_id: 'course-001',
-            title: 'Anti-Money Laundering Fundamentals',
-            description: 'Comprehensive training on AML regulations and compliance requirements',
-            course_type: 'compliance',
-            difficulty_level: 'intermediate',
-            duration_minutes: 120,
-            pass_threshold: 80,
-            tags: ['AML', 'Compliance', 'Financial Crime'],
-            is_active: true,
-            created_at: '2024-01-15T10:00:00Z',
-            updated_at: '2024-01-15T10:00:00Z',
-            created_by: 'admin',
-            enrollment_count: 245,
-            completion_rate: 87.5,
-            average_score: 82.3
-          },
-          {
-            course_id: 'course-002',
-            title: 'Data Protection and GDPR Compliance',
-            description: 'Understanding data protection regulations and GDPR requirements',
-            course_type: 'regulatory',
-            difficulty_level: 'advanced',
-            duration_minutes: 180,
-            pass_threshold: 85,
-            tags: ['GDPR', 'Data Protection', 'Privacy'],
-            is_active: true,
-            created_at: '2024-01-10T14:30:00Z',
-            updated_at: '2024-01-10T14:30:00Z',
-            created_by: 'admin',
-            enrollment_count: 189,
-            completion_rate: 92.1,
-            average_score: 88.7
-          },
-          {
-            course_id: 'course-003',
-            title: 'Cybersecurity Awareness',
-            description: 'Essential cybersecurity practices and threat awareness',
-            course_type: 'security',
-            difficulty_level: 'beginner',
-            duration_minutes: 90,
-            pass_threshold: 75,
-            tags: ['Security', 'Cybersecurity', 'Awareness'],
-            is_active: true,
-            created_at: '2024-01-05T09:15:00Z',
-            updated_at: '2024-01-05T09:15:00Z',
-            created_by: 'admin',
-            enrollment_count: 312,
-            completion_rate: 78.9,
-            average_score: 76.4
-          }
-        ];
+        if (coursesRes.ok) {
+          const coursesData = await coursesRes.json();
+          setCourses(Array.isArray(coursesData) ? coursesData : coursesData.data || []);
+        } else {
+          console.error('Failed to fetch courses:', coursesRes.statusText);
+          setCourses([]);
+        }
 
-        // Mock enrollments data
-        const mockEnrollments: UserEnrollment[] = [
-          {
-            enrollment_id: 'enrollment-001',
-            user_id: 'user-001',
-            course_id: 'course-001',
-            enrollment_date: '2024-01-20T08:00:00Z',
-            status: 'in_progress',
-            progress_percentage: 65,
-            last_accessed_at: '2024-01-22T14:30:00Z',
-            current_module_id: 'module-003',
-            quiz_attempts: []
-          },
-          {
-            enrollment_id: 'enrollment-002',
-            user_id: 'user-002',
-            course_id: 'course-002',
-            enrollment_date: '2024-01-18T10:15:00Z',
-            completion_date: '2024-01-21T16:45:00Z',
-            status: 'completed',
-            progress_percentage: 100,
-            certificate_issued: true,
-            certificate_url: '/certificates/cert-001.pdf',
-            quiz_attempts: [{
-              attempt_id: 'attempt-001',
-              enrollment_id: 'enrollment-002',
-              quiz_id: 'quiz-001',
-              score: 42,
-              max_score: 50,
-              percentage: 84,
-              passed: true,
-              submitted_at: '2024-01-21T16:45:00Z',
-              time_taken_minutes: 45
-            }]
-          }
-        ];
+        if (enrollmentsRes.ok) {
+          const enrollmentsData = await enrollmentsRes.json();
+          setEnrollments(Array.isArray(enrollmentsData) ? enrollmentsData : enrollmentsData.data || []);
+        } else {
+          console.error('Failed to fetch enrollments:', enrollmentsRes.statusText);
+          setEnrollments([]);
+        }
 
-        // Mock stats
-        const mockStats: TrainingStats = {
-          total_courses: 15,
-          active_enrollments: 1247,
-          completed_trainings: 892,
-          average_completion_rate: 71.5,
-          certifications_issued: 756,
-          popular_courses: [
-            { course_id: 'course-001', title: 'Anti-Money Laundering Fundamentals', enrollment_count: 245, completion_rate: 87.5 },
-            { course_id: 'course-002', title: 'Data Protection and GDPR Compliance', enrollment_count: 189, completion_rate: 92.1 },
-            { course_id: 'course-003', title: 'Cybersecurity Awareness', enrollment_count: 312, completion_rate: 78.9 }
-          ],
-          department_completion_rates: {
-            'Compliance': 89.2,
-            'IT Security': 76.8,
-            'Operations': 82.4,
-            'Finance': 94.1
-          },
-          monthly_training_hours: [
-            { month: 'Jan 2024', hours: 2450 },
-            { month: 'Dec 2023', hours: 2230 },
-            { month: 'Nov 2023', hours: 1980 }
-          ]
-        };
-
-        setCourses(mockCourses);
-        setEnrollments(mockEnrollments);
-        setStats(mockStats);
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          setStats(statsData || {
+            total_courses: 0,
+            active_enrollments: 0,
+            completed_trainings: 0,
+            average_completion_rate: 0,
+            certifications_issued: 0,
+            popular_courses: [],
+            department_completion_rates: {},
+            monthly_training_hours: []
+          });
+        } else {
+          console.error('Failed to fetch stats:', statsRes.statusText);
+          setStats({
+            total_courses: 0,
+            active_enrollments: 0,
+            completed_trainings: 0,
+            average_completion_rate: 0,
+            certifications_issued: 0,
+            popular_courses: [],
+            department_completion_rates: {},
+            monthly_training_hours: []
+          });
+        }
       } catch (error) {
         console.error('Failed to load training data:', error);
       } finally {

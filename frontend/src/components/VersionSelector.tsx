@@ -51,10 +51,37 @@ const mockVersions: APIVersion[] = [
 
 const VersionSelector: React.FC = () => {
   const [selectedVersion, setSelectedVersion] = useState(apiVersion.current);
-  const [versions] = useState<APIVersion[]>(mockVersions);
+  const [versions, setVersions] = useState<APIVersion[]>([]);
   const [isChanging, setIsChanging] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+
+  // Fetch available versions from backend API
+  React.useEffect(() => {
+    const fetchVersions = async () => {
+      try {
+        const authToken = localStorage.getItem('authToken');
+        const response = await fetch('/api/versions', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const versionsData = Array.isArray(data) ? data : data.data || [];
+          setVersions(versionsData);
+        } else {
+          console.error('Failed to fetch API versions:', response.statusText);
+          // Fallback to empty array if API fails
+          setVersions([]);
+        }
+      } catch (error) {
+        console.error('Failed to load API versions:', error);
+        setVersions([]);
+      }
+    };
+
+    fetchVersions();
+  }, []);
 
   const currentVersionData = versions.find(v => v.version === selectedVersion);
 

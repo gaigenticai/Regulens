@@ -389,6 +389,8 @@ struct ComponentHealth {
     std::string status_message;
     std::unordered_map<std::string, double> metrics;  // Health metrics (response time, error rate, etc.)
 
+    ComponentHealth() = default;
+
     ComponentHealth(std::string name)
         : component_name(std::move(name)), status(HealthStatus::UNKNOWN),
           consecutive_failures(0) {}

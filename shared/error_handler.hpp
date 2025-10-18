@@ -234,6 +234,15 @@ public:
                                    int hours_back = 24);
 
     /**
+     * @brief Clear error history with optional filters
+     * @param component_filter Optional component filter (empty = all components)
+     * @param hours_back Hours of history to clear (0 = clear all)
+     * @return true if successful
+     */
+    bool clear_error_history(const std::string& component_filter = "",
+                           int hours_back = 0);
+
+    /**
      * @brief Force cleanup of old error data
      * @return Number of items cleaned up
      */

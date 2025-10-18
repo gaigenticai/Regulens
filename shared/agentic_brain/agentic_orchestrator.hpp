@@ -72,19 +72,6 @@ struct OrchestratorConfig {
     static OrchestratorConfig from_environment();
 };
 
-struct AgentDecision {
-    std::string agent_id;
-    AgentType agent_type;
-    std::string decision_id;
-    nlohmann::json input_context;
-    nlohmann::json decision_output;
-    DecisionUrgency urgency;
-    double confidence_score;
-    std::string reasoning;
-    std::vector<std::string> recommended_actions;
-    std::chrono::system_clock::time_point timestamp;
-    bool requires_human_review;
-};
 
 
 class AgenticOrchestrator {
@@ -106,7 +93,7 @@ public:
     AgenticOrchestrator(
         std::shared_ptr<ConnectionPool> db_pool,
         std::shared_ptr<LLMInterface> llm_interface,
-        std::shared_ptr<LearningEngine> learning_engine,
+        std::shared_ptr<AgentLearningEngine> learning_engine,
         std::shared_ptr<DecisionEngine> decision_engine,
         std::shared_ptr<ToolRegistry> tool_registry,
         std::shared_ptr<EventBus> event_bus,
@@ -245,7 +232,7 @@ private:
     std::shared_ptr<ToolRegistry> create_tool_registry_with_defaults();
     std::shared_ptr<EventBus> create_event_bus_with_defaults();
     std::shared_ptr<LLMInterface> create_llm_interface_from_environment();
-    std::shared_ptr<LearningEngine> create_learning_engine_with_defaults();
+    std::shared_ptr<AgentLearningEngine> create_learning_engine_with_defaults();
     std::shared_ptr<DecisionEngine> create_decision_engine_with_defaults();
     bool initialize_components_eagerly(const OrchestratorConfig& config);
 
@@ -301,7 +288,7 @@ private:
     OrchestratorConfig config_;  // Production configuration settings
 
     std::shared_ptr<LLMInterface> llm_interface_;
-    std::shared_ptr<LearningEngine> learning_engine_;
+    std::shared_ptr<AgentLearningEngine> learning_engine_;
     std::shared_ptr<DecisionEngine> decision_engine_;
 
     std::unordered_map<AgentType, nlohmann::json> agent_configurations_;

@@ -19,13 +19,17 @@
 #include "../shared/models/compliance_event.hpp"
 #include "../shared/models/agent_decision.hpp"
 #include "../shared/models/agent_state.hpp"
-// Note: agent_communication.hpp and consensus_engine.hpp not yet implemented
-// Defining types inline for compilation
+#include "../shared/agentic_brain/message_translator.hpp"
+#include "../shared/agentic_brain/inter_agent_communicator.hpp"
+#include "../shared/agentic_brain/communication_mediator.hpp"
+#include "../shared/agentic_brain/agent_comm_registry.hpp"
+#include "../shared/agentic_brain/consensus_engine.hpp"
+// Production implementation - all components now available
 
 namespace regulens {
 
 // Production-grade type definitions for inter-agent communication
-enum class MessageType {
+enum class AgentMessageType {
     TASK_ASSIGNMENT,
     TASK_RESULT,
     AGENT_QUERY,
@@ -36,11 +40,11 @@ enum class MessageType {
     ERROR_NOTIFICATION
 };
 
-struct AgentMessage {
+struct AgentDecisionMessage {
     std::string message_id;
     std::string sender_agent;
     std::string receiver_agent;
-    MessageType type;
+    AgentMessageType type;
     nlohmann::json payload;
     std::chrono::system_clock::time_point timestamp;
     int priority{0};
@@ -48,7 +52,7 @@ struct AgentMessage {
 
 struct AgentCommCapabilities {
     std::vector<std::string> supported_tasks;
-    std::vector<MessageType> supported_message_types;
+    std::vector<AgentMessageType> supported_message_types;
     bool can_participate_in_consensus{true};
     int max_concurrent_tasks{5};
 };
@@ -60,7 +64,7 @@ enum class ConsensusAlgorithm {
     BYZANTINE_FAULT_TOLERANT
 };
 
-struct ConsensusResult {
+struct BasicConsensusResult {
     bool consensus_reached{false};
     nlohmann::json agreed_decision;
     std::vector<std::string> participating_agents;
@@ -73,11 +77,9 @@ class ComplianceAgent;
 class EventProcessor;
 class KnowledgeBase;
 class MetricsCollector;
-class InterAgentCommunicator;
 class AgentCommRegistry;
 class IntelligentMessageTranslator;
 class ConsensusEngine;
-class CommunicationMediator;
 
 
 /**
@@ -112,9 +114,10 @@ struct AgentTask {
 };
 
 /**
- * @brief Agent registration information
+ * @brief Agent registration information for the orchestrator
+ * This is separate from AgentCommRegistry's AgentRegistration which is for communication components
  */
-struct AgentRegistration {
+struct OrchestratorAgentRegistration {
     std::string agent_type;
     std::string agent_name;
     std::shared_ptr<ComplianceAgent> agent_instance;
@@ -122,10 +125,10 @@ struct AgentRegistration {
     bool active;
 
     // Default constructor for map operations
-    AgentRegistration() = default;
+    OrchestratorAgentRegistration() = default;
 
-    AgentRegistration(std::string type, std::string name, std::shared_ptr<ComplianceAgent> instance,
-                     AgentCommCapabilities caps, bool act = true)
+    OrchestratorAgentRegistration(std::string type, std::string name, std::shared_ptr<ComplianceAgent> instance,
+                                 AgentCommCapabilities caps, bool act = true)
         : agent_type(std::move(type)), agent_name(std::move(name)), agent_instance(std::move(instance)),
           capabilities(std::move(caps)), active(act) {}
 };
@@ -172,7 +175,7 @@ public:
      * @param registration Agent registration information
      * @return true if registration successful
      */
-    bool register_agent(const AgentRegistration& registration);
+    bool register_agent(const OrchestratorAgentRegistration& registration);
 
     /**
      * @brief Unregister an agent
@@ -237,7 +240,7 @@ public:
      * @return true if message sent successfully
      */
     bool send_agent_message(const std::string& from_agent, const std::string& to_agent,
-                           MessageType message_type, const nlohmann::json& content);
+                            AgentMessageType message_type, const nlohmann::json& content);
 
     /**
      * @brief Broadcast message to all agents
@@ -246,8 +249,8 @@ public:
      * @param content Message content
      * @return true if broadcast successful
      */
-    bool broadcast_to_agents(const std::string& from_agent, MessageType message_type,
-                            const nlohmann::json& content);
+    bool broadcast_to_agents(const std::string& from_agent, AgentMessageType message_type,
+                             const nlohmann::json& content);
 
     /**
      * @brief Receive messages for an agent
@@ -255,7 +258,7 @@ public:
      * @param max_messages Maximum messages to retrieve
      * @return Vector of messages
      */
-    std::vector<AgentMessage> receive_agent_messages(const std::string& agent_id,
+    std::vector<AgentDecisionMessage> receive_agent_messages(const std::string& agent_id,
                                                     size_t max_messages = 10);
 
     /**
@@ -286,7 +289,7 @@ public:
      * @param session_id Session identifier
      * @return Decision result or nullopt if not ready
      */
-    std::optional<ConsensusResult> get_collaborative_decision_result(const std::string& session_id);
+    std::optional<BasicConsensusResult> get_collaborative_decision_result(const std::string& session_id);
 
     /**
      * @brief Facilitate agent conversation
@@ -304,7 +307,7 @@ public:
      * @param conflicting_messages Messages with conflicts
      * @return Resolution outcome
      */
-    nlohmann::json resolve_agent_conflicts(const std::vector<AgentMessage>& conflicting_messages);
+    nlohmann::json resolve_agent_conflicts(const std::vector<AgentDecisionMessage>& conflicting_messages);
 
     /**
      * @brief Get multi-agent communication statistics
@@ -342,7 +345,7 @@ public:
     bool initialize_agents();
     bool initialize_communication_system();
     void register_system_metrics();
-    bool validate_agent_registration(const AgentRegistration& registration) const;
+    bool validate_agent_registration(const OrchestratorAgentRegistration& registration) const;
     bool prepare_task_execution(const AgentTask& task, std::shared_ptr<ComplianceAgent>& agent);
     TaskResult execute_task_with_agent(const AgentTask& task, std::shared_ptr<ComplianceAgent> agent);
     void finalize_task_execution(const AgentTask& task, const TaskResult& result);
@@ -370,15 +373,15 @@ public:
     std::shared_ptr<MetricsCollector> metrics_collector_;
 
     // Multi-agent communication system
-    std::shared_ptr<AgentCommRegistry> agent_registry_;
+    std::shared_ptr<AgentCommRegistry> agent_comm_registry_;
     std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
-    std::shared_ptr<IntelligentMessageTranslator> message_translator_;
+    std::shared_ptr<MessageTranslator> message_translator_;
     std::shared_ptr<ConsensusEngine> consensus_engine_;
     std::shared_ptr<CommunicationMediator> communication_mediator_;
 
     // Agent registry
     mutable std::mutex agents_mutex_;
-    std::unordered_map<std::string, AgentRegistration> registered_agents_;
+    std::unordered_map<std::string, OrchestratorAgentRegistration> registered_agents_;
 
     // Task queue management
     mutable std::mutex task_queue_mutex_;

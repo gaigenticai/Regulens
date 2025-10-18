@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include "../database/postgresql_connection.hpp"
 #include "../logging/structured_logger.hpp"
+#include "../llm/embeddings_client.hpp"
 
 namespace regulens {
 namespace embeddings {
@@ -47,6 +48,8 @@ struct SearchQuery {
     int top_k = 10;
     std::optional<std::string> category_filter;
     std::optional<double> confidence_threshold;
+    std::string domain_filter;           // Filter by knowledge domain
+    double similarity_threshold = 0.7;   // Minimum similarity score (0.0-1.0)
 };
 
 struct SearchResult {
@@ -201,6 +204,7 @@ public:
 private:
     std::shared_ptr<PostgreSQLConnection> db_conn_;
     std::shared_ptr<StructuredLogger> logger_;
+    std::shared_ptr<EmbeddingsClient> embeddings_client_;
 
     // Configuration
     bool cache_enabled_ = true;
@@ -220,6 +224,8 @@ private:
         const std::string& algorithm,
         const nlohmann::json& parameters
     );
+
+    std::vector<float> generate_query_embedding(const std::string& query_text);
 
     std::vector<std::vector<double>> generate_2d_coordinates(
         const std::vector<EmbeddingPoint>& points,

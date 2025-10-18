@@ -20,8 +20,8 @@
 
 namespace regulens {
 
-// LearningEngine Implementation
-LearningEngine::LearningEngine(
+// AgentLearningEngine Implementation
+AgentLearningEngine::AgentLearningEngine(
     std::shared_ptr<ConnectionPool> db_pool,
     std::shared_ptr<LLMInterface> llm_interface,
     StructuredLogger* logger
@@ -29,9 +29,9 @@ LearningEngine::LearningEngine(
     initialize_learning_models();
 }
 
-LearningEngine::~LearningEngine() = default;
+AgentLearningEngine::~AgentLearningEngine() = default;
 
-void LearningEngine::initialize_learning_models() {
+void AgentLearningEngine::initialize_learning_models() {
     // Initialize pattern recognition models
     pattern_models_["risk_patterns"] = PatternRecognitionModel{
         "risk_patterns",
@@ -57,7 +57,7 @@ void LearningEngine::initialize_learning_models() {
     };
 }
 
-bool LearningEngine::initialize() {
+bool AgentAgentLearningEngine::initialize() {
     try {
         // Initialize database tables if needed
         if (db_pool_) {
@@ -76,13 +76,13 @@ bool LearningEngine::initialize() {
     }
 }
 
-void LearningEngine::shutdown() {
+void AgentLearningEngine::shutdown() {
     // Save any pending learning state
     save_learning_state();
     logger_->log(LogLevel::INFO, "Learning engine shutdown - state saved");
 }
 
-void LearningEngine::initialize_database_schema(PostgreSQLConnection& conn) {
+void AgentLearningEngine::initialize_database_schema(PostgreSQLConnection& conn) {
     std::vector<std::string> schema_commands = {
         R"(
             CREATE TABLE IF NOT EXISTS learning_interactions (
@@ -114,7 +114,7 @@ void LearningEngine::initialize_database_schema(PostgreSQLConnection& conn) {
     }
 }
 
-bool LearningEngine::store_feedback(const LearningFeedback& feedback) {
+bool AgentLearningEngine::store_feedback(const LearningFeedback& feedback) {
     try {
         // Validate feedback
         if (!validate_feedback(feedback)) {
@@ -151,7 +151,7 @@ bool LearningEngine::store_feedback(const LearningFeedback& feedback) {
     }
 }
 
-bool LearningEngine::validate_feedback(const LearningFeedback& feedback) {
+bool AgentLearningEngine::validate_feedback(const LearningFeedback& feedback) {
     // Check required fields
     if (feedback.agent_id.empty() || feedback.decision_id.empty()) {
         return false;
@@ -174,7 +174,7 @@ bool LearningEngine::validate_feedback(const LearningFeedback& feedback) {
     return true;
 }
 
-void LearningEngine::update_models_from_feedback(const LearningFeedback& feedback) {
+void AgentLearningEngine::update_models_from_feedback(const LearningFeedback& feedback) {
     // Update pattern recognition models based on feedback
     for (auto& [model_name, model] : pattern_models_) {
         // Incremental online learning with stochastic gradient descent
@@ -211,7 +211,7 @@ void LearningEngine::update_models_from_feedback(const LearningFeedback& feedbac
     }
 }
 
-double LearningEngine::predict_with_model(const PatternRecognitionModel& model,
+double AgentLearningEngine::predict_with_model(const PatternRecognitionModel& model,
                                         const std::vector<double>& features) {
     if (features.size() != model.weights.size()) {
         return 0.0;
@@ -226,7 +226,7 @@ double LearningEngine::predict_with_model(const PatternRecognitionModel& model,
     return 1.0 / (1.0 + std::exp(-prediction));
 }
 
-double LearningEngine::calculate_recent_accuracy(const FeedbackModel& model) {
+double AgentLearningEngine::calculate_recent_accuracy(const FeedbackModel& model) {
     if (model.feedback_count == 0) return 0.5;
 
     int recent_count = std::min(20, static_cast<int>(model.feedback_count));
@@ -240,7 +240,7 @@ double LearningEngine::calculate_recent_accuracy(const FeedbackModel& model) {
     return sum / recent_count;
 }
 
-void LearningEngine::store_feedback_to_database(const LearningFeedback& feedback) {
+void AgentLearningEngine::store_feedback_to_database(const LearningFeedback& feedback) {
     try {
         auto conn = db_pool_->get_connection();
         if (!conn) {
@@ -277,7 +277,7 @@ void LearningEngine::store_feedback_to_database(const LearningFeedback& feedback
     }
 }
 
-void LearningEngine::update_performance_metrics(const LearningFeedback& feedback) {
+void AgentLearningEngine::update_performance_metrics(const LearningFeedback& feedback) {
     performance_metrics_.total_feedback_processed++;
     performance_metrics_.average_feedback_score =
         (performance_metrics_.average_feedback_score * (performance_metrics_.total_feedback_processed - 1) +
@@ -292,7 +292,7 @@ void LearningEngine::update_performance_metrics(const LearningFeedback& feedback
     }
 }
 
-nlohmann::json LearningEngine::get_learning_metrics(const std::string& agent_id) {
+nlohmann::json AgentLearningEngine::get_learning_metrics(const std::string& agent_id) {
     nlohmann::json metrics = {
         {"agent_id", agent_id},
         {"total_feedback_processed", performance_metrics_.total_feedback_processed},
@@ -325,7 +325,7 @@ nlohmann::json LearningEngine::get_learning_metrics(const std::string& agent_id)
     return metrics;
 }
 
-std::vector<std::string> LearningEngine::identify_learning_gaps(const std::string& agent_id) {
+std::vector<std::string> AgentLearningEngine::identify_learning_gaps(const std::string& agent_id) {
     std::vector<std::string> gaps;
 
     // Analyze current learning state to identify gaps
@@ -360,7 +360,7 @@ std::vector<std::string> LearningEngine::identify_learning_gaps(const std::strin
     return gaps.empty() ? std::vector<std::string>{"Learning system performing adequately"} : gaps;
 }
 
-nlohmann::json LearningEngine::get_agent_insights(const std::string& agent_id) {
+nlohmann::json AgentLearningEngine::get_agent_insights(const std::string& agent_id) {
     nlohmann::json insights = get_learning_metrics(agent_id);
 
     // Add learning insights
@@ -373,7 +373,7 @@ nlohmann::json LearningEngine::get_agent_insights(const std::string& agent_id) {
     return insights;
 }
 
-double LearningEngine::calculate_learning_effectiveness() {
+double AgentLearningEngine::calculate_learning_effectiveness() {
     if (performance_metrics_.total_feedback_processed < 10) return 0.0;
 
     // Calculate improvement trend from recent feedback
@@ -396,7 +396,7 @@ double LearningEngine::calculate_learning_effectiveness() {
     return std::max(0.0, std::min(1.0, recent_avg - performance_metrics_.average_feedback_score + 0.5));
 }
 
-double LearningEngine::calculate_pattern_quality() {
+double AgentLearningEngine::calculate_pattern_quality() {
     double total_confidence = 0.0;
     int pattern_count = 0;
 
@@ -416,7 +416,7 @@ double LearningEngine::calculate_pattern_quality() {
     return pattern_count > 0 ? total_confidence / pattern_count : 0.0;
 }
 
-nlohmann::json LearningEngine::analyze_feedback_trends() {
+nlohmann::json AgentLearningEngine::analyze_feedback_trends() {
     if (feedback_history_.size() < 5) {
         return {{"insufficient_data", true}};
     }
@@ -469,7 +469,7 @@ nlohmann::json LearningEngine::analyze_feedback_trends() {
     };
 }
 
-nlohmann::json LearningEngine::generate_learning_recommendations() {
+nlohmann::json AgentLearningEngine::generate_learning_recommendations() {
     std::vector<std::string> recommendations;
 
     // Analyze current learning state and provide recommendations
@@ -502,7 +502,7 @@ nlohmann::json LearningEngine::generate_learning_recommendations() {
     return recommendations;
 }
 
-void LearningEngine::save_learning_state() {
+void AgentLearningEngine::save_learning_state() {
     // Save current model weights and learning state to database
     if (!db_pool_) return;
 
@@ -529,7 +529,7 @@ void LearningEngine::save_learning_state() {
 }
 
 // Utility methods
-std::string LearningEngine::feedback_type_to_string(FeedbackType type) {
+std::string AgentLearningEngine::feedback_type_to_string(FeedbackType type) {
     switch (type) {
         case FeedbackType::ACCURACY: return "accuracy";
         case FeedbackType::TIMELINESS: return "timeliness";
@@ -539,7 +539,7 @@ std::string LearningEngine::feedback_type_to_string(FeedbackType type) {
     }
 }
 
-std::string LearningEngine::timestamp_to_string(std::chrono::system_clock::time_point tp) {
+std::string AgentLearningEngine::timestamp_to_string(std::chrono::system_clock::time_point tp) {
     auto time_t = std::chrono::system_clock::to_time_t(tp);
     std::stringstream ss;
     ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");

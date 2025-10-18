@@ -146,117 +146,43 @@ const RegulatorySimulator: React.FC<RegulatorySimulatorProps> = ({ className = '
     const loadSimulatorData = async () => {
       setIsLoading(true);
       try {
-        // Simulate API calls
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Fetch scenarios, executions, and templates from the backend API
+        const authToken = localStorage.getItem('authToken');
+        const [scenariosRes, executionsRes, templatesRes] = await Promise.all([
+          fetch('/api/simulator/scenarios', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          }),
+          fetch('/api/simulator/executions', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          }),
+          fetch('/api/simulator/templates', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          })
+        ]);
 
-        // Mock scenarios data
-        const mockScenarios: SimulationScenario[] = [
-          {
-            scenario_id: 'scenario-001',
-            scenario_name: 'Enhanced KYC Requirements',
-            description: 'Simulation of new enhanced KYC verification requirements for high-risk customers',
-            scenario_type: 'regulatory_change',
-            regulatory_changes: {},
-            impact_parameters: {},
-            baseline_data: {},
-            test_data: {},
-            created_by: 'user-001',
-            created_at: '2024-01-15T10:00:00Z',
-            updated_at: '2024-01-15T10:00:00Z',
-            is_template: false,
-            is_active: true,
-            tags: ['KYC', 'Regulatory', 'Compliance'],
-            metadata: {},
-            estimated_runtime_seconds: 300,
-            max_concurrent_simulations: 5
-          },
-          {
-            scenario_id: 'scenario-002',
-            scenario_name: 'Cryptocurrency Regulation Impact',
-            description: 'Analysis of potential cryptocurrency regulation changes on transaction processing',
-            scenario_type: 'market_change',
-            regulatory_changes: {},
-            impact_parameters: {},
-            baseline_data: {},
-            test_data: {},
-            created_by: 'user-002',
-            created_at: '2024-01-20T14:30:00Z',
-            updated_at: '2024-01-20T14:30:00Z',
-            is_template: false,
-            is_active: true,
-            tags: ['Crypto', 'Market', 'Transactions'],
-            metadata: {},
-            estimated_runtime_seconds: 450,
-            max_concurrent_simulations: 3
-          }
-        ];
+        if (scenariosRes.ok) {
+          const scenariosData = await scenariosRes.json();
+          setScenarios(Array.isArray(scenariosData) ? scenariosData : scenariosData.data || []);
+        } else {
+          console.error('Failed to fetch scenarios:', scenariosRes.statusText);
+          setScenarios([]);
+        }
 
-        // Mock executions data
-        const mockExecutions: SimulationExecution[] = [
-          {
-            execution_id: 'exec-001',
-            scenario_id: 'scenario-001',
-            user_id: 'user-001',
-            execution_status: 'completed',
-            execution_parameters: {},
-            started_at: '2024-01-15T10:30:00Z',
-            completed_at: '2024-01-15T10:35:00Z',
-            progress_percentage: 100,
-            created_at: '2024-01-15T10:30:00Z',
-            metadata: {}
-          },
-          {
-            execution_id: 'exec-002',
-            scenario_id: 'scenario-002',
-            user_id: 'user-002',
-            execution_status: 'running',
-            execution_parameters: {},
-            started_at: '2024-01-22T09:00:00Z',
-            progress_percentage: 65,
-            created_at: '2024-01-22T09:00:00Z',
-            metadata: {}
-          }
-        ];
+        if (executionsRes.ok) {
+          const executionsData = await executionsRes.json();
+          setExecutions(Array.isArray(executionsData) ? executionsData : executionsData.data || []);
+        } else {
+          console.error('Failed to fetch executions:', executionsRes.statusText);
+          setExecutions([]);
+        }
 
-        // Mock templates data
-        const mockTemplates: SimulationTemplate[] = [
-          {
-            template_id: 'template-001',
-            template_name: 'AML Transaction Monitoring Update',
-            template_description: 'Template for simulating AML transaction monitoring system updates',
-            category: 'aml',
-            jurisdiction: 'us',
-            regulatory_body: 'finra',
-            template_data: {},
-            usage_count: 45,
-            success_rate: 92.5,
-            average_runtime_seconds: 240,
-            created_by: 'admin',
-            created_at: '2024-01-01T00:00:00Z',
-            is_active: true,
-            tags: ['AML', 'Transaction Monitoring', 'Template']
-          },
-          {
-            template_id: 'template-002',
-            template_name: 'GDPR Data Processing Impact',
-            template_description: 'Template for GDPR compliance changes in data processing',
-            category: 'privacy',
-            jurisdiction: 'eu',
-            regulatory_body: 'ecb',
-            template_data: {},
-            usage_count: 32,
-            success_rate: 88.9,
-            average_runtime_seconds: 320,
-            created_by: 'admin',
-            created_at: '2024-01-01T00:00:00Z',
-            is_active: true,
-            tags: ['GDPR', 'Privacy', 'Data Processing']
-          }
-        ];
-
-        setScenarios(mockScenarios);
-        setExecutions(mockExecutions);
-        setTemplates(mockTemplates);
+        if (templatesRes.ok) {
+          const templatesData = await templatesRes.json();
+          setTemplates(Array.isArray(templatesData) ? templatesData : templatesData.data || []);
+        } else {
+          console.error('Failed to fetch templates:', templatesRes.statusText);
+          setTemplates([]);
+        }
       } catch (error) {
         console.error('Failed to load simulator data:', error);
       } finally {

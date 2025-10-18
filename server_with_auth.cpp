@@ -40,6 +40,10 @@
 #include "shared/llm/policy_generation_api_handlers.hpp"
 #include "shared/config/dynamic_config_api_handlers.hpp"
 
+// Alert Management System
+#include "shared/alerts/notification_service.hpp"
+#include "shared/alerts/alert_evaluation_engine.hpp"
+
 // API Registry System - Systematic endpoint registration and management
 #include "shared/api_registry/api_registry.hpp"
 #include "shared/api_registry/api_endpoint_registrations.hpp"
@@ -1285,6 +1289,14 @@ private:
     // std::unique_ptr<regulens::RegulatoryEventSubscriber> event_subscriber;
     // std::unique_ptr<regulens::AgentOutputRouter> output_router;
 
+    // Alert Management System - Production-grade alert processing
+    std::shared_ptr<regulens::alerts::NotificationService> notification_service;
+    std::shared_ptr<regulens::alerts::AlertEvaluationEngine> alert_evaluation_engine;
+
+    // Background embedding job
+    std::thread embedding_worker_thread_;
+    std::atomic<bool> running_{true};
+
     // GPT-4 Chatbot Service - Production-grade conversational AI
     std::shared_ptr<regulens::ChatbotService> chatbot_service;
 
@@ -1617,14 +1629,23 @@ int main() {
 
 
         // Start Alert Management System services (deferred for embeddings focus)
-        // TODO: Start alert services when initialized
-        // notification_service->start();
-        // alert_evaluation_engine->start();
-        // logger_->log(LogLevel::INFO, "Alert Management System services started");
+        // Start alert services
+        notification_service = std::make_shared<regulens::alerts::NotificationService>(
+            std::make_shared<PostgreSQLConnection>(db_pool_->get_connection()),
+            std::make_shared<StructuredLogger>()
+        );
+        alert_evaluation_engine = std::make_shared<regulens::alerts::AlertEvaluationEngine>(
+            std::make_shared<PostgreSQLConnection>(db_pool_->get_connection()),
+            std::make_shared<StructuredLogger>()
+        );
+
+        notification_service->start();
+        alert_evaluation_engine->start();
+        logger_->log(LogLevel::INFO, "Alert Management System services started");
 
         // Background embedding generation job (available via API endpoints)
-        // TODO: Start background embedding job when threading architecture is properly set up
-        std::cout << "🔄 Embeddings Explorer ready - use API endpoints for embedding operations" << std::endl;
+        start_background_embedding_job();
+        std::cout << "🔄 Embeddings Explorer ready - background job started for embedding operations" << std::endl;
 
         // Build database connection string from environment variables
         const char* db_host = std::getenv("DB_HOST");
@@ -1679,8 +1700,35 @@ int main() {
 // Generate missing embeddings for knowledge base entries
 // ============================================================================
 
-// Static helper function for background thread (TODO: Implement properly)
-// void generate_missing_embeddings_static(...) { ... }
+// Background embedding job implementation
+void ProductionRegulatoryServer::start_background_embedding_job() {
+    // Start background thread for embedding generation
+    embedding_worker_thread_ = std::thread([this]() {
+        logger_->log(LogLevel::INFO, "Background embedding worker thread started");
+
+        while (running_.load()) {
+            try {
+                // Get database connection from pool
+                auto conn = db_pool_->get_connection();
+                if (conn) {
+                    generate_missing_embeddings(conn.get());
+                }
+
+                // Sleep for 5 minutes between embedding generation cycles
+                std::this_thread::sleep_for(std::chrono::minutes(5));
+
+            } catch (const std::exception& e) {
+                logger_->log(LogLevel::ERROR, "Exception in embedding worker thread: " + std::string(e.what()));
+                std::this_thread::sleep_for(std::chrono::seconds(30)); // Shorter sleep on error
+            }
+        }
+
+        logger_->log(LogLevel::INFO, "Background embedding worker thread stopped");
+    });
+
+    embedding_worker_thread_.detach(); // Run in background
+    logger_->log(LogLevel::INFO, "Background embedding job started successfully");
+}
 
 void ProductionRegulatoryServer::generate_missing_embeddings(PGconn* conn) {
     try {

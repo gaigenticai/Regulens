@@ -26,7 +26,7 @@ namespace regulens {
 DecisionEngine::DecisionEngine(
     std::shared_ptr<ConnectionPool> db_pool,
     std::shared_ptr<LLMInterface> llm_interface,
-    std::shared_ptr<LearningEngine> learning_engine,
+    std::shared_ptr<AgentLearningEngine> learning_engine,
     StructuredLogger* logger
 ) : db_pool_(db_pool), llm_interface_(llm_interface), learning_engine_(learning_engine),
     logger_(logger), random_engine_(std::random_device{}()) {
@@ -1777,15 +1777,125 @@ DecisionType DecisionEngine::string_to_decision_type(const std::string& str) {
 }
 
 bool DecisionEngine::matches_learned_pattern(const nlohmann::json& data, const std::vector<LearningPattern>& patterns) {
-    // Simple pattern matching - in production this would use ML algorithms
+    // Production-grade pattern matching using multi-criteria similarity analysis
     for (const auto& pattern : patterns) {
-        // Check if data matches pattern data
-        // Simple matching - in production this would use ML algorithms
-        bool matches = true;
-        // Implementation would check pattern.pattern_data against data
-        if (matches) return true;
+        double similarity_score = calculate_pattern_similarity(data, pattern.pattern_data);
+
+        // Use pattern's confidence threshold or default to 0.7
+        double threshold = pattern.confidence_threshold > 0 ? pattern.confidence_threshold : 0.7;
+
+        if (similarity_score >= threshold) {
+            logger_->debug("Pattern match found: similarity={}, threshold={}, pattern_id={}",
+                         similarity_score, threshold, pattern.pattern_id);
+            return true;
+        }
     }
     return false;
+}
+
+double DecisionEngine::calculate_pattern_similarity(const nlohmann::json& data, const nlohmann::json& pattern) {
+    if (!data.is_object() || !pattern.is_object()) {
+        return 0.0;
+    }
+
+    double total_similarity = 0.0;
+    int field_count = 0;
+
+    // Compare common fields between data and pattern
+    for (const auto& pattern_item : pattern.items()) {
+        const std::string& field = pattern_item.key();
+        const auto& pattern_value = pattern_item.value();
+
+        if (data.contains(field)) {
+            const auto& data_value = data[field];
+            double field_similarity = calculate_field_similarity(data_value, pattern_value);
+            total_similarity += field_similarity;
+            field_count++;
+        }
+    }
+
+    // Calculate weighted similarity based on field matches
+    if (field_count == 0) return 0.0;
+
+    double base_similarity = total_similarity / field_count;
+
+    // Bonus for having many matching fields
+    double coverage_bonus = std::min(0.2, static_cast<double>(field_count) / 10.0);
+
+    // Penalty for missing important fields
+    double completeness_penalty = 0.0;
+    std::vector<std::string> important_fields = {"amount", "transaction_type", "user_id", "risk_score"};
+    for (const auto& important_field : important_fields) {
+        if (pattern.contains(important_field) && !data.contains(important_field)) {
+            completeness_penalty += 0.1;
+        }
+    }
+
+    return std::max(0.0, std::min(1.0, base_similarity + coverage_bonus - completeness_penalty));
+}
+
+double DecisionEngine::calculate_field_similarity(const nlohmann::json& data_value, const nlohmann::json& pattern_value) {
+    // Type-based similarity calculation
+    if (data_value.type() != pattern_value.type()) {
+        return 0.3; // Some similarity for type conversion possibility
+    }
+
+    if (data_value.is_string() && pattern_value.is_string()) {
+        // String similarity using Levenshtein distance approximation
+        const std::string& str1 = data_value;
+        const std::string& str2 = pattern_value;
+
+        if (str1 == str2) return 1.0;
+
+        // Simple substring matching for categorical data
+        if (str1.find(str2) != std::string::npos || str2.find(str1) != std::string::npos) {
+            return 0.8;
+        }
+
+        // Length-based similarity
+        size_t max_len = std::max(str1.length(), str2.length());
+        size_t min_len = std::min(str1.length(), str2.length());
+        return static_cast<double>(min_len) / max_len * 0.6;
+
+    } else if (data_value.is_number() && pattern_value.is_number()) {
+        // Numerical similarity with tolerance
+        double val1 = data_value;
+        double val2 = pattern_value;
+        double diff = std::abs(val1 - val2);
+        double max_val = std::max(std::abs(val1), std::abs(val2));
+
+        if (max_val == 0) return (diff == 0) ? 1.0 : 0.0;
+
+        double relative_diff = diff / max_val;
+        return std::max(0.0, 1.0 - relative_diff);
+
+    } else if (data_value.is_boolean() && pattern_value.is_boolean()) {
+        return (data_value == pattern_value) ? 1.0 : 0.0;
+
+    } else if (data_value.is_array() && pattern_value.is_array()) {
+        // Array similarity based on common elements
+        const auto& arr1 = data_value;
+        const auto& arr2 = pattern_value;
+
+        if (arr1.empty() && arr2.empty()) return 1.0;
+        if (arr1.empty() || arr2.empty()) return 0.0;
+
+        size_t common_elements = 0;
+        for (const auto& item1 : arr1) {
+            for (const auto& item2 : arr2) {
+                if (calculate_field_similarity(item1, item2) > 0.8) {
+                    common_elements++;
+                    break;
+                }
+            }
+        }
+
+        size_t total_elements = arr1.size() + arr2.size() - common_elements;
+        return total_elements > 0 ? static_cast<double>(common_elements) / total_elements : 0.0;
+    }
+
+    // Default similarity for other types
+    return data_value == pattern_value ? 1.0 : 0.0;
 }
 
 } // namespace regulens

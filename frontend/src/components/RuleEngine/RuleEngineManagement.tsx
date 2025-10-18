@@ -87,14 +87,46 @@ const mockRules = [
 ];
 
 const RuleEngineManagement: React.FC = () => {
-  const [rules, setRules] = useState(mockRules);
-  const [filteredRules, setFilteredRules] = useState(mockRules);
+  const [rules, setRules] = useState<any[]>([]);
+  const [filteredRules, setFilteredRules] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedRule, setSelectedRule] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Load rules from backend API
+  React.useEffect(() => {
+    const loadRules = async () => {
+      setIsLoading(true);
+      try {
+        const authToken = localStorage.getItem('authToken');
+        const response = await fetch('/api/rules', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const rulesData = Array.isArray(data) ? data : data.data || [];
+          setRules(rulesData);
+          setFilteredRules(rulesData);
+        } else {
+          console.error('Failed to fetch rules:', response.statusText);
+          setRules([]);
+          setFilteredRules([]);
+        }
+      } catch (error) {
+        console.error('Failed to load rules:', error);
+        setRules([]);
+        setFilteredRules([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadRules();
+  }, []);
 
   // Filter rules based on search and filters
   useEffect(() => {

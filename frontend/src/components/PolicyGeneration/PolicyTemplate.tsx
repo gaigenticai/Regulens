@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { getUserIdFromToken } from '../../utils/auth';
 import {
   FileText,
   Plus,
@@ -423,7 +424,7 @@ const PolicyTemplate: React.FC<PolicyTemplateProps> = ({
       ...templateData,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      createdBy: 'current_user', // TODO: Get from auth context
+      createdBy: getUserIdFromToken(),
       usageCount: 0,
       averageGenerationTime: 0,
       successRate: 0,

@@ -609,11 +609,10 @@ std::string get_fraud_analysis(PGconn* db_conn, const std::string& transaction_i
  * Approve a transaction
  * Production: Updates transaction status and logs approval
  */
-std::string approve_transaction(PGconn* db_conn, const std::string& transaction_id, const std::string& request_body) {
+std::string approve_transaction(PGconn* db_conn, const std::string& transaction_id, const std::string& user_id, const std::string& request_body) {
     try {
         json req = json::parse(request_body);
         std::string notes = req.value("notes", "");
-        std::string approved_by = req.value("approved_by", ""); // Should come from auth context
 
         std::string query = "UPDATE transactions SET status = 'approved', "
                            "approved_by = $1, approved_at = CURRENT_TIMESTAMP, "
@@ -621,7 +620,7 @@ std::string approve_transaction(PGconn* db_conn, const std::string& transaction_
                            "WHERE transaction_id = $3 AND status != 'approved' "
                            "RETURNING transaction_id, status, approved_at";
 
-        std::vector<std::string> params = {approved_by, notes, transaction_id};
+        std::vector<std::string> params = {user_id, notes, transaction_id};
         std::vector<const char*> paramValues;
         for (const auto& p : params) {
             paramValues.push_back(p.c_str());
@@ -660,11 +659,10 @@ std::string approve_transaction(PGconn* db_conn, const std::string& transaction_
  * Reject a transaction
  * Production: Updates transaction status and logs rejection
  */
-std::string reject_transaction(PGconn* db_conn, const std::string& transaction_id, const std::string& request_body) {
+std::string reject_transaction(PGconn* db_conn, const std::string& transaction_id, const std::string& user_id, const std::string& request_body) {
     try {
         json req = json::parse(request_body);
         std::string reason = req.value("reason", "");
-        std::string rejected_by = req.value("rejected_by", ""); // Should come from auth context
 
         std::string query = "UPDATE transactions SET status = 'rejected', "
                            "rejected_by = $1, rejected_at = CURRENT_TIMESTAMP, "
@@ -672,7 +670,7 @@ std::string reject_transaction(PGconn* db_conn, const std::string& transaction_i
                            "WHERE transaction_id = $3 AND status != 'rejected' "
                            "RETURNING transaction_id, status, rejected_at";
 
-        std::vector<std::string> params = {rejected_by, reason, transaction_id};
+        std::vector<std::string> params = {user_id, reason, transaction_id};
         std::vector<const char*> paramValues;
         for (const auto& p : params) {
             paramValues.push_back(p.c_str());

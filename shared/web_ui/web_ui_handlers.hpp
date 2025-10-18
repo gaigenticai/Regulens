@@ -42,15 +42,17 @@
 #include "../memory/memory_manager.hpp"
 #include "../risk_assessment.hpp"
 #include "../decision_tree_optimizer.hpp"
-#include "../../core/agent/message_translator.hpp"
+#include "../agentic_brain/message_translator.hpp"
 #include "../agentic_brain/consensus_engine.hpp"
 #include "../agentic_brain/communication_mediator.hpp"
 #include "../agentic_brain/inter_agent_communicator.hpp"
+#include "../agentic_brain/agent_comm_registry.hpp"
+#include "../auth/jwt_parser.hpp"
 #include "../../agents/real_agent.hpp"
 
 // Forward declarations for agent communication components
-class AgentCommRegistry;
-class DecisionAuditTrailManager;
+// Include DecisionAuditTrailManager instead of forward declaring
+#include "../audit/decision_audit_trail.hpp"
 #include "../knowledge_base.hpp"
 #include "../regulatory_knowledge_base.hpp"
 #include "../agentic_brain/inter_agent_api_handlers.hpp"
@@ -149,6 +151,7 @@ public:
     HTTPResponse handle_circuit_breaker_status(const HTTPRequest& request);
     HTTPResponse handle_circuit_breaker_reset(const HTTPRequest& request);
     HTTPResponse handle_error_export(const HTTPRequest& request);
+    HTTPResponse handle_error_clear(const HTTPRequest& request);
 
     // LLM and OpenAI handlers
     HTTPResponse handle_llm_dashboard(const HTTPRequest& request);
@@ -335,10 +338,10 @@ private:
     std::shared_ptr<DecisionTreeOptimizer> decision_optimizer_;
 
     // Multi-Agent Communication System
-    std::shared_ptr<AgentCommRegistry> agent_registry_;
+    std::shared_ptr<AgentCommRegistry> agent_comm_registry_;
     std::shared_ptr<InterAgentCommunicator> inter_agent_communicator_;
     std::shared_ptr<InterAgentAPIHandlers> inter_agent_api_handlers_;
-    std::shared_ptr<IntelligentMessageTranslator> message_translator_;
+    std::shared_ptr<MessageTranslator> message_translator_;
     std::shared_ptr<ConsensusEngine> consensus_engine_;
     std::shared_ptr<CommunicationMediator> communication_mediator_;
 
@@ -356,6 +359,9 @@ private:
 
     // Decision audit trail manager
     std::shared_ptr<DecisionAuditTrailManager> decision_audit_manager_;
+
+    // JWT parser for authentication
+    std::unique_ptr<JWTParser> jwt_parser_;
 
     // Regulatory monitor
     std::shared_ptr<RegulatoryMonitor> regulatory_monitor_;

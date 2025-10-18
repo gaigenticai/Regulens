@@ -109,6 +109,13 @@ struct ConsensusResult {
     std::string error_message;
     int rounds_used = 0;
     long processing_time_ms = 0;
+
+    // Web UI convenience fields
+    bool consensus_reached = false;
+    double confidence = 0.0;
+    std::string reasoning;
+    nlohmann::json decision;
+    std::vector<nlohmann::json> votes;
 };
 
 struct ConsensusConfiguration {
@@ -149,6 +156,11 @@ public:
     bool start_voting_round(const std::string& consensus_id);
     bool end_voting_round(const std::string& consensus_id);
     ConsensusResult calculate_consensus(const std::string& consensus_id);
+
+    // Web UI convenience methods
+    std::optional<std::string> start_session(const std::string& topic, const std::vector<std::string>& participants, VotingAlgorithm consensus_type, const nlohmann::json& parameters);
+    bool contribute_vote(const std::string& session_id, const std::string& agent_id, const nlohmann::json& vote_value, double confidence, const std::string& reasoning);
+    ConsensusResult calculate_result(const std::string& session_id);
 
     // Agent management
     bool register_agent(const Agent& agent);

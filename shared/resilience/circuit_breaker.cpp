@@ -38,7 +38,7 @@ nlohmann::json CircuitBreakerMetrics::to_json() const {
 
 // CircuitBreaker Implementation
 
-CircuitBreaker::CircuitBreaker(std::shared_ptr<ConfigurationManager> config,
+CircuitBreaker::CircuitBreaker(ConfigurationManager* config,
                              std::string name,
                              StructuredLogger* logger,
                              ErrorHandler* error_handler)
@@ -495,7 +495,7 @@ nlohmann::json CircuitBreakerRegistry::get_registry_health() const {
 // Factory function
 
 std::shared_ptr<CircuitBreaker> create_circuit_breaker(
-    std::shared_ptr<ConfigurationManager> config,
+    ConfigurationManager* config,
     const std::string& name,
     StructuredLogger* logger,
     ErrorHandler* error_handler) {

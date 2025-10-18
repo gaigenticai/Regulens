@@ -6472,7 +6472,7 @@ CREATE TABLE IF NOT EXISTS consensus_contributions (
 CREATE INDEX IF NOT EXISTS idx_consensus_contributions_session ON consensus_contributions(session_id, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_consensus_contributions_agent ON consensus_contributions(agent_id, submitted_at DESC);
 
-COMMENT ON TABLE consensus_contributions IS 'Simplified consensus contributions for agent orchestrator workflows';
+COMMENT ON TABLE consensus_contributions IS 'Consensus contributions for agent orchestrator workflows';
 
 
 
@@ -8332,7 +8332,7 @@ CREATE INDEX idx_tool_test_executions_tool ON tool_test_executions(tool_name, ex
 CREATE INDEX idx_tool_test_executions_category ON tool_test_executions(tool_category, executed_at DESC);
 CREATE INDEX idx_tool_test_executions_success ON tool_test_executions(success, executed_at DESC);
 
--- Mock data templates
+-- Test data templates
 CREATE TABLE IF NOT EXISTS tool_test_data_templates (
     template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     template_name VARCHAR(255) NOT NULL,
@@ -8470,3 +8470,21 @@ CREATE TABLE IF NOT EXISTS tool_version_compatibility (
 
 CREATE INDEX idx_tool_compatibility_tool ON tool_version_compatibility(tool_name, tool_version);
 CREATE INDEX idx_tool_compatibility_deprecated ON tool_version_compatibility(deprecated, created_at DESC);
+
+-- =============================================================================
+-- AGENT COMMUNICATION REGISTRY
+-- =============================================================================
+
+-- Registry for managing agent communication components and their registrations
+CREATE TABLE agent_comm_registry (
+    agent_id VARCHAR(255) PRIMARY KEY,
+    agent_type VARCHAR(100) NOT NULL,
+    capabilities TEXT,
+    is_active BOOLEAN DEFAULT true,
+    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_agent_comm_registry_type ON agent_comm_registry(agent_type);
+CREATE INDEX idx_agent_comm_registry_active ON agent_comm_registry(is_active);
+CREATE INDEX idx_agent_comm_registry_last_active ON agent_comm_registry(last_active);

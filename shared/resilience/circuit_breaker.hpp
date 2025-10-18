@@ -144,7 +144,7 @@ struct CircuitBreakerResult {
  */
 class CircuitBreaker {
 public:
-    CircuitBreaker(std::shared_ptr<ConfigurationManager> config,
+    CircuitBreaker(ConfigurationManager* config,
                   std::string name,
                   StructuredLogger* logger,
                   ErrorHandler* error_handler);
@@ -298,7 +298,7 @@ public:
 private:
     // Configuration and dependencies
     CircuitBreakerConfig config_;
-    std::shared_ptr<ConfigurationManager> config_manager_;
+    ConfigurationManager* config_manager_;
     StructuredLogger* logger_;
     ErrorHandler* error_handler_;
 
@@ -436,7 +436,7 @@ private:
  * @return Shared pointer to circuit breaker
  */
 std::shared_ptr<CircuitBreaker> create_circuit_breaker(
-    std::shared_ptr<ConfigurationManager> config,
+    ConfigurationManager* config,
     const std::string& name,
     StructuredLogger* logger,
     ErrorHandler* error_handler);

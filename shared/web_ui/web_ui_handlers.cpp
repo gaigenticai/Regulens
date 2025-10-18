@@ -112,7 +112,7 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
 
     try {
         // Initialize error handler first (needed by other components)
-        error_handler_ = std::make_shared<ErrorHandler>(config, logger);
+        error_handler_ = std::make_shared<ErrorHandler>(config.get(), logger.get());
         error_handler_->initialize();
 
         // Initialize decision tree visualizer
@@ -202,24 +202,31 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
                 decision_audit_manager_ = std::make_shared<DecisionAuditTrailManager>(db_pool_, logger_.get());
                 decision_audit_manager_->initialize();
 
+                // Initialize JWT parser for authentication
+                const char* jwt_secret = std::getenv("JWT_SECRET");
+                if (jwt_secret && strlen(jwt_secret) > 0) {
+                    jwt_parser_ = std::make_unique<JWTParser>(jwt_secret);
+                } else {
+                    if (logger_) {
+                        logger_->error("JWT_SECRET environment variable not set - authentication will fail");
+                    }
+                }
+
                 // Initialize regulatory monitor
                 regulatory_monitor_ = std::make_shared<RegulatoryMonitor>(config_manager_, logger_, regulatory_knowledge_base_);
                 regulatory_monitor_->initialize();
 
-                // Initialize Inter-Agent Communication System
-                inter_agent_communicator_ = std::make_shared<InterAgentCommunicator>(db_connection_);
+                // Initialize Agent Communication Registry (manages all communication components)
+                agent_comm_registry_ = std::make_shared<AgentCommRegistry>(db_connection_, logger_);
+
+                // Get component references from registry
+                inter_agent_communicator_ = agent_comm_registry_->get_communicator();
+                consensus_engine_ = agent_comm_registry_->get_consensus_engine();
+                message_translator_ = agent_comm_registry_->get_translator();
+                communication_mediator_ = agent_comm_registry_->get_mediator();
+
+                // Initialize Inter-Agent API handlers
                 inter_agent_api_handlers_ = std::make_shared<InterAgentAPIHandlers>(db_connection_, inter_agent_communicator_);
-                // inter_agent_communicator_->start_message_processor(); // Async processing disabled for now
-
-                // Initialize Consensus Engine
-                consensus_engine_ = std::make_shared<ConsensusEngine>(db_connection_);
-
-                // Initialize Message Translator
-                message_translator_ = std::make_shared<IntelligentMessageTranslator>(logger_, anthropic_client_);
-
-                // Initialize Communication Mediator
-                communication_mediator_ = std::make_shared<CommunicationMediator>(
-                    db_connection_, logger_, consensus_engine_, nullptr);
 
             } catch (const std::exception& e) {
                 if (logger_) {
@@ -228,20 +235,8 @@ WebUIHandlers::WebUIHandlers(std::shared_ptr<ConfigurationManager> config,
             }
         }
 
-        // Initialize Multi-Agent Communication components (non-database dependent)
-        agent_registry_ = nullptr;  // Future: create_agent_registry(...)
-
-        // Initialize non-database dependent components if not already initialized
-        if (!message_translator_ && anthropic_client_) {
-            message_translator_ = std::make_shared<IntelligentMessageTranslator>(logger_, anthropic_client_);
-        }
-        if (!consensus_engine_ && db_connection_) {
-            consensus_engine_ = std::make_shared<ConsensusEngine>(db_connection_);
-        }
-        if (!communication_mediator_ && db_connection_ && consensus_engine_) {
-            communication_mediator_ = std::make_shared<CommunicationMediator>(
-                db_connection_, logger_, consensus_engine_, nullptr);
-        }
+        // Agent communication components are now managed by AgentCommRegistry
+        // All components are initialized together via the registry
 
         // Initialize health check handler for Kubernetes probes
         // auto prometheus_metrics = std::static_pointer_cast<PrometheusMetricsCollector>(metrics);
@@ -323,25 +318,33 @@ HTTPResponse WebUIHandlers::handle_config_get(const HTTPRequest& request) {
         auto auth_header = request.headers.find("authorization");
         if (auth_header != request.headers.end() && auth_header->second.find("Bearer ") == 0) {
             std::string token = auth_header->second.substr(7);
-            // Basic JWT validation - check token structure
-            size_t first_dot = token.find('.');
-            size_t second_dot = token.find('.', first_dot + 1);
-            if (first_dot != std::string::npos && second_dot != std::string::npos && token.length() > second_dot) {
-                // For this implementation, we'll use a default user_id since the frontend is sending tokens
-                // In production, proper JWT parsing would be implemented
-                user_id = "authenticated_user";
+
+            // Production-grade JWT parsing and validation
+            if (jwt_parser_) {
+                auto claims_opt = jwt_parser_->parse_token(token);
+                if (claims_opt.has_value()) {
+                    const auto& claims = claims_opt.value();
+                    if (!jwt_parser_->is_expired(claims)) {
+                        user_id = claims.user_id;
+                    } else {
+                        return create_error_response(401, "Token has expired");
+                    }
+                } else {
+                    return create_error_response(401, "Invalid JWT token");
+                }
+            } else {
+                return create_error_response(500, "JWT authentication not configured - missing JWT_SECRET");
             }
 
             if (user_id.empty()) {
-                return create_error_response(401, "Invalid or expired token");
+                return create_error_response(401, "Invalid token - no user_id found");
             }
         } else {
             return create_error_response(401, "Authorization token required");
         }
 
         // Query system configuration from database
-        pqxx::work txn(db_connection_->get_connection());
-        auto result = txn.exec(
+        auto results = db_connection_->execute_query_multi(
             "SELECT config_key, config_value, config_type, description, is_sensitive, requires_restart "
             "FROM system_configuration "
             "ORDER BY config_key"
@@ -352,13 +355,13 @@ HTTPResponse WebUIHandlers::handle_config_get(const HTTPRequest& request) {
             {"configurations", nlohmann::json::array()}
         };
 
-        for (const auto& row : result) {
-            std::string config_key = row[0].as<std::string>();
-            std::string config_value_str = row[1].as<std::string>();
-            std::string config_type = row[2].as<std::string>();
-            std::string description = row[3].is_null() ? "" : row[3].as<std::string>();
-            bool is_sensitive = row[4].as<bool>();
-            bool requires_restart = row[5].as<bool>();
+        for (const auto& row : results) {
+            std::string config_key = row.at("config_key");
+            std::string config_value_str = row.at("config_value");
+            std::string config_type = row.at("config_type");
+            std::string description = row.count("description") ? row.at("description") : "";
+            bool is_sensitive = row.at("is_sensitive") == "t" || row.at("is_sensitive") == "true" || row.at("is_sensitive") == "1";
+            bool requires_restart = row.at("requires_restart") == "t" || row.at("requires_restart") == "true" || row.at("requires_restart") == "1";
 
             // Parse config_value based on type
             nlohmann::json config_value;
@@ -399,13 +402,8 @@ HTTPResponse WebUIHandlers::handle_config_get(const HTTPRequest& request) {
             response["configurations"].push_back(config_item);
         }
 
-        txn.commit();
-
-        return HTTPResponse{
-            200,
-            {{"Content-Type", "application/json"}},
-            response.dump(2)
-        };
+        HTTPResponse resp(200, "OK", response.dump(2), "application/json");
+        return resp;
 
     } catch (const pqxx::sql_error& e) {
         logger_->error("Database error in config retrieval: {}", e.what());
@@ -425,16 +423,41 @@ HTTPResponse WebUIHandlers::handle_config_update(const HTTPRequest& request) {
         return create_error_response(503, "Configuration management system not available");
     }
 
+    // Extract user ID from JWT token for authorization
+    std::string user_id;
+    auto auth_header = request.headers.find("authorization");
+    if (auth_header != request.headers.end() && auth_header->second.find("Bearer ") == 0) {
+        std::string token = auth_header->second.substr(7);
+
+        // Production-grade JWT parsing and validation
+        if (jwt_parser_) {
+            auto claims_opt = jwt_parser_->parse_token(token);
+            if (claims_opt.has_value()) {
+                const auto& claims = claims_opt.value();
+                if (!jwt_parser_->is_expired(claims)) {
+                    user_id = claims.user_id;
+                } else {
+                    return create_error_response(401, "Token has expired");
+                }
+            } else {
+                return create_error_response(401, "Invalid JWT token");
+            }
+        } else {
+            return create_error_response(500, "JWT authentication not configured - missing JWT_SECRET");
+        }
+    } else {
+        return create_error_response(401, "Authorization token required");
+    }
+
+    if (user_id.empty()) {
+        return create_error_response(401, "Invalid token - no user_id found");
+    }
+
     // Parse form data and update configuration
     auto form_data = parse_form_data(request.body);
-
-    // Get user ID from form data or use default for now
-    // TODO: Implement proper user authentication and session management
-    std::string user_id = form_data.count("user_id") ? form_data.at("user_id") : "web_ui_user";
     std::string reason = form_data.count("reason") ? form_data.at("reason") : "Web UI configuration update";
 
     // Remove non-configuration fields from form data
-    form_data.erase("user_id");
     form_data.erase("reason");
 
     nlohmann::json updated_fields = nlohmann::json::array();
@@ -2008,6 +2031,93 @@ HTTPResponse WebUIHandlers::handle_error_export(const HTTPRequest& request) {
     response.body = export_data.dump(2);
 
     return response;
+}
+
+HTTPResponse WebUIHandlers::handle_error_clear(const HTTPRequest& request) {
+    if (!validate_request(request) || request.method != "POST") {
+        return create_error_response(400, "Invalid request - POST method required");
+    }
+
+    // Extract user ID from JWT token for authorization
+    std::string user_id;
+    auto auth_header = request.headers.find("authorization");
+    if (auth_header != request.headers.end() && auth_header->second.find("Bearer ") == 0) {
+        std::string token = auth_header->second.substr(7);
+
+        // Production-grade JWT parsing and validation
+        if (jwt_parser_) {
+            auto claims_opt = jwt_parser_->parse_token(token);
+            if (claims_opt.has_value()) {
+                const auto& claims = claims_opt.value();
+                if (!jwt_parser_->is_expired(claims)) {
+                    user_id = claims.user_id;
+                } else {
+                    return create_error_response(401, "Token has expired");
+                }
+            } else {
+                return create_error_response(401, "Invalid JWT token");
+            }
+        } else {
+            return create_error_response(500, "JWT authentication not configured");
+        }
+    } else {
+        return create_error_response(401, "Authorization token required");
+    }
+
+    if (user_id.empty()) {
+        return create_error_response(401, "Invalid token - no user_id found");
+    }
+
+    try {
+        // Parse request body for clearing options
+        auto body_json = nlohmann::json::parse(request.body);
+
+        std::string component_filter = body_json.value("component", "");
+        int hours_back = body_json.value("hours_back", 0); // 0 means clear all
+        bool confirmed = body_json.value("confirmed", false);
+
+        if (!confirmed) {
+            return create_error_response(400, "Confirmation required - set 'confirmed': true");
+        }
+
+        // Check if user has admin privileges (basic check - can be enhanced)
+        if (user_id != "admin" && user_id.find("admin") == std::string::npos) {
+            return create_error_response(403, "Insufficient permissions - admin access required");
+        }
+
+        // Clear error history
+        bool success = error_handler_->clear_error_history(component_filter, hours_back);
+
+        if (success) {
+            // Log the action for audit trail
+            if (decision_audit_manager_) {
+                decision_audit_manager_->log_decision(
+                    "error_clearing",
+                    {{"user_id", user_id}, {"component_filter", component_filter}, {"hours_back", hours_back}},
+                    "Error history cleared via web UI",
+                    {{"action", "error_clearing"}, {"user", user_id}, {"component", component_filter}}
+                );
+            }
+
+            logger_->info("Error history cleared by user {}: component={}, hours_back={}", user_id, component_filter, hours_back);
+
+            nlohmann::json response = {
+                {"success", true},
+                {"message", "Error history cleared successfully"},
+                {"cleared_by", user_id},
+                {"component_filter", component_filter},
+                {"hours_back", hours_back}
+            };
+
+            return create_json_response(response);
+        } else {
+            return create_error_response(500, "Failed to clear error history");
+        }
+
+    } catch (const std::exception& e) {
+        logger_->error("Exception clearing error history: {}", e.what());
+        return create_error_response(500, "Exception occurred while clearing error history");
+    }
 }
 
 // LLM and OpenAI handlers
@@ -6663,7 +6773,32 @@ std::string WebUIHandlers::generate_error_dashboard_html() const {
                 return;
             }
 
-            alert('Error clearing not implemented in this demo (would require backend API)');
+            // Call the backend API to clear errors
+            fetch('/api/errors/clear', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '')
+                },
+                body: JSON.stringify({
+                    confirmed: true,
+                    component: '', // Clear all components
+                    hours_back: 0 // Clear all history
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Error history cleared successfully');
+                    refreshErrors(); // Refresh the error display
+                } else {
+                    alert('Failed to clear errors: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Failed to clear errors:', error);
+                alert('Error clearing failed: ' + error.message);
+            });
         }
 
         function refreshDashboard() {
@@ -10723,7 +10858,7 @@ HTTPResponse WebUIHandlers::handle_communication_overview(const HTTPRequest& req
         {"filters", {
             {"agent_id", agent_filter ? *agent_filter : ""},
             {"limit", message_limit},
-            {"hours", horizon ? horizon->count() : nlohmann::json()},
+            {"hours", horizon ? static_cast<int>(horizon->count()) : 0},
             {"consensus_limit", consensus_limit}
         }},
         {"communication", nlohmann::json::object()},
@@ -10747,7 +10882,6 @@ HTTPResponse WebUIHandlers::handle_communication_overview(const HTTPRequest& req
             if (agent_filter) {
                 auto pending_messages = inter_agent_communicator_->get_pending_messages(*agent_filter, message_limit);
                 nlohmann::json messages_json = nlohmann::json::array();
-                messages_json.reserve(pending_messages.size());
                 for (const auto& message : pending_messages) {
                     nlohmann::json message_json = {
                         {"message_id", message.message_id},
@@ -11209,14 +11343,14 @@ HTTPResponse WebUIHandlers::handle_consensus_start(const HTTPRequest& request) {
         }
 
         // Convert consensus type string to enum
-        ConsensusType consensus_type;
-        if (consensus_type_str == "unanimous") consensus_type = ConsensusType::UNANIMOUS;
-        else if (consensus_type_str == "majority") consensus_type = ConsensusType::MAJORITY;
-        else if (consensus_type_str == "supermajority") consensus_type = ConsensusType::SUPERMAJORITY;
-        else if (consensus_type_str == "weighted_voting") consensus_type = ConsensusType::WEIGHTED_VOTING;
-        else if (consensus_type_str == "ranked_choice") consensus_type = ConsensusType::RANKED_CHOICE;
-        else if (consensus_type_str == "bayesian") consensus_type = ConsensusType::BAYESIAN;
-        else consensus_type = ConsensusType::MAJORITY;
+        VotingAlgorithm consensus_type;
+        if (consensus_type_str == "unanimous") consensus_type = VotingAlgorithm::UNANIMOUS;
+        else if (consensus_type_str == "majority") consensus_type = VotingAlgorithm::MAJORITY;
+        else if (consensus_type_str == "supermajority") consensus_type = VotingAlgorithm::SUPER_MAJORITY;
+        else if (consensus_type_str == "weighted_voting") consensus_type = VotingAlgorithm::WEIGHTED_MAJORITY;
+        else if (consensus_type_str == "ranked_choice") consensus_type = VotingAlgorithm::RANKED_CHOICE;
+        else if (consensus_type_str == "quorum") consensus_type = VotingAlgorithm::QUORUM;
+        else consensus_type = VotingAlgorithm::MAJORITY;
 
         auto session_id_opt = consensus_engine_->start_session(topic, participants, consensus_type, parameters);
 
@@ -11308,19 +11442,8 @@ HTTPResponse WebUIHandlers::handle_consensus_result(const HTTPRequest& request) 
             response["decision"] = result.decision;
         }
 
-        // Include vote details
-        nlohmann::json votes_json = nlohmann::json::array();
-        for (const auto& vote : result.votes) {
-            nlohmann::json vote_json = {
-                {"agent_id", vote.agent_id},
-                {"vote_value", vote.vote_value},
-                {"confidence", vote.confidence},
-                {"reasoning", vote.reasoning},
-                {"cast_at", vote.cast_at}
-            };
-            votes_json.push_back(vote_json);
-        }
-        response["votes"] = votes_json;
+        // Include vote details (votes are already JSON objects)
+        response["votes"] = result.votes;
 
         return create_json_response(response);
 
@@ -11350,12 +11473,34 @@ HTTPResponse WebUIHandlers::handle_message_translate(const HTTPRequest& request)
             return create_error_response(400, "Missing required fields: message, source_agent_type, target_agent_type");
         }
 
+        // Create message header for translation
+        MessageHeader header;
+        header.message_id = std::to_string(std::chrono::system_clock::now().time_since_epoch().count()); // Simple ID generation
+        header.sender_id = source_agent_type;
+        header.recipient_id = target_agent_type;
+        header.message_type = MessageType::REQUEST;
+        header.timestamp = std::chrono::system_clock::now();
+
+        // Determine target protocol based on agent type
+        MessageProtocol target_protocol = MessageProtocol::JSON_RPC; // Default
+        if (target_agent_type == "rest") target_protocol = MessageProtocol::REST_HTTP;
+        else if (target_agent_type == "grpc") target_protocol = MessageProtocol::GRPC;
+        else if (target_agent_type == "graphql") target_protocol = MessageProtocol::GRAPHQL;
+
         // Perform message translation
-        nlohmann::json translated_message = message_translator_->translate_message(
-            source_message, source_agent_type, target_agent_type);
+        TranslationResultData translation_result = message_translator_->translate_message(
+            source_message.dump(), header, target_protocol);
 
         // Validate translation integrity
-        bool validation_passed = message_translator_->validate_translation(source_message, translated_message);
+        bool validation_passed = message_translator_->validate_translation(source_message.dump(), translation_result);
+
+        // Extract translated message as JSON
+        nlohmann::json translated_message;
+        try {
+            translated_message = nlohmann::json::parse(translation_result.translated_message);
+        } catch (const std::exception&) {
+            translated_message = {{"error", "Failed to parse translated message"}};
+        }
 
         nlohmann::json response = {
             {"success", true},
@@ -11416,7 +11561,7 @@ HTTPResponse WebUIHandlers::handle_agent_conversation(const HTTPRequest& request
             {"objective", objective},
             {"participant_count", participant_ids.size()},
             {"participants", participant_ids},
-            {"state", context ? "initialized" : "unknown"},
+            {"state", !context.conversation_id.empty() ? "initialized" : "unknown"},
             {"initiation_timestamp", std::chrono::system_clock::now().time_since_epoch().count()}
         };
 
@@ -11449,19 +11594,19 @@ HTTPResponse WebUIHandlers::handle_conflict_resolution(const HTTPRequest& reques
         }
 
         // Determine resolution strategy
-        regulens::ResolutionStrategy resolution_strategy = regulens::ResolutionStrategy::MAJORITY_VOTE;
+        ResolutionStrategy resolution_strategy = ResolutionStrategy::MAJORITY_VOTE;
         if (strategy == "WEIGHTED_VOTE") {
-            resolution_strategy = regulens::ResolutionStrategy::WEIGHTED_VOTE;
+            resolution_strategy = ResolutionStrategy::WEIGHTED_VOTE;
         } else if (strategy == "EXPERT_ARBITRATION") {
-            resolution_strategy = regulens::ResolutionStrategy::EXPERT_ARBITRATION;
+            resolution_strategy = ResolutionStrategy::EXPERT_ARBITRATION;
         } else if (strategy == "COMPROMISE_NEGOTIATION") {
-            resolution_strategy = regulens::ResolutionStrategy::COMPROMISE_NEGOTIATION;
+            resolution_strategy = ResolutionStrategy::COMPROMISE_NEGOTIATION;
         } else if (strategy == "ESCALATION") {
-            resolution_strategy = regulens::ResolutionStrategy::ESCALATION;
+            resolution_strategy = ResolutionStrategy::ESCALATION;
         }
 
         // Resolve conflict
-        regulens::MediationResult result;
+        MediationResult result;
         if (!conflict_id.empty()) {
             // Resolve specific conflict
             result = communication_mediator_->resolve_conflict(conversation_id, conflict_id, resolution_strategy);
@@ -11519,13 +11664,14 @@ HTTPResponse WebUIHandlers::handle_communication_stats(const HTTPRequest& reques
             )";
             
             auto result = db_connection_->execute_query(query);
-            if (result.has_value()) {
+            if (!result.rows.empty()) {
+                const auto& row = result.rows[0];
                 stats["communication_stats"] = {
                     {"status", "active"},
-                    {"total_messages_24h", result->get<int>("total_messages", 0)},
-                    {"active_senders", result->get<int>("active_senders", 0)},
-                    {"active_receivers", result->get<int>("active_receivers", 0)},
-                    {"avg_delivery_time_seconds", result->get<double>("avg_delivery_time_seconds", 0.0)}
+                    {"total_messages_24h", std::stoi(row.at("total_messages"))},
+                    {"active_senders", std::stoi(row.at("active_senders"))},
+                    {"active_receivers", std::stoi(row.at("active_receivers"))},
+                    {"avg_delivery_time_seconds", std::stod(row.at("avg_delivery_time_seconds"))}
                 };
             } else {
                 stats["communication_stats"] = {{"status", "no_data"}};
@@ -11543,7 +11689,7 @@ HTTPResponse WebUIHandlers::handle_communication_stats(const HTTPRequest& reques
     // Consensus engine stats
     if (consensus_engine_) {
         try {
-            auto consensus_stats = consensus_engine_->get_consensus_stats();
+            auto consensus_stats = consensus_engine_->get_consensus_statistics();
             stats["consensus_stats"] = {
                 {"status", "active"},
                 {"total_sessions", consensus_stats["total_sessions"]},

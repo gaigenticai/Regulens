@@ -9,6 +9,10 @@ interface TestSuite {
   tools: TestCase[];
   created_at: string;
   updated_at: string;
+  last_run?: string;
+  results?: TestResult[];
+  passed?: number;
+  failed?: number;
 }
 
 interface TestCase {
@@ -17,6 +21,14 @@ interface TestCase {
   operation: string;
   parameters: Record<string, any>;
   expected_result?: any;
+}
+
+interface TestResult {
+  test_case_id: string;
+  passed: boolean;
+  result: any;
+  error: string | null;
+  execution_time: number;
 }
 
 interface TestSuiteManagementProps {
@@ -87,14 +99,86 @@ export const TestSuiteManagement: React.FC<TestSuiteManagementProps> = ({
     setNewSuiteDescription('');
   };
 
-  const runTestSuite = (suite: TestSuite) => {
-    // TODO: Implement test suite execution
-    console.log('Running test suite:', suite.name);
+  const runTestSuite = async (suite: TestSuite) => {
+    try {
+      console.log('Running test suite:', suite.name);
+
+      // Execute each test case in the suite
+      const results = [];
+      for (const testCase of suite.tools) {
+        const result = await executeTestCase(testCase);
+        results.push(result);
+      }
+
+      // Update suite with results
+      const updatedSuite = {
+        ...suite,
+        last_run: new Date().toISOString(),
+        results: results,
+        passed: results.filter(r => r.passed).length,
+        failed: results.filter(r => !r.passed).length
+      };
+
+      setTestSuites(prev => prev.map(s =>
+        s.id === suite.id ? updatedSuite : s
+      ));
+
+      console.log('Test suite completed:', updatedSuite);
+    } catch (error) {
+      console.error('Failed to run test suite:', error);
+    }
+  };
+
+  const executeTestCase = async (testCase: TestCase): Promise<TestResult> => {
+    try {
+      // Make API call to execute the test case
+      const response = await fetch('/api/tools/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || 'demo-token'}`
+        },
+        body: JSON.stringify({
+          tool_name: testCase.tool_name,
+          operation: testCase.operation,
+          parameters: testCase.parameters
+        })
+      });
+
+      const result = await response.json();
+
+      return {
+        test_case_id: testCase.id,
+        passed: response.ok && (!testCase.expected_result ||
+                JSON.stringify(result) === JSON.stringify(testCase.expected_result)),
+        result: result,
+        error: response.ok ? null : result.error,
+        execution_time: Date.now()
+      };
+    } catch (error) {
+      return {
+        test_case_id: testCase.id,
+        passed: false,
+        result: null,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        execution_time: Date.now()
+      };
+    }
   };
 
   const addTestCase = (suiteId: string) => {
-    // TODO: Implement adding test cases to suite
-    console.log('Adding test case to suite:', suiteId);
+    const newTestCase: TestCase = {
+      id: `test_${Date.now()}`,
+      tool_name: '',
+      operation: '',
+      parameters: {}
+    };
+
+    setTestSuites(prev => prev.map(suite =>
+      suite.id === suiteId
+        ? { ...suite, tools: [...suite.tools, newTestCase] }
+        : suite
+    ));
   };
 
   return (

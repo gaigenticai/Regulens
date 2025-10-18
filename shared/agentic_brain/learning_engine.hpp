@@ -100,15 +100,15 @@ struct Pattern {
     nlohmann::json metadata;
 };
 
-class LearningEngine {
+class AgentLearningEngine {
 public:
-    LearningEngine(
+    AgentLearningEngine(
         std::shared_ptr<ConnectionPool> db_pool,
         std::shared_ptr<LLMInterface> llm_interface,
         StructuredLogger* logger
     );
 
-    ~LearningEngine();
+    ~AgentLearningEngine();
 
     // Core learning operations
     bool initialize();
